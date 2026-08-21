@@ -4,6 +4,7 @@ import { fileURLToPath } from "node:url";
 import { advance } from "../core/orchestrator.js";
 import { ClaudeCodeRunner } from "../runner/claude-code.js";
 import { readState, isStale } from "../core/state.js";
+import type { Env } from "../core/paths.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -22,9 +23,21 @@ export function runDetached(id: string): number {
   return child.pid ?? -1;
 }
 
-export function guardAlreadyRunning(id: string): void {
-  const state = readState(id);
+/**
+ * Checked BEFORE spawning, not inside the child. A detached child runs with
+ * stdio: "ignore", so anything it throws is discarded — the parent would have
+ * already printed "started (pid N)" and the user would see a success message
+ * for a run that died on the orchestrator's failed-status guard microseconds
+ * later. Refusing here is the difference between an honest error and a lie.
+ */
+export function guardRunnable(id: string, env?: Env): void {
+  const state = readState(id, env);
   if (state.status === "running" && !isStale(state)) {
-    throw new Error(`${id} is already running (pid ${state.pid}) — use \`sfo stop ${id}\` first`);
+    throw new Error(`${id} is already running (pid ${state.pid}) — wait for it to finish`);
+  }
+  if (state.status === "failed") {
+    throw new Error(
+      `${id} failed at stage "${state.currentStage}" — re-run it with \`sfo stage ${id} ${state.currentStage}\` before advancing`,
+    );
   }
 }
