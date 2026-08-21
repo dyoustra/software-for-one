@@ -60,8 +60,10 @@ describe("selectTriagePath", () => {
     expect(selectTriagePath({ ANTHROPIC_API_KEY: "sk-ant-x" })).toBe("sdk");
   });
 
-  it("picks the SDK when only ANTHROPIC_AUTH_TOKEN is set", () => {
-    expect(selectTriagePath({ ANTHROPIC_AUTH_TOKEN: "oat-x" })).toBe("sdk");
+  it("takes the CLI path when only ANTHROPIC_AUTH_TOKEN is set", () => {
+    // An OAuth token there needs an anthropic-beta header the SDK never sends,
+    // so the SDK would 401. The fallback exists for exactly this case.
+    expect(selectTriagePath({ ANTHROPIC_AUTH_TOKEN: "oat-x" })).toBe("cli");
   });
 
   it("falls back to the CLI when neither is set", () => {

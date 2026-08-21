@@ -55,7 +55,12 @@ export type TriagePath = "sdk" | "cli";
  * rather than a silent one.
  */
 export function selectTriagePath(env: NodeJS.ProcessEnv = process.env): TriagePath {
-  return env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN ? "sdk" : "cli";
+  // Deliberately ANTHROPIC_API_KEY only. ANTHROPIC_AUTH_TOKEN also reaches the
+  // SDK, but when it holds an OAuth token the request needs an
+  // `anthropic-beta: oauth-2025-04-20` header the SDK does not send, so it
+  // 401s. Routing a known-broken case toward the SDK defeats the point of
+  // having a fallback — those users take the CLI path, which works.
+  return env.ANTHROPIC_API_KEY ? "sdk" : "cli";
 }
 
 // Claude Opus 5 list pricing, USD per million tokens. Hardcoded and will drift
