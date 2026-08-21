@@ -1,5 +1,7 @@
 Read `.sfo/IDEA.md` and `.sfo/RESEARCH.md`. Produce a specification.
 
+**Write each file as you finish it, not all at the end.** Write `.sfo/SPEC.md` first and save it, then `.sfo/QUESTIONS.md`, then append to `.sfo/DECISIONS.md`. Stages get killed mid-run; partial output that a re-run can build on beats losing twenty minutes of work to a dropped connection.
+
 Write `.sfo/SPEC.md` containing:
 - **What this is** — one paragraph.
 - **User stories** — what someone actually does with it.
