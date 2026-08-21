@@ -28,6 +28,11 @@ Append every default you chose to `.sfo/DECISIONS.md` in this format:
     - Chose: <what>
     - Considered: <alternatives>
     - Why: <reasoning>
+    - decided_by: agent
     - blast_radius: local | structural | external
+
+`decided_by` is required on every entry, never omitted. An absent field cannot be
+distinguished from a forgotten one, so "the agent chose this" must be stated rather
+than inferred from silence.
 
 Write only those three files.

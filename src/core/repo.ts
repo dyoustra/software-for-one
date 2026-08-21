@@ -26,8 +26,21 @@ const NO_INTERFERENCE = ["-c", "commit.gpgsign=false"];
  * `stage(spec): SPEC.md, QUESTIONS.md` — the stage that ran and what it
  * touched. Pure, so the interesting part is testable without spawning git.
  */
+/**
+ * Bookkeeping files change on every single stage, so left unsorted they crowd
+ * the real artifacts out of the subject line — `stage(spec)` would read
+ * "COST.jsonl, DECISIONS.md, QUESTIONS.md, SPEC.md, state.json" and bury the
+ * two files a reader actually cares about. They sort last so the named slots
+ * go to what the stage produced.
+ */
+const BOOKKEEPING = new Set(["state.json", "COST.jsonl"]);
+
 export function buildCommitMessage(stage: string, changedPaths: string[]): string {
-  const names = [...new Set(changedPaths.map((p) => path.basename(p)))];
+  const names = [...new Set(changedPaths.map((p) => path.basename(p)))].sort((a, b) => {
+    const aBook = BOOKKEEPING.has(a) ? 1 : 0;
+    const bBook = BOOKKEEPING.has(b) ? 1 : 0;
+    return aBook - bBook;
+  });
   if (names.length === 0) return `stage(${stage}): no files`;
 
   const shown = names.slice(0, MAX_NAMED_FILES).join(", ");

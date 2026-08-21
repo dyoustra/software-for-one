@@ -161,3 +161,20 @@ describe("commitStage", () => {
     expect(warnings).toHaveLength(1);
   });
 });
+
+describe("buildCommitMessage bookkeeping ordering", () => {
+  it("names the stage's real artifacts before state.json and COST.jsonl", () => {
+    // These two change on every stage; unsorted they crowd out the artifacts
+    // the reader actually wants to see in the subject line.
+    const msg = buildCommitMessage("spec", [
+      ".sfo/state.json",
+      ".sfo/COST.jsonl",
+      ".sfo/SPEC.md",
+      ".sfo/QUESTIONS.md",
+      ".sfo/DECISIONS.md",
+    ]);
+    expect(msg).toContain("SPEC.md");
+    expect(msg.indexOf("SPEC.md")).toBeLessThan(msg.indexOf("state.json"));
+    expect(msg.indexOf("DECISIONS.md")).toBeLessThan(msg.indexOf("COST.jsonl"));
+  });
+});
