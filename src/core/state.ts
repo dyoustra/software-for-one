@@ -27,7 +27,11 @@ export function writeState(state: ProjectState, env?: Env): void {
 }
 
 export function readState(id: string, env?: Env): ProjectState {
-  const raw = fs.readFileSync(artifactPath(id, "state.json", env), "utf8");
+  const file = artifactPath(id, "state.json", env);
+  if (!fs.existsSync(file)) {
+    throw new Error(`no such project: ${id}`);
+  }
+  const raw = fs.readFileSync(file, "utf8");
   const parsed = ProjectStateSchema.safeParse(JSON.parse(raw));
   if (!parsed.success) {
     throw new Error(`invalid state for project ${id}: ${parsed.error.message}`);
