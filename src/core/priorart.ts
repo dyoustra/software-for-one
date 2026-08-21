@@ -48,3 +48,34 @@ export function writePriorArt(id: string, value: PriorArt, env?: Env): void {
 export function blocksPipeline(verdict: PriorArt["verdict"]): boolean {
   return verdict !== "clear_gap";
 }
+
+/** The stage that produces the verdict, and therefore the one a verdict parks. */
+const VERDICT_STAGE = "research";
+
+/**
+ * The verdict a project is currently stopped *by*, or null.
+ *
+ * Two things make this narrower than "the file exists and blocks". The verdict
+ * only parks a project at `research`, so anything parked later is waiting on
+ * something else. And `--anyway` leaves PRIOR_ART.json exactly where it was, so
+ * the file's presence alone would keep re-reporting a verdict the human already
+ * overrode.
+ *
+ * Never throws. Callers here are read-only surfaces — a status listing of every
+ * project, and a pre-flight check — and neither should die because one project
+ * has a malformed artifact. The cost is that a corrupt verdict stops blocking;
+ * that is the right trade for a file the pipeline treats as advice to a human.
+ */
+export function blockingPriorArt(
+  state: { id: string; status: string; currentStage: string },
+  env?: Env,
+): PriorArt | null {
+  if (state.status !== "awaiting_human" || state.currentStage !== VERDICT_STAGE) return null;
+  let art: PriorArt | null;
+  try {
+    art = readPriorArt(state.id, env);
+  } catch {
+    return null;
+  }
+  return art && blocksPipeline(art.verdict) ? art : null;
+}

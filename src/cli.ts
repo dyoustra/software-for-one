@@ -46,13 +46,14 @@ export function buildProgram(): Command {
     .description("Advance a project until done or blocked")
     .argument("<id>", "project id")
     .option("--attach", "run in this process and stream progress")
-    .action(guarded(async (id: string, opts: { attach?: boolean }) => {
+    .option("--anyway", "build it even though research found prior art")
+    .action(guarded(async (id: string, opts: { attach?: boolean; anyway?: boolean }) => {
       const { runAttached, runDetached, guardRunnable } = await import("./commands/run.js");
-      guardRunnable(id);
+      guardRunnable(id, undefined, { anyway: opts.anyway });
       if (opts.attach) {
         await runAttached(id);
       } else {
-        console.log(`started (pid ${runDetached(id)})`);
+        console.log(`started (pid ${runDetached(id, { anyway: opts.anyway })})`);
       }
     }));
 
@@ -109,6 +110,15 @@ export function buildProgram(): Command {
     .action(guarded(async (id: string) => {
       const { showCriteria } = await import("./commands/criteria.js");
       showCriteria(id);
+    }));
+
+  program
+    .command("why")
+    .description("Show the prior-art verdict — what already exists, and whether it stopped the run")
+    .argument("<id>", "project id")
+    .action(guarded(async (id: string) => {
+      const { showWhy } = await import("./commands/why.js");
+      showWhy(id);
     }));
 
   program

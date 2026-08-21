@@ -12,5 +12,11 @@ describe("buildProgram", () => {
     expect(names).toContain("cost");
     expect(names).toContain("criteria");
     expect(names).toContain("decisions");
+    expect(names).toContain("why");
+  });
+
+  it("offers an explicit override for the prior-art verdict", () => {
+    const run = buildProgram().commands.find((c) => c.name() === "run");
+    expect(run?.options.map((o) => o.long)).toContain("--anyway");
   });
 });

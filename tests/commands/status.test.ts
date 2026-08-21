@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { listProjects, formatStatus } from "../../src/commands/status.js";
 import { writeState } from "../../src/core/state.js";
+import { writePriorArt, type PriorArt } from "../../src/core/priorart.js";
 
 let env: Record<string, string>;
 
@@ -25,6 +26,18 @@ function seed(id: string, stage: string, status: "running" | "awaiting_human" | 
   );
 }
 
+function seedPriorArt(id: string, art: PriorArt) {
+  fs.mkdirSync(path.join(env.SFO_HOME, id, ".sfo"), { recursive: true });
+  writePriorArt(id, art, env);
+}
+
+const noGap: PriorArt = {
+  verdict: "no_gap",
+  summary: "ai-renamer does this already.",
+  existing: [{ name: "ai-renamer", url: "https://example.com", gap: "none worth the build" }],
+  recommendation: "use ai-renamer instead",
+};
+
 beforeEach(() => {
   env = { SFO_HOME: fs.mkdtempSync(path.join(os.tmpdir(), "sfo-st-")) };
 });
@@ -45,6 +58,45 @@ describe("listProjects", () => {
     fs.mkdirSync(path.join(env.SFO_HOME, "junk"), { recursive: true });
     expect(listProjects(env)).toHaveLength(1);
   });
+
+  it("notes the recommendation when prior art stopped the project", () => {
+    seed("a-111", "research", "awaiting_human");
+    seedPriorArt("a-111", noGap);
+    expect(listProjects(env)[0]?.note).toBe("stopped: use ai-renamer instead");
+  });
+
+  it("notes a marginal verdict as a decision the human owes", () => {
+    seed("a-111", "research", "awaiting_human");
+    seedPriorArt("a-111", { verdict: "marginal_gap", summary: "close", existing: [] });
+    expect(listProjects(env)[0]?.note).toMatch(/prior art is close/);
+  });
+
+  it("leaves a project with a clear gap unannotated", () => {
+    seed("a-111", "clarify", "awaiting_human");
+    seedPriorArt("a-111", { verdict: "clear_gap", summary: "nothing does this", existing: [] });
+    expect(listProjects(env)[0]?.note).toBeUndefined();
+  });
+
+  it("leaves a project with no prior art unannotated", () => {
+    seed("a-111", "clarify", "awaiting_human");
+    expect(listProjects(env)[0]?.note).toBeUndefined();
+  });
+
+  it("does not note a project that is past the verdict and running again", () => {
+    // `--anyway` leaves PRIOR_ART.json on disk, so the file alone cannot mean
+    // "stopped here" — the project has to actually be parked at research.
+    seed("a-111", "spec", "running");
+    seedPriorArt("a-111", noGap);
+    expect(listProjects(env)[0]?.note).toBeUndefined();
+  });
+
+  it("still lists a project whose PRIOR_ART.json is malformed", () => {
+    seed("a-111", "research", "awaiting_human");
+    fs.writeFileSync(path.join(env.SFO_HOME, "a-111", ".sfo", "PRIOR_ART.json"), "{ not json");
+    const listed = listProjects(env);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.note).toBeUndefined();
+  });
 });
 
 describe("formatStatus", () => {
@@ -56,5 +108,21 @@ describe("formatStatus", () => {
   it("reports a stale running project rather than claiming it is live", () => {
     seed("c-333", "spec", "running");
     expect(formatStatus(listProjects(env))).toContain("stale");
+  });
+
+  it("shows the note in place of the bare needs-you label", () => {
+    seed("b-222", "research", "awaiting_human");
+    seedPriorArt("b-222", noGap);
+    const out = formatStatus(listProjects(env));
+    expect(out).toContain("stopped: use ai-renamer instead");
+    expect(out).not.toContain("needs you");
+  });
+
+  it("truncates a runaway recommendation instead of wrecking the table", () => {
+    seed("b-222", "research", "awaiting_human");
+    seedPriorArt("b-222", { ...noGap, recommendation: "x".repeat(400) });
+    const line = formatStatus(listProjects(env));
+    expect(line.length).toBeLessThan(160);
+    expect(line).toContain("…");
   });
 });
