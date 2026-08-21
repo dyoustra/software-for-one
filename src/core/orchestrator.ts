@@ -1,6 +1,7 @@
 import { readState, writeState } from "./state.js";
 import { nextStage, blocksOnHuman } from "./stages.js";
 import { artifactExists } from "./artifacts.js";
+import { readCriteria } from "./criteria.js";
 import { recordCost } from "./cost.js";
 import { commitStage } from "./repo.js";
 import { loadPrompt } from "../stages/prompts.js";
@@ -77,6 +78,38 @@ function pickStage(
   return upcoming;
 }
 
+
+/**
+ * Criterion ids currently on disk. Never throws: this feeds a drift *warning*,
+ * and a check that can fail the pipeline is worse than the drift it detects.
+ */
+function criterionIds(id: string, env: Env | undefined): string[] {
+  try {
+    return readCriteria(id, env).map((c) => c.id);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Stages that rewrite CRITERIA.jsonl must re-emit every record to change one,
+ * and a model can drop records from the untouched tail of a long rewrite.
+ * That failure is silent — a vanished criterion just shrinks the contract the
+ * build is held to, and nothing throws. Removal is sometimes legitimate (an
+ * answer can rule a criterion out), so this warns rather than fails, but it
+ * makes the shrink visible instead of invisible.
+ */
+function warnOnDroppedCriteria(before: string[], after: string[], stage: string): void {
+  if (before.length === 0) return;
+  const surviving = new Set(after);
+  const dropped = before.filter((x) => !surviving.has(x));
+  if (dropped.length > 0) {
+    console.warn(
+      `sfo: ${stage} dropped ${dropped.length} criteri${dropped.length === 1 ? "on" : "a"}: ${dropped.join(", ")}`,
+    );
+  }
+}
+
 export async function advance(
   id: string,
   runner: Runner,
@@ -131,6 +164,7 @@ export async function advance(
     };
     writeState(state, env);
 
+    const criteriaBefore = criterionIds(id, env);
     const stopHeartbeat = startHeartbeat(id, env, heartbeatMs);
     let result;
     try {
@@ -146,6 +180,8 @@ export async function advance(
     // Recorded before the ok/failed branch: a stage that failed still spent
     // money, and billing only the happy path under-reports every retry.
     recordCost(id, upcoming, result.ok, result.usage, env);
+
+    warnOnDroppedCriteria(criteriaBefore, criterionIds(id, env), upcoming);
 
     // The heartbeat rewrote state under us, so re-read before mutating rather
     // than writing back a stale in-memory copy.

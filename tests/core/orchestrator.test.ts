@@ -1,10 +1,11 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { advance } from "../../src/core/orchestrator.js";
 import { writeState, readState, type ProjectState } from "../../src/core/state.js";
+import { writeCriteria } from "../../src/core/criteria.js";
 import { readCostRecords } from "../../src/core/cost.js";
 import type { Runner, RunStageInput, StageResult, StageUsage } from "../../src/runner/types.js";
 
@@ -26,10 +27,13 @@ class FakeRunner implements Runner {
     private readonly ok = true,
     private readonly delayMs = 0,
     private readonly usage: StageUsage | undefined = undefined,
+    /** Stands in for a stage rewriting artifacts while it runs. */
+    private readonly onRun?: () => void,
   ) {}
   async runStage(input: RunStageInput): Promise<StageResult> {
     this.calls.push(input);
     if (this.delayMs > 0) await new Promise((r) => setTimeout(r, this.delayMs));
+    this.onRun?.();
     return {
       ok: this.ok,
       exitCode: this.ok ? 0 : 1,
@@ -232,5 +236,42 @@ describe("advance", () => {
     const runner = new FakeRunner();
     await advance("p", runner, env);
     expect(runner.calls).toHaveLength(0);
+  });
+});
+
+describe("criteria drift", () => {
+  it("warns when a stage drops criteria it was supposed to carry through", async () => {
+    seed("capture");
+    writeCriteria(
+      "p",
+      [
+        { id: "AC-001", group: "G", text: "one" },
+        { id: "AC-002", group: "G", text: "two" },
+      ],
+      env,
+    );
+
+    // A stage that rewrites the file and loses a record from the tail. This
+    // fails silently without the check: nothing throws, the contract just shrinks.
+    const dropper = new FakeRunner(true, 0, undefined, () =>
+      writeCriteria("p", [{ id: "AC-001", group: "G", text: "one" }], env),
+    );
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await advance("p", dropper, env);
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("AC-002"));
+    warn.mockRestore();
+  });
+
+  it("stays quiet when every criterion survives", async () => {
+    seed("capture");
+    writeCriteria("p", [{ id: "AC-001", group: "G", text: "one" }], env);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await advance("p", new FakeRunner(), env);
+
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 });
