@@ -1,87 +1,42 @@
 import readline from "node:readline/promises";
-import { readArtifact, writeArtifact } from "../core/artifacts.js";
+import { readQuestions, writeAnswers } from "../core/questions.js";
 import { readState, writeState } from "../core/state.js";
 import type { Env } from "../core/paths.js";
 
-export interface Question {
-  section: string;
-  text: string;
-  options: string[];
-}
-
-/**
- * QUESTIONS.md is the wire format, not a transport for one. Parsing the
- * markdown the agent already wrote keeps the human's turn deterministic and
- * free, where a second model call would be neither — and the same file can be
- * rendered as a UI later without touching this.
- */
-export function parseQuestions(markdown: string): Question[] {
-  const questions: Question[] = [];
-  let section = "";
-  let current: Question | null = null;
-
-  for (const line of markdown.split("\n")) {
-    const sectionMatch = /^##\s+(.+)$/.exec(line);
-    const questionMatch = /^###\s+(.+)$/.exec(line);
-    const optionMatch = /^-\s+\[\s*\]\s+(.+)$/.exec(line);
-
-    if (sectionMatch) {
-      section = sectionMatch[1].trim();
-    } else if (questionMatch) {
-      current = { section, text: questionMatch[1].trim(), options: [] };
-      questions.push(current);
-    } else if (optionMatch && current) {
-      current.options.push(optionMatch[1].trim());
-    }
-  }
-  return questions;
-}
-
-export function renderAnswers(questions: Question[], answers: string[]): string {
-  if (questions.length !== answers.length) {
-    throw new Error(`expected ${questions.length} answers, got ${answers.length}`);
-  }
-  return [
-    "# Answers",
-    "",
-    ...questions.flatMap((q, i) => [`### ${q.text}`, "", answers[i], ""]),
-  ].join("\n");
-}
-
 export async function promptForAnswers(id: string, env?: Env): Promise<void> {
   // Existence check only — a typo'd id must report "no such project", not
-  // blame a missing QUESTIONS.md. The state written at the end is re-read
+  // blame a missing QUESTIONS.json. The state written at the end is re-read
   // there, because the human may sit at the prompt for a long time.
   readState(id, env);
 
-  const raw = readArtifact(id, "QUESTIONS.md", env);
-  if (!raw) throw new Error(`no QUESTIONS.md for ${id} — has the spec stage run?`);
-
-  const questions = parseQuestions(raw);
-  if (questions.length === 0) {
-    // The parser is lenient and never throws, so a mangled QUESTIONS.md yields
-    // zero questions. Without this guard we'd prompt for nothing, write an
-    // ANSWERS.md containing only a heading, print "answers saved", and unblock
-    // the pipeline — a confident success message for an empty handoff.
+  const questions = readQuestions(id, env);
+  if (!questions) {
+    throw new Error(`no QUESTIONS.json for ${id} — has the spec stage run?`);
+  }
+  if (questions.questions.length === 0) {
+    // A schema-valid file can still hold an empty list. Without this guard we'd
+    // prompt for nothing, write an empty ANSWERS.json, print "answers saved",
+    // and unblock the pipeline — a confident success for an empty handoff.
     throw new Error(
-      `QUESTIONS.md for ${id} contains no parseable questions — re-run the stage with \`sfo stage ${id} spec\``,
+      `QUESTIONS.json for ${id} contains no questions — re-run the stage with \`sfo stage ${id} spec\``,
     );
   }
 
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  const answers: string[] = [];
+  const answers: { questionId: string; answer: string }[] = [];
 
   try {
-    for (const q of questions) {
+    for (const q of questions.questions) {
       console.log(`\n[${q.section}] ${q.text}`);
-      q.options.forEach((o) => console.log(`  ${o}`));
-      answers.push(await rl.question("> "));
+      if (q.context) console.log(`  ${q.context}`);
+      for (const o of q.options) console.log(`  ${o.key} — ${o.label} — ${o.tradeoff}`);
+      answers.push({ questionId: q.id, answer: await rl.question("> ") });
     }
   } finally {
     rl.close();
   }
 
-  writeArtifact(id, "ANSWERS.md", renderAnswers(questions, answers), env);
+  writeAnswers(id, { answers }, env);
 
   const state = readState(id, env);
   writeState({ ...state, status: "awaiting_human", updatedAt: new Date().toISOString() }, env);
