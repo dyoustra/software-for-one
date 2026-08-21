@@ -2,11 +2,14 @@
   "name": "software-for-one",
   "version": "0.1.0",
   "type": "module",
-  "bin": { "sfo": "./dist/cli.js" },
+  "bin": {
+    "sfo": "./dist/cli.js"
+  },
   "scripts": {
     "build": "tsc",
     "test": "vitest run",
-    "sfo": "tsx src/cli.ts"
+    "sfo": "tsx src/cli.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.test.json"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",

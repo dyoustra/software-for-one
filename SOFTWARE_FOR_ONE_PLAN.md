@@ -80,7 +80,8 @@ npm install -D typescript vitest @types/node tsx
     "strict": true,
     "skipLibCheck": true,
     "resolveJsonModule": true,
-    "declaration": false
+    "declaration": false,
+    "types": ["node"]
   },
   "include": ["src/**/*"]
 }
