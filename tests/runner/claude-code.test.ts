@@ -43,6 +43,21 @@ describe("ClaudeCodeRunner", () => {
     expect(res.exitCode).toBe(3);
   });
 
+  it("rejects an unopenable log path by resolving, never by throwing", async () => {
+    const runner = new ClaudeCodeRunner({ bin: FAKE });
+    // A path whose parent is a regular file cannot be created as a directory.
+    const blocker = path.join(dir, "blocker");
+    fs.writeFileSync(blocker, "not a directory");
+
+    const res = await runner.runStage({
+      workdir: dir,
+      prompt: "x",
+      logPath: path.join(blocker, "out.log"),
+    });
+    expect(res.ok).toBe(false);
+    expect(res.exitCode).toBe(126);
+  });
+
   it("creates the log directory if missing", async () => {
     const runner = new ClaudeCodeRunner({ bin: FAKE });
     const log = path.join(dir, "nested", "deeper", "out.log");

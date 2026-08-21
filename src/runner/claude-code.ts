@@ -20,9 +20,6 @@ export class ClaudeCodeRunner implements Runner {
   }
 
   runStage(input: RunStageInput): Promise<StageResult> {
-    fs.mkdirSync(path.dirname(input.logPath), { recursive: true });
-    const log = fs.openSync(input.logPath, "a");
-
     const args = [
       "--print",
       "--output-format",
@@ -35,6 +32,20 @@ export class ClaudeCodeRunner implements Runner {
     ];
 
     return new Promise((resolve) => {
+      // Opening the log must happen inside the executor. Done above it, a
+      // bad logPath throws synchronously out of runStage — which contradicts
+      // the Promise<StageResult> signature and would strand a project as
+      // `running` when the orchestrator's await rejects mid-advance.
+      let log: number;
+      try {
+        fs.mkdirSync(path.dirname(input.logPath), { recursive: true });
+        log = fs.openSync(input.logPath, "a");
+      } catch {
+        // 126: failed before we could exec anything.
+        resolve({ ok: false, exitCode: 126, logPath: input.logPath });
+        return;
+      }
+
       const child = spawn(this.bin, args, {
         cwd: input.workdir,
         env: { ...process.env, ...this.extraEnv },

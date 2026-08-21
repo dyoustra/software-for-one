@@ -1991,11 +1991,21 @@ sfo status            # shows the project as running
 sfo logs <id> -f      # streams the current stage
 ```
 
-- [ ] **Step 7: Write the runbook**
+- [ ] **Step 7: Record the cost per stage**
+
+Measured during Task 6 with a trivial one-word prompt: **$0.29 per `claude -p` invocation**, of which essentially all is `cache_creation_input_tokens: 28779` — the default context (system prompt, tool schemas, CLAUDE.md discovery) written to a 1-hour ephemeral cache before any work happens.
+
+Two consequences to verify in the real run:
+- Stages running **within an hour of each other** should read that prefix from cache at roughly a tenth the price, so a 4-stage pipeline should cost far less than 4 x $0.29. Confirm this from the `cache_read_input_tokens` on stages 2-4.
+- The `--bare` flag skips hooks, plugin sync, and CLAUDE.md auto-discovery, which would cut the prefix substantially. **Do not adopt it for build stages** — the archetype design depends on the project's own `AGENTS.md` being discovered. It may be worth it for research and spec, which need no project conventions. Measure before deciding.
+
+Record actual per-stage cost in the runbook. This is the number the spec's funding-model question turns on.
+
+- [ ] **Step 8: Write the runbook**
 
 `docs/RUNBOOK.md` — record what you actually observed: how long each stage took, what the token cost was, which prompts needed tuning, and any stage that failed and why. This file is the input to Phase 2 planning.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 9: Commit**
 
 ```bash
 git add -A && git commit -m "docs: phase 1 runbook from first end-to-end run"
