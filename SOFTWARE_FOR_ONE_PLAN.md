@@ -770,7 +770,9 @@ git add -A && git commit -m "feat: claude -p subprocess runner behind a Runner i
 - Create: `src/stages/triage.ts`
 - Test: `tests/stages/triage.test.ts`
 
-**Design note:** triage is the one stage with no agent loop — it is a single structured call, so it uses the Anthropic SDK directly with `messages.parse()` and a zod schema. The client is injected so the test needs no API key.
+**Design note:** triage is the one stage with no agent loop — a single structured call. The client is injected so the test needs no API key.
+
+**Do not use the SDK's `zodOutputFormat` helper.** Verified against the installed versions (`@anthropic-ai/sdk` 0.120.0, `zod` 4.4.3): the helper demotes `enum` into a prose `description` string, so the model receives a hint rather than a hard constraint and could return any string for `verdict`. `zod`'s own `z.toJSONSchema()` emits a correct `enum`, so we build the schema from that and strip `$schema` (the API rejects unknown top-level keys). Client-side validation stays — `TriageResultSchema.parse` is what actually guarantees the shape.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -778,29 +780,54 @@ git add -A && git commit -m "feat: claude -p subprocess runner behind a Runner i
 
 ```typescript
 import { describe, it, expect, vi } from "vitest";
-import { triage, TriageResultSchema } from "../../src/stages/triage.js";
+import { triage, TriageResultSchema, triageOutputSchema } from "../../src/stages/triage.js";
 
-function fakeClient(parsed: unknown) {
-  return { messages: { parse: vi.fn().mockResolvedValue({ parsed_output: parsed }) } };
+function fakeClient(payload: unknown) {
+  return {
+    messages: {
+      create: vi.fn().mockResolvedValue({
+        content: [{ type: "text", text: JSON.stringify(payload) }],
+      }),
+    },
+  };
 }
+
+describe("triageOutputSchema", () => {
+  it("constrains verdict with a real JSON Schema enum, not a description", () => {
+    const schema = triageOutputSchema() as any;
+    expect(schema.properties.verdict.enum).toEqual([
+      "ready",
+      "underspecified",
+      "out_of_scope",
+    ]);
+  });
+
+  it("strips $schema, which the API rejects as an unknown key", () => {
+    expect(triageOutputSchema()).not.toHaveProperty("$schema");
+  });
+
+  it("forbids extra properties", () => {
+    expect((triageOutputSchema() as any).additionalProperties).toBe(false);
+  });
+});
 
 describe("triage", () => {
   it("returns a ready verdict for a clear idea", async () => {
     const client = fakeClient({
       verdict: "ready",
-      title: "Subway tracker",
+      title: "Subway Tracker",
       reason: "Scope and platform are clear.",
       counterOffer: null,
     });
-    const res = await triage("Build me a subway arrival tracker for the L train", client as never);
+    const res = await triage("Build a subway arrival tracker for the L train", client as never);
     expect(res.verdict).toBe("ready");
-    expect(res.title).toBe("Subway tracker");
+    expect(res.title).toBe("Subway Tracker");
   });
 
   it("returns a counter-offer instead of rejecting an out-of-scope idea", async () => {
     const client = fakeClient({
       verdict: "out_of_scope",
-      title: "Train an LLM",
+      title: "Train An LLM",
       reason: "Training a foundation model is not buildable here.",
       counterOffer: "A local inference playground with a chat UI.",
     });
@@ -809,21 +836,28 @@ describe("triage", () => {
     expect(res.counterOffer).toMatch(/playground/);
   });
 
-  it("requests opus and a structured format", async () => {
+  it("requests opus and passes the structured format", async () => {
     const client = fakeClient({ verdict: "ready", title: "T", reason: "r", counterOffer: null });
     await triage("anything", client as never);
-    const args = client.messages.parse.mock.calls[0][0];
+    const args = client.messages.create.mock.calls[0][0];
     expect(args.model).toBe("claude-opus-5");
-    expect(args.output_config.format).toBeDefined();
+    expect(args.output_config.format.type).toBe("json_schema");
+    expect(args.output_config.format.schema.properties.verdict.enum).toHaveLength(3);
   });
 
-  it("throws when the model returns nothing parseable", async () => {
-    const client = { messages: { parse: vi.fn().mockResolvedValue({ parsed_output: null }) } };
-    await expect(triage("x", client as never)).rejects.toThrow(/triage/i);
+  it("throws when the response carries no text block", async () => {
+    const client = { messages: { create: vi.fn().mockResolvedValue({ content: [] }) } };
+    await expect(triage("x", client as never)).rejects.toThrow(/no text/i);
+  });
+
+  it("throws when the model returns a verdict outside the enum", async () => {
+    const client = fakeClient({ verdict: "maybe", title: "t", reason: "r", counterOffer: null });
+    await expect(triage("x", client as never)).rejects.toThrow();
   });
 
   it("accepts only the three known verdicts", () => {
-    expect(TriageResultSchema.safeParse({ verdict: "maybe", title: "t", reason: "r", counterOffer: null }).success).toBe(false);
+    const bad = { verdict: "maybe", title: "t", reason: "r", counterOffer: null };
+    expect(TriageResultSchema.safeParse(bad).success).toBe(false);
   });
 });
 ```
@@ -839,7 +873,6 @@ Expected: FAIL — cannot resolve `../../src/stages/triage.js`
 
 ```typescript
 import Anthropic from "@anthropic-ai/sdk";
-import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 
 export const TriageResultSchema = z.object({
@@ -850,6 +883,18 @@ export const TriageResultSchema = z.object({
 });
 
 export type TriageResult = z.infer<typeof TriageResultSchema>;
+
+/**
+ * Built from zod's own JSON Schema output rather than the SDK's
+ * `zodOutputFormat` helper: with zod v4 that helper demotes `enum` into a
+ * prose `description`, which would leave `verdict` unconstrained at the API
+ * level. `$schema` is stripped because the API rejects unknown top-level keys.
+ */
+export function triageOutputSchema(): Record<string, unknown> {
+  const full = z.toJSONSchema(TriageResultSchema) as Record<string, unknown>;
+  const { $schema: _ignored, ...schema } = full;
+  return schema;
+}
 
 const SYSTEM = `You triage side-project ideas for a pipeline that autonomously builds working software.
 
@@ -862,33 +907,34 @@ Never simply reject. For "out_of_scope", set counterOffer to the nearest thing t
 
 Also produce a short title (under 6 words) suitable for a directory name.`;
 
-type ParseClient = Pick<Anthropic, "messages">;
+type TriageClient = Pick<Anthropic, "messages">;
 
-export async function triage(idea: string, client: ParseClient): Promise<TriageResult> {
-  const response = await client.messages.parse({
+export async function triage(idea: string, client: TriageClient): Promise<TriageResult> {
+  const response = await client.messages.create({
     model: "claude-opus-5",
     max_tokens: 16000,
     system: SYSTEM,
-    output_config: { format: zodOutputFormat(TriageResultSchema) },
+    output_config: { format: { type: "json_schema", schema: triageOutputSchema() } },
     messages: [{ role: "user", content: idea }],
   });
 
-  if (!response.parsed_output) {
-    throw new Error("triage returned no parseable result");
+  const block = response.content.find((b) => b.type === "text");
+  if (!block || block.type !== "text") {
+    throw new Error("triage response contained no text block");
   }
-  return response.parsed_output;
+  return TriageResultSchema.parse(JSON.parse(block.text));
 }
 ```
 
 - [ ] **Step 4: Run it and confirm it passes**
 
 Run: `npx vitest run tests/stages/triage.test.ts`
-Expected: PASS — 5 tests
+Expected: PASS — 8 tests
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A && git commit -m "feat: triage stage with structured output and scope renegotiation"
+git add -A && git commit -m "feat: triage stage with a genuine JSON Schema enum constraint"
 ```
 
 ---
