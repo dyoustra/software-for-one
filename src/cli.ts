@@ -71,6 +71,25 @@ export function buildProgram(): Command {
       showLogs(id, opts.follow ?? false);
     }));
 
+  program
+    .command("answer")
+    .description("Answer a project's open questions")
+    .argument("<id>", "project id")
+    .action(guarded(async (id: string) => {
+      const { promptForAnswers } = await import("./commands/answer.js");
+      await promptForAnswers(id);
+    }));
+
+  program
+    .command("stage")
+    .description("Re-run a single stage in isolation")
+    .argument("<id>", "project id")
+    .argument("<stage>", "stage name")
+    .action(guarded(async (id: string, stage: string) => {
+      const { runSingleStage } = await import("./commands/stage.js");
+      await runSingleStage(id, stage);
+    }));
+
   return program;
 }
 
