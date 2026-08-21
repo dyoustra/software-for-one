@@ -52,9 +52,38 @@ export function parseUsageFromLog(text: string): StageUsage | undefined {
   };
 }
 
+/**
+ * Only the tail is needed — the result event is always the last line — and
+ * reading the whole file is a trap. stream-json is far more verbose than the
+ * old `json` format, so a long stage with many tool calls can produce a log
+ * large enough to exceed V8's string cap. That throws, usage silently becomes
+ * undefined, and the cost data vanishes for exactly the expensive stages you
+ * most wanted to measure.
+ *
+ * Slicing at a byte offset can cut a UTF-8 sequence or a line in half; that is
+ * harmless because parseUsageFromLog skips anything it cannot parse.
+ */
+const LOG_TAIL_BYTES = 512 * 1024;
+
+export function readLogTail(logPath: string, maxBytes = LOG_TAIL_BYTES): string {
+  const { size } = fs.statSync(logPath);
+  const start = Math.max(0, size - maxBytes);
+  const length = size - start;
+  if (length === 0) return "";
+
+  const fd = fs.openSync(logPath, "r");
+  try {
+    const buf = Buffer.alloc(length);
+    fs.readSync(fd, buf, 0, length, start);
+    return buf.toString("utf8");
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
 function readUsage(logPath: string): StageUsage | undefined {
   try {
-    return parseUsageFromLog(fs.readFileSync(logPath, "utf8"));
+    return parseUsageFromLog(readLogTail(logPath));
   } catch {
     // No log, or it vanished. Missing cost data must never fail a stage.
     return undefined;

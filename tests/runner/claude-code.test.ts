@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ClaudeCodeRunner, parseUsageFromLog } from "../../src/runner/claude-code.js";
+import { ClaudeCodeRunner, parseUsageFromLog, readLogTail } from "../../src/runner/claude-code.js";
 
 const FAKE = path.resolve("tests/fixtures/fake-claude.sh");
 let dir: string;
@@ -182,5 +182,53 @@ describe("parseUsageFromLog", () => {
       cacheCreationInputTokens: 0,
       cacheReadInputTokens: 0,
     });
+  });
+});
+
+describe("readLogTail", () => {
+  it("returns the whole file when it is smaller than the cap", () => {
+    const f = path.join(dir, "small.log");
+    fs.writeFileSync(f, "hello\nworld\n");
+    expect(readLogTail(f)).toBe("hello\nworld\n");
+  });
+
+  it("returns only the tail of a large file", () => {
+    const f = path.join(dir, "big.log");
+    fs.writeFileSync(f, "x".repeat(5000) + "\nTAIL\n");
+    const tail = readLogTail(f, 100);
+    expect(tail.length).toBeLessThanOrEqual(100);
+    expect(tail).toContain("TAIL");
+  });
+
+  it("still finds the result event when the head of the log is discarded", () => {
+    // The failure this guards: a verbose stage produces a log too large to
+    // read whole, cost data disappears, and the stage reports success anyway.
+    const f = path.join(dir, "verbose.log");
+    const noise = Array.from({ length: 2000 }, (_, i) =>
+      JSON.stringify({ type: "assistant", n: i, pad: "y".repeat(200) }),
+    ).join("\n");
+    const result = JSON.stringify({
+      type: "result",
+      total_cost_usd: 1.25,
+      duration_ms: 9000,
+      num_turns: 7,
+      usage: {
+        input_tokens: 10,
+        output_tokens: 20,
+        cache_creation_input_tokens: 30,
+        cache_read_input_tokens: 40,
+      },
+    });
+    fs.writeFileSync(f, `${noise}\n${result}\n`);
+
+    const usage = parseUsageFromLog(readLogTail(f, 4096));
+    expect(usage?.costUsd).toBe(1.25);
+    expect(usage?.numTurns).toBe(7);
+  });
+
+  it("returns an empty string for an empty file", () => {
+    const f = path.join(dir, "empty.log");
+    fs.writeFileSync(f, "");
+    expect(readLogTail(f)).toBe("");
   });
 });
