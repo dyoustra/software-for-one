@@ -48,3 +48,15 @@ describe("criteria", () => {
     expect(groups.get("Enumeration")).toHaveLength(2);
   });
 });
+
+describe("duplicate ids on read", () => {
+  it("rejects a hand-edited file containing duplicate ids", () => {
+    // plan, test-write and review all readCriteria directly and key by id.
+    // Write-time validation never sees a file edited outside the pipeline.
+    fs.writeFileSync(
+      path.join(env.SFO_HOME, "p", ".sfo", "CRITERIA.jsonl"),
+      '{"id":"AC-001","group":"G","text":"one"}\n{"id":"AC-001","group":"G","text":"two"}\n',
+    );
+    expect(() => readCriteria("p", env)).toThrow(/duplicate criterion id: AC-001/);
+  });
+});

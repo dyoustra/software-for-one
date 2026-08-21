@@ -14,20 +14,30 @@ export type Criterion = z.infer<typeof CriterionSchema>;
 
 export const CRITERIA_FILE = "CRITERIA.jsonl";
 
+/**
+ * Enforced on read as well as write. Three Phase 2 stages — `plan`,
+ * `test-write` and `review` — call readCriteria directly, and each keys by id.
+ * A duplicate introduced by a hand edit or a malformed stage output would
+ * silently drop one criterion from whatever consumes them, shrinking the
+ * contract the build is held to. Validating only on write catches it solely
+ * when something happens to rewrite the file.
+ */
+function assertUniqueIds(criteria: Criterion[]): void {
+  const seen = new Set<string>();
+  for (const c of criteria) {
+    if (seen.has(c.id)) throw new Error(`duplicate criterion id: ${c.id}`);
+    seen.add(c.id);
+  }
+}
+
 export function readCriteria(id: string, env?: Env): Criterion[] {
-  return readRecords(artifactPath(id, CRITERIA_FILE, env), CriterionSchema);
+  const criteria = readRecords(artifactPath(id, CRITERIA_FILE, env), CriterionSchema);
+  assertUniqueIds(criteria);
+  return criteria;
 }
 
 export function writeCriteria(id: string, criteria: Criterion[], env?: Env): void {
-  const seen = new Set<string>();
-  for (const c of criteria) {
-    if (seen.has(c.id)) {
-      // Downstream stages key on id. A duplicate silently drops one criterion
-      // from whatever consumes them, shrinking the contract the build must meet.
-      throw new Error(`duplicate criterion id: ${c.id}`);
-    }
-    seen.add(c.id);
-  }
+  assertUniqueIds(criteria);
   writeRecords(artifactPath(id, CRITERIA_FILE, env), CriterionSchema, criteria);
 }
 
