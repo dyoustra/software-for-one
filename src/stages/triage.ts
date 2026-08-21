@@ -2,7 +2,7 @@ import { z } from "zod";
 import { runStructured } from "../runner/structured.js";
 import type { StageUsage } from "../runner/types.js";
 
-export const TriageResultSchema = z.object({
+const TriageFieldsSchema = z.object({
   verdict: z.enum(["ready", "underspecified", "out_of_scope"]),
   title: z.string(),
   reason: z.string(),
@@ -13,6 +13,18 @@ export const TriageResultSchema = z.object({
   estimateHighUsd: z.number().nonnegative(),
   estimateBasis: z.string(),
 });
+
+/**
+ * The ordering check lives here rather than only in `EstimateSchema` so a
+ * reversed range fails at the parse boundary, before `sfo new` has created a
+ * directory and a git repo it would then abandon half-built. `z.toJSONSchema`
+ * drops refinements, so the JSON Schema the model receives is unchanged — the
+ * prompt states the constraint instead.
+ */
+export const TriageResultSchema = TriageFieldsSchema.refine(
+  (r) => r.estimateLowUsd <= r.estimateHighUsd,
+  { message: "estimateLowUsd must not exceed estimateHighUsd", path: ["estimateLowUsd"] },
+);
 
 export type TriageResult = z.infer<typeof TriageResultSchema>;
 
@@ -42,7 +54,7 @@ Also produce a short title (under 6 words) suitable for a directory name.
 Also estimate what the research + spec + clarify stages will cost, as a USD range.
 For calibration: a single-purpose CLI with a handful of searches ran $3-6 end to end;
 a broad idea needing extensive research could be several times that. Give the range
-you actually believe, and state the basis in one sentence.`;
+you actually believe, with the low end first, and state the basis in one sentence.`;
 
 /**
  * Which route a triage call takes.

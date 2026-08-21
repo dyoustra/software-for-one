@@ -239,6 +239,13 @@ describe("triage routing", () => {
     await expect(triage("x", { path: "sdk", sdk: fakeSdk(noEstimate) })).rejects.toThrow();
   });
 
+  it("rejects a reversed range at the parse boundary, before any project exists", async () => {
+    const reversed = { ...READY, estimateLowUsd: 10, estimateHighUsd: 2 };
+    await expect(triage("x", { path: "sdk", sdk: fakeSdk(reversed) })).rejects.toThrow(
+      /estimateLowUsd/,
+    );
+  });
+
   it("accepts only the three known verdicts", () => {
     const bad = { verdict: "maybe", title: "t", reason: "r", counterOffer: null, ...ESTIMATE };
     expect(TriageResultSchema.safeParse(bad).success).toBe(false);
