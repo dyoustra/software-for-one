@@ -58,6 +58,16 @@ export async function promptForAnswers(id: string, env?: Env): Promise<void> {
   if (!raw) throw new Error(`no QUESTIONS.md for ${id} — has the spec stage run?`);
 
   const questions = parseQuestions(raw);
+  if (questions.length === 0) {
+    // The parser is lenient and never throws, so a mangled QUESTIONS.md yields
+    // zero questions. Without this guard we'd prompt for nothing, write an
+    // ANSWERS.md containing only a heading, print "answers saved", and unblock
+    // the pipeline — a confident success message for an empty handoff.
+    throw new Error(
+      `QUESTIONS.md for ${id} contains no parseable questions — re-run the stage with \`sfo stage ${id} spec\``,
+    );
+  }
+
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const answers: string[] = [];
 

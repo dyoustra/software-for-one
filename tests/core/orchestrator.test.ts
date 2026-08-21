@@ -77,14 +77,43 @@ describe("advance", () => {
     expect(readState("p", env).pid).toBeNull();
   });
 
-  it("runs the clarify stage once the human has answered", async () => {
-    seed("spec");
-    fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.md"), "# Answers");
-    const runner = new FakeRunner();
-    await advance("p", runner, env);
+  it("runs the parked clarify stage after the human answers, via the real resume path", async () => {
+    // Walks the state the pipeline actually produces. Seeding currentStage
+    // "spec" with ANSWERS.md already present passes against a broken
+    // orchestrator, because parking sets currentStage to "clarify" — asking
+    // nextStage("clarify") then returns null and the project is marked done
+    // having never run the stage that folds in the answers.
+    seed("capture");
+    const first = new FakeRunner();
+    await advance("p", first, env);
 
-    expect(runner.calls.map((c) => path.basename(c.logPath))).toEqual(["clarify.log"]);
+    expect(first.calls.map((c) => path.basename(c.logPath))).toEqual([
+      "research.log",
+      "spec.log",
+    ]);
+    expect(readState("p", env).currentStage).toBe("clarify");
+    expect(readState("p", env).status).toBe("awaiting_human");
+
+    // The human answers.
+    fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.md"), "# Answers");
+
+    const resumed = new FakeRunner();
+    await advance("p", resumed, env);
+
+    expect(resumed.calls.map((c) => path.basename(c.logPath))).toEqual(["clarify.log"]);
     expect(readState("p", env).status).toBe("done");
+  });
+
+  it("does not run clarify twice when advanced again after it completed", async () => {
+    seed("capture");
+    await advance("p", new FakeRunner(), env);
+    fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.md"), "# Answers");
+    await advance("p", new FakeRunner(), env);
+    expect(readState("p", env).status).toBe("done");
+
+    const again = new FakeRunner();
+    await advance("p", again, env);
+    expect(again.calls).toHaveLength(0);
   });
 
   it("keeps ticking the heartbeat while a stage is running", async () => {
