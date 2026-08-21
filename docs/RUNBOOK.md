@@ -42,3 +42,62 @@
 ## Extrapolation
 
 At ~$3.93 per idea on the successful path, the spec's 10-idea validation lands near **$40**, assuming later ideas benefit from a warm cache within the hour. Research dominates; capping its turn count or scoping its brief is the highest-leverage cost lever.
+
+---
+
+# Plan A — artifact format migration
+
+**Date:** 2026-08-21. Re-ran `spec` on the screenshot renamer against the new
+schemas. **Cost: ~$2.16 / 680s** for that stage; project total now $7.34.
+
+## The question this answered
+
+*Will a model reliably emit schema-valid JSONL and JSON?* **Yes — first attempt,
+no schema violations.** `sfo criteria` and `sfo decisions` both render. Every
+downstream stage in Plan B parses these formats, so this was the load-bearing
+assumption and it held.
+
+## What changed, and what it does not prove
+
+| | markdown | structured |
+|---|---|---|
+| Acceptance criteria | 43 | **64** (+49%) |
+| Groups | 9 | 10 |
+| Questions | 9 | 8 |
+| Stage cost | $0.99 | ~$2.16 |
+| Stage time | 251s | 680s |
+
+**The comparison is confounded and should not be read as a format cost.** This
+run had strictly more input than the first: a `SPEC.md` already clarified with
+nine human answers, plus the previous round's decisions. More context reasonably
+produces more criteria and costs more. Attributing the increase to JSONL would
+require a same-input A/B, which has not been run.
+
+## Findings
+
+**`decided_by` works as designed.** 9 records attributed to `human`, 36 to
+`agent`. The stage correctly carried forward the human decisions from the
+earlier clarify round rather than reclaiming them — the exact distinction the
+field was added for. Note the implication: a stage that never spoke to a human
+can legitimately emit `decided_by: human` when preserving history.
+
+**The new questions are a layer deeper, not a restatement.** The first round
+asked about rename-in-place, naming convention, and cloud-vs-local. This round
+asks about the Batch API vs bounded concurrency, which Apple OCR path, and
+whether `--apply` may run without a saved plan. With the earlier answers folded
+into the spec, the stage moved on rather than re-litigating. **Consequence: the
+old `ANSWERS.md` had nothing to migrate** — no question survived to map onto, so
+the planned hand-conversion was moot and was skipped.
+
+**64 criteria is tractable because of slicing, not despite it.** Spread over 10
+groups that is ~6 per slice, which is a reasonable build target. The spec's open
+question about over-specification is better framed as "how large is a slice"
+than "how many criteria are too many".
+
+## Still open
+
+- **Slice size** remains unanswered and is now the sharpest open question for
+  Plan B: 10 groups ranging 2–9 criteria each is the natural default, but the
+  2-criterion group may not justify a build invocation's fixed cost.
+- The rough estimate anchors on a single calibration point ($3–6) and will
+  read precise while being weakly informative until more real runs accumulate.
