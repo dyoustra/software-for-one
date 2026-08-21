@@ -1,14 +1,20 @@
 import { describe, it, expect, vi } from "vitest";
 import { triage, TriageResultSchema, triageOutputSchema } from "../../src/stages/triage.js";
 
-function fakeClient(payload: unknown) {
-  return {
-    messages: {
-      create: vi.fn().mockResolvedValue({
-        content: [{ type: "text", text: JSON.stringify(payload) }],
-      }),
+/** Stands in for runStructured: returns the inner `result` string, un-parsed. */
+function fakeRun(payload: unknown) {
+  return vi.fn().mockResolvedValue({
+    text: JSON.stringify(payload),
+    usage: {
+      costUsd: 0.34,
+      durationMs: 1000,
+      numTurns: 1,
+      inputTokens: 1,
+      outputTokens: 2,
+      cacheCreationInputTokens: 3,
+      cacheReadInputTokens: 4,
     },
-  };
+  });
 }
 
 describe("triageOutputSchema", () => {
@@ -32,46 +38,52 @@ describe("triageOutputSchema", () => {
 
 describe("triage", () => {
   it("returns a ready verdict for a clear idea", async () => {
-    const client = fakeClient({
+    const run = fakeRun({
       verdict: "ready",
       title: "Subway Tracker",
       reason: "Scope and platform are clear.",
       counterOffer: null,
     });
-    const res = await triage("Build a subway arrival tracker for the L train", client as never);
-    expect(res.verdict).toBe("ready");
-    expect(res.title).toBe("Subway Tracker");
+    const { result } = await triage("Build a subway arrival tracker for the L train", run);
+    expect(result.verdict).toBe("ready");
+    expect(result.title).toBe("Subway Tracker");
   });
 
   it("returns a counter-offer instead of rejecting an out-of-scope idea", async () => {
-    const client = fakeClient({
+    const run = fakeRun({
       verdict: "out_of_scope",
       title: "Train An LLM",
       reason: "Training a foundation model is not buildable here.",
       counterOffer: "A local inference playground with a chat UI.",
     });
-    const res = await triage("make an LLM", client as never);
-    expect(res.verdict).toBe("out_of_scope");
-    expect(res.counterOffer).toMatch(/playground/);
+    const { result } = await triage("make an LLM", run);
+    expect(result.verdict).toBe("out_of_scope");
+    expect(result.counterOffer).toMatch(/playground/);
   });
 
-  it("requests opus and passes the structured format", async () => {
-    const client = fakeClient({ verdict: "ready", title: "T", reason: "r", counterOffer: null });
-    await triage("anything", client as never);
-    const args = client.messages.create.mock.calls[0][0];
-    expect(args.model).toBe("claude-opus-5");
-    expect(args.output_config.format.type).toBe("json_schema");
-    expect(args.output_config.format.schema.properties.verdict.enum).toHaveLength(3);
+  it("passes the constrained schema and a prompt carrying both instructions and idea", async () => {
+    const run = fakeRun({ verdict: "ready", title: "T", reason: "r", counterOffer: null });
+    await triage("track the L train", run);
+    const args = run.mock.calls[0][0];
+    expect(args.schema.properties.verdict.enum).toHaveLength(3);
+    expect(args.prompt).toContain("You triage side-project ideas");
+    expect(args.prompt).toContain("track the L train");
   });
 
-  it("throws when the response carries no text block", async () => {
-    const client = { messages: { create: vi.fn().mockResolvedValue({ content: [] }) } };
-    await expect(triage("x", client as never)).rejects.toThrow(/no text/i);
+  it("surfaces the usage the run reported", async () => {
+    const run = fakeRun({ verdict: "ready", title: "T", reason: "r", counterOffer: null });
+    const { usage } = await triage("x", run);
+    expect(usage?.costUsd).toBe(0.34);
   });
 
   it("throws when the model returns a verdict outside the enum", async () => {
-    const client = fakeClient({ verdict: "maybe", title: "t", reason: "r", counterOffer: null });
-    await expect(triage("x", client as never)).rejects.toThrow();
+    const run = fakeRun({ verdict: "maybe", title: "t", reason: "r", counterOffer: null });
+    await expect(triage("x", run)).rejects.toThrow();
+  });
+
+  it("propagates a failure from the runner", async () => {
+    const run = vi.fn().mockRejectedValue(new Error("claude exited with code 1"));
+    await expect(triage("x", run)).rejects.toThrow(/exited with code 1/);
   });
 
   it("accepts only the three known verdicts", () => {

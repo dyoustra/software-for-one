@@ -1,5 +1,6 @@
-import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
+import { runStructured } from "../runner/structured.js";
+import type { StageUsage } from "../runner/types.js";
 
 export const TriageResultSchema = z.object({
   verdict: z.enum(["ready", "underspecified", "out_of_scope"]),
@@ -33,20 +34,27 @@ Never simply reject. For "out_of_scope", set counterOffer to the nearest thing t
 
 Also produce a short title (under 6 words) suitable for a directory name.`;
 
-type TriageClient = Pick<Anthropic, "messages">;
+export interface TriageOutcome {
+  result: TriageResult;
+  /** What the call cost, so the caller can record it against the project. */
+  usage?: StageUsage;
+}
 
-export async function triage(idea: string, client: TriageClient): Promise<TriageResult> {
-  const response = await client.messages.create({
-    model: "claude-opus-5",
-    max_tokens: 16000,
-    system: SYSTEM,
-    output_config: { format: { type: "json_schema", schema: triageOutputSchema() } },
-    messages: [{ role: "user", content: idea }],
+/**
+ * `run` is injected so tests never spawn the real binary.
+ *
+ * The CLI takes a single prompt argument with no separate system parameter,
+ * so the instructions are prepended to the idea rather than sent apart from it.
+ */
+export async function triage(
+  idea: string,
+  run: typeof runStructured = runStructured,
+): Promise<TriageOutcome> {
+  const { text, usage } = await run({
+    prompt: `${SYSTEM}\n\nIdea:\n${idea}`,
+    schema: triageOutputSchema(),
   });
 
-  const block = response.content.find((b) => b.type === "text");
-  if (!block || block.type !== "text") {
-    throw new Error("triage response contained no text block");
-  }
-  return TriageResultSchema.parse(JSON.parse(block.text));
+  // Two parses: the CLI envelope's `result` is itself a string of JSON.
+  return { result: TriageResultSchema.parse(JSON.parse(text)), usage };
 }

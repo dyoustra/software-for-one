@@ -1,6 +1,5 @@
 import { Command } from "commander";
 import { randomBytes } from "node:crypto";
-import Anthropic from "@anthropic-ai/sdk";
 import { createProject } from "./commands/new.js";
 import { triage } from "./stages/triage.js";
 
@@ -29,12 +28,7 @@ export function buildProgram(): Command {
     .description("Capture an idea and start a run")
     .argument("<idea>", "the idea, in your own words")
     .action(guarded(async (idea: string) => {
-      const client = new Anthropic();
-      const id = await createProject(
-        idea,
-        (text) => triage(text, client),
-        randomBytes(3).toString("hex"),
-      );
+      const id = await createProject(idea, triage, randomBytes(3).toString("hex"));
       console.log(`captured: ${id}`);
     }));
 

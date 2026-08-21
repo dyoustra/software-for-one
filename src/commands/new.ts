@@ -3,9 +3,10 @@ import { execFileSync } from "node:child_process";
 import { projectDir, sfoDir, type Env } from "../core/paths.js";
 import { writeState } from "../core/state.js";
 import { writeArtifact, appendArtifact } from "../core/artifacts.js";
-import type { TriageResult } from "../stages/triage.js";
+import { recordCost } from "../core/cost.js";
+import type { TriageOutcome } from "../stages/triage.js";
 
-export type TriageFn = (idea: string) => Promise<TriageResult>;
+export type TriageFn = (idea: string) => Promise<TriageOutcome>;
 
 /**
  * Trims AFTER slicing, not before: a 40-char cut that lands on a separator
@@ -29,7 +30,7 @@ export async function createProject(
   suffix: string,
   env?: Env,
 ): Promise<string> {
-  const verdict = await runTriage(idea);
+  const { result: verdict, usage } = await runTriage(idea);
   const id = `${slugify(verdict.title)}-${suffix}`;
 
   const dir = projectDir(id, env);
@@ -72,6 +73,11 @@ export async function createProject(
     },
     env,
   );
+
+  // Only recordable once triage has returned, since the id derives from the
+  // title it produced. Triage spends real money and is otherwise invisible
+  // to `sfo cost`.
+  recordCost(id, "triage", true, usage, env);
 
   return id;
 }
