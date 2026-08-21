@@ -63,6 +63,29 @@ function reason(err: unknown): string {
  * user their history, which is bad; throwing here would cost them the stage
  * that just ran, which on `research` is minutes of work and real money.
  */
+
+const LOGS_IGNORE = ".sfo/logs/";
+
+/**
+ * The spec stage rewrites .gitignore once it has chosen a stack, and is told to
+ * keep this line — but an instruction to a model is not a guarantee, and the
+ * cost of it being dropped is silent: `git add -A` then commits roughly a
+ * megabyte of stream-json stage logs per project, permanently. Re-asserting is
+ * cheaper than trusting, and self-heals rather than failing the stage.
+ */
+function ensureLogsIgnored(cwd: string, log: (message: string) => void): void {
+  const file = path.join(cwd, ".gitignore");
+  try {
+    const body = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+    if (body.split("\n").some((line) => line.trim() === LOGS_IGNORE)) return;
+
+    fs.writeFileSync(file, body.endsWith("\n") || body === "" ? `${body}${LOGS_IGNORE}\n` : `${body}\n${LOGS_IGNORE}\n`);
+    log(`sfo: restored ${LOGS_IGNORE} to .gitignore — stage logs must not be committed`);
+  } catch {
+    // Best effort. A failure here must not cost the stage its commit.
+  }
+}
+
 export function commitStage(
   id: string,
   stage: string,
@@ -84,6 +107,8 @@ export function commitStage(
       log(`sfo: could not commit ${stage} artifacts: ${cwd} is not its own git repo`);
       return;
     }
+
+    ensureLogsIgnored(cwd, log);
 
     execFileSync("git", ["add", "-A"], { cwd, stdio: "pipe" });
 
