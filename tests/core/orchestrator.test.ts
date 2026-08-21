@@ -10,9 +10,13 @@ let env: Record<string, string>;
 
 class FakeRunner implements Runner {
   calls: RunStageInput[] = [];
-  constructor(private readonly ok = true) {}
+  constructor(
+    private readonly ok = true,
+    private readonly delayMs = 0,
+  ) {}
   async runStage(input: RunStageInput): Promise<StageResult> {
     this.calls.push(input);
+    if (this.delayMs > 0) await new Promise((r) => setTimeout(r, this.delayMs));
     return { ok: this.ok, exitCode: this.ok ? 0 : 1, logPath: input.logPath };
   }
 }
@@ -81,6 +85,40 @@ describe("advance", () => {
 
     expect(runner.calls.map((c) => path.basename(c.logPath))).toEqual(["clarify.log"]);
     expect(readState("p", env).status).toBe("done");
+  });
+
+  it("keeps ticking the heartbeat while a stage is running", async () => {
+    seed("capture");
+    // Stage outlives the 120s staleness window in spirit: several ticks must
+    // land while the runner is still working, or a healthy long run reads dead.
+    const runner = new FakeRunner(true, 60);
+    const before = new Date().toISOString();
+    await advance("p", runner, env, { heartbeatMs: 10 });
+
+    const after = readState("p", env).heartbeatAt;
+    expect(after).not.toBeNull();
+    expect(new Date(after as string).getTime()).toBeGreaterThan(new Date(before).getTime());
+  });
+
+  it("refuses to advance a failed project instead of skipping the failed stage", async () => {
+    seed("capture");
+    await advance("p", new FakeRunner(false), env);
+    expect(readState("p", env).status).toBe("failed");
+    expect(readState("p", env).currentStage).toBe("research");
+
+    const resumed = new FakeRunner();
+    await expect(advance("p", resumed, env)).rejects.toThrow(/failed at stage "research"/);
+    expect(resumed.calls).toHaveLength(0);
+    expect(readState("p", env).currentStage).toBe("research");
+  });
+
+  it("never launders a failed clarify into done", async () => {
+    seed("clarify");
+    const s = readState("p", env);
+    writeState({ ...s, status: "failed" }, env);
+
+    await expect(advance("p", new FakeRunner(), env)).rejects.toThrow(/failed at stage "clarify"/);
+    expect(readState("p", env).status).toBe("failed");
   });
 
   it("refuses to advance a project that is already done", async () => {

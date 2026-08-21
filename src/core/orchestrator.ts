@@ -8,9 +8,54 @@ import type { Runner } from "../runner/types.js";
 /** The artifact a human must produce before a blocking stage can run. */
 const HUMAN_INPUT: Record<string, string> = { clarify: "ANSWERS.md" };
 
-export async function advance(id: string, runner: Runner, env?: Env): Promise<void> {
+export const HEARTBEAT_INTERVAL_MS = 30_000;
+
+export interface AdvanceOptions {
+  /** Overridable so tests can exercise ticking without waiting 30s. */
+  heartbeatMs?: number;
+}
+
+/**
+ * Keeps `heartbeatAt` fresh for the duration of a stage. Stamping it once at
+ * stage start is not enough: real stages run for minutes, `isStale` uses a
+ * 120s window, and a healthy long run would therefore read as dead to
+ * `sfo status` and to the already-running guard in `sfo run`.
+ */
+function startHeartbeat(id: string, env: Env | undefined, intervalMs: number): () => void {
+  const timer = setInterval(() => {
+    try {
+      const current = readState(id, env);
+      writeState({ ...current, heartbeatAt: new Date().toISOString() }, env);
+    } catch {
+      // State was unreadable this tick (mid-rename, say). The next tick retries;
+      // a missed beat is survivable, a crashed heartbeat thread is not.
+    }
+  }, intervalMs);
+  timer.unref?.();
+  return () => clearInterval(timer);
+}
+
+export async function advance(
+  id: string,
+  runner: Runner,
+  env?: Env,
+  opts: AdvanceOptions = {},
+): Promise<void> {
+  const heartbeatMs = opts.heartbeatMs ?? HEARTBEAT_INTERVAL_MS;
   let state = readState(id, env);
   if (state.status === "done") return;
+
+  // Refusing to advance a failed project closes two data-loss paths. Advancing
+  // past a failed stage would silently skip the work it never finished, and a
+  // failed `clarify` would fall straight through `nextStage() === null` and be
+  // marked `done` — reporting success for a spec that never absorbed the
+  // human's answers. `currentStage` alone cannot distinguish "resume this" from
+  // "advance past this", so the status has to be the gate.
+  if (state.status === "failed") {
+    throw new Error(
+      `${id} failed at stage "${state.currentStage}" — re-run it with \`sfo stage ${id} ${state.currentStage}\` before advancing`,
+    );
+  }
 
   while (true) {
     const upcoming = nextStage(state.currentStage);
@@ -46,11 +91,21 @@ export async function advance(id: string, runner: Runner, env?: Env): Promise<vo
     };
     writeState(state, env);
 
-    const result = await runner.runStage({
-      workdir: projectDir(id, env),
-      prompt: loadPrompt(upcoming),
-      logPath: logPath(id, upcoming, env),
-    });
+    const stopHeartbeat = startHeartbeat(id, env, heartbeatMs);
+    let result;
+    try {
+      result = await runner.runStage({
+        workdir: projectDir(id, env),
+        prompt: loadPrompt(upcoming),
+        logPath: logPath(id, upcoming, env),
+      });
+    } finally {
+      stopHeartbeat();
+    }
+
+    // The heartbeat rewrote state under us, so re-read before mutating rather
+    // than writing back a stale in-memory copy.
+    state = readState(id, env);
 
     if (!result.ok) {
       state = {

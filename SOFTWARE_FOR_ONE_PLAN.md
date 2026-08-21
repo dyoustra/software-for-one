@@ -1115,6 +1115,12 @@ git add -A && git commit -m "feat: stage prompts as versioned files"
 
 **Design note:** the orchestrator takes a `Runner`, so the whole advance loop is testable with a fake that records calls and never touches a model.
 
+**Three behaviours this stage must get right** — all three were found empirically during implementation, and each is a silent-wrong-answer path rather than a crash:
+
+1. **The human gate must not skip the stage.** Parking at `clarify` and letting the next `advance` see `nextStage() === null` marks the project done without ever folding the human's answers into the spec. The `HUMAN_INPUT` + `artifactExists` check prevents it.
+2. **A `failed` project must not advance.** `currentStage` means "the stage that most recently ran", so *resume this* and *advance past this* are indistinguishable from state alone. Without a status guard, resuming skips the broken stage entirely — and a failed `clarify` falls through `nextStage() === null` and is laundered into `done`.
+3. **The heartbeat must tick, not be stamped once.** `isStale` uses a 120s window and real stages run for minutes, so a once-stamped heartbeat makes every healthy long run read as dead — to `sfo status`, and to the already-running guard in `sfo run`, which would then start a second run over a live one.
+
 - [ ] **Step 1: Write the failing test**
 
 `tests/core/orchestrator.test.ts`:
