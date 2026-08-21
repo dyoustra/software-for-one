@@ -8,7 +8,7 @@ import { projectDir, logPath, type Env } from "./paths.js";
 import type { Runner } from "../runner/types.js";
 
 /** The artifact a human must produce before a blocking stage can run. */
-const HUMAN_INPUT: Record<string, string> = { clarify: "ANSWERS.md" };
+const HUMAN_INPUT: Record<string, string> = { clarify: "ANSWERS.json" };
 
 export const HEARTBEAT_INTERVAL_MS = 30_000;
 

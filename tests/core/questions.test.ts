@@ -74,3 +74,11 @@ describe("questions", () => {
     expect(() => readQuestions("p", env)).toThrow(/QUESTIONS\.json is not valid JSON/);
   });
 });
+
+describe("atomic writes", () => {
+  it("leaves no temp file behind", () => {
+    writeAnswers("p", { answers: [{ questionId: "Q-001", answer: "A" }] }, env);
+    const files = fs.readdirSync(path.join(env.SFO_HOME, "p", ".sfo"));
+    expect(files.filter((f) => f.endsWith(".tmp"))).toEqual([]);
+  });
+});

@@ -128,7 +128,7 @@ describe("advance", () => {
     expect(readState("p", env).status).toBe("awaiting_human");
 
     // The human answers.
-    fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.md"), "# Answers");
+    fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.json"), '{"answers":[]}');
 
     const resumed = new FakeRunner();
     await advance("p", resumed, env);
@@ -140,7 +140,7 @@ describe("advance", () => {
   it("does not run clarify twice when advanced again after it completed", async () => {
     seed("capture");
     await advance("p", new FakeRunner(), env);
-    fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.md"), "# Answers");
+    fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.json"), '{"answers":[]}');
     await advance("p", new FakeRunner(), env);
     expect(readState("p", env).status).toBe("done");
 

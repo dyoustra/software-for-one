@@ -53,7 +53,12 @@ function readJson<T>(file: string, schema: z.ZodType<T>, label: string): T | nul
 function writeJson<T>(file: string, schema: z.ZodType<T>, value: T, label: string): void {
   const parsed = schema.safeParse(value);
   if (!parsed.success) throw new Error(`invalid ${label}: ${parsed.error.message}`);
-  fs.writeFileSync(file, `${JSON.stringify(parsed.data, null, 2)}\n`);
+  // Temp-file-and-rename, matching writeState. A crash mid-write would
+  // otherwise leave a truncated file — and for ANSWERS.json that is answers a
+  // person sat and typed, which no re-run can recover.
+  const tmp = `${file}.tmp`;
+  fs.writeFileSync(tmp, `${JSON.stringify(parsed.data, null, 2)}\n`);
+  fs.renameSync(tmp, file);
 }
 
 export function readQuestions(id: string, env?: Env): Questions | null {
