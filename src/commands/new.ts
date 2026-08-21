@@ -7,12 +7,20 @@ import type { TriageResult } from "../stages/triage.js";
 
 export type TriageFn = (idea: string) => Promise<TriageResult>;
 
+/**
+ * Trims AFTER slicing, not before: a 40-char cut that lands on a separator
+ * would otherwise reintroduce a trailing dash. Falls back to "project" when a
+ * title slugs to nothing (a non-latin or punctuation-only title does), because
+ * an empty slug yields an id like "-a1b2c3" — a directory whose name commander
+ * parses as an option, making `sfo run <id>` impossible to type.
+ */
 export function slugify(title: string): string {
-  return title
+  const slug = title
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 40);
+    .slice(0, 40)
+    .replace(/^-+|-+$/g, "");
+  return slug || "project";
 }
 
 export async function createProject(
@@ -25,6 +33,12 @@ export async function createProject(
   const id = `${slugify(verdict.title)}-${suffix}`;
 
   const dir = projectDir(id, env);
+  // Without this guard a colliding id appends the new idea to the existing
+  // project's append-only IDEA.md and overwrites its TRIAGE.md and state.json
+  // — the new project hijacks the old one and its history is gone, silently.
+  if (fs.existsSync(dir)) {
+    throw new Error(`project ${id} already exists at ${dir}`);
+  }
   fs.mkdirSync(sfoDir(id, env), { recursive: true });
   execFileSync("git", ["init", "-q"], { cwd: dir });
 
