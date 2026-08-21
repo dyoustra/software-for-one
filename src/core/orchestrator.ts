@@ -4,6 +4,7 @@ import { artifactExists } from "./artifacts.js";
 import { readCriteria } from "./criteria.js";
 import { recordCost } from "./cost.js";
 import { commitStage } from "./repo.js";
+import { readPriorArt, blocksPipeline } from "./priorart.js";
 import { loadPrompt } from "../stages/prompts.js";
 import { projectDir, logPath, type Env } from "./paths.js";
 import type { Runner } from "../runner/types.js";
@@ -197,6 +198,25 @@ export async function advance(
       };
       writeState(state, env);
       return;
+    }
+
+    // A research stage that concludes "this already exists" must be able to
+    // stop the pipeline. Otherwise a 30KB prior-art document changes nothing
+    // and the project spends the spec stage — and later the whole build —
+    // rebuilding something the user could install today.
+    if (upcoming === "research") {
+      const priorArt = readPriorArt(id, env);
+      if (priorArt && blocksPipeline(priorArt.verdict)) {
+        state = {
+          ...state,
+          status: "awaiting_human",
+          pid: null,
+          updatedAt: new Date().toISOString(),
+        };
+        writeState(state, env);
+        commitStage(id, upcoming, env);
+        return;
+      }
     }
 
     // Only on success. A failed stage's partial output stays uncommitted so the

@@ -229,6 +229,44 @@ describe("advance", () => {
     expect(subjects()).toEqual([]);
   });
 
+  it("stops after research when prior art says the gap is not real", async () => {
+    seed("capture");
+    const runner = new FakeRunner(true, 0, undefined, () =>
+      fs.writeFileSync(
+        path.join(env.SFO_HOME, "p", ".sfo", "PRIOR_ART.json"),
+        JSON.stringify({
+          verdict: "no_gap",
+          summary: "Several mature tools do exactly this.",
+          existing: [{ name: "ai-renamer", url: "https://example.com", gap: "none" }],
+          recommendation: "use ai-renamer",
+        }),
+      ),
+    );
+
+    await advance("p", runner, env);
+
+    expect(runner.calls.map((c) => path.basename(c.logPath))).toEqual(["research.log"]);
+    expect(readState("p", env).status).toBe("awaiting_human");
+    expect(readState("p", env).currentStage).toBe("research");
+  });
+
+  it("proceeds past research when the gap is real", async () => {
+    seed("capture");
+    const runner = new FakeRunner(true, 0, undefined, () =>
+      fs.writeFileSync(
+        path.join(env.SFO_HOME, "p", ".sfo", "PRIOR_ART.json"),
+        JSON.stringify({
+          verdict: "clear_gap",
+          summary: "Nothing covers this.",
+          existing: [],
+        }),
+      ),
+    );
+
+    await advance("p", runner, env);
+    expect(runner.calls.map((c) => path.basename(c.logPath))).toContain("spec.log");
+  });
+
   it("refuses to advance a project that is already done", async () => {
     seed("clarify");
     const s = readState("p", env);
