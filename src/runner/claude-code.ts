@@ -98,7 +98,10 @@ export class ClaudeCodeRunner implements Runner {
   constructor(opts: ClaudeCodeRunnerOptions = {}) {
     this.bin = opts.bin ?? "claude";
     this.extraEnv = opts.env ?? {};
-    this.maxBudgetUsd = opts.maxBudgetUsd;
+    // Env var so every call site (sfo run, sfo stage, the detached child)
+    // inherits the same ceiling without threading an option through each one.
+    const fromEnv = Number(process.env.SFO_MAX_BUDGET_USD);
+    this.maxBudgetUsd = opts.maxBudgetUsd ?? (Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : undefined);
   }
 
   runStage(input: RunStageInput): Promise<StageResult> {
