@@ -1,9 +1,19 @@
 import readline from "node:readline/promises";
-import { readQuestions, writeAnswers } from "../core/questions.js";
+import { readQuestions, readAnswers, writeAnswers } from "../core/questions.js";
+import { openQuestions } from "../core/openQuestions.js";
 import { readState, writeState } from "../core/state.js";
 import type { Env } from "../core/paths.js";
 
-export async function promptForAnswers(id: string, env?: Env): Promise<void> {
+export type Ask = (prompt: string) => Promise<string>;
+
+type Reader = { ask: Ask; close: () => void };
+
+function stdinReader(): Reader {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  return { ask: (prompt) => rl.question(prompt), close: () => rl.close() };
+}
+
+export async function promptForAnswers(id: string, env?: Env, ask?: Ask): Promise<void> {
   // Existence check only — a typo'd id must report "no such project", not
   // blame a missing QUESTIONS.json. The state written at the end is re-read
   // there, because the human may sit at the prompt for a long time.
@@ -22,21 +32,29 @@ export async function promptForAnswers(id: string, env?: Env): Promise<void> {
     );
   }
 
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const open = openQuestions(id, env);
+  if (open.length === 0) {
+    throw new Error(`no open questions for ${id}`);
+  }
+
+  const reader = ask ? { ask, close: () => {} } : stdinReader();
   const answers: { questionId: string; answer: string }[] = [];
 
   try {
-    for (const q of questions.questions) {
+    for (const q of open) {
       console.log(`\n[${q.section}] ${q.text}`);
       if (q.context) console.log(`  ${q.context}`);
       for (const o of q.options) console.log(`  ${o.key} — ${o.label} — ${o.tradeoff}`);
-      answers.push({ questionId: q.id, answer: await rl.question("> ") });
+      answers.push({ questionId: q.id, answer: await reader.ask("> ") });
     }
   } finally {
-    rl.close();
+    reader.close();
   }
 
-  writeAnswers(id, { answers }, env);
+  // Merge, never replace: writeAnswers overwrites the file, so a second pass
+  // answering two follow-ups would otherwise erase the first pass's answers.
+  const existing = readAnswers(id, env)?.answers ?? [];
+  writeAnswers(id, { answers: [...existing, ...answers] }, env);
 
   const state = readState(id, env);
   writeState({ ...state, status: "awaiting_human", updatedAt: new Date().toISOString() }, env);

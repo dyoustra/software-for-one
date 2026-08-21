@@ -58,6 +58,16 @@ export function buildProgram(): Command {
       guardRunnable(id, undefined, { anyway: opts.anyway });
       if (opts.attach) {
         await runAttached(id);
+
+        // Reported here rather than left for the human to find on their next
+        // `sfo status`: a follow-up asked while they are still at the keyboard
+        // costs seconds, and hours once they have walked away. The orchestrator
+        // returns state; the command layer decides what to say about it.
+        const { openQuestions } = await import("./core/openQuestions.js");
+        const open = openQuestions(id);
+        if (open.length > 0) {
+          console.log(`\nsfo: ${open.length} question(s) still open — run \`sfo answer ${id}\``);
+        }
       } else {
         console.log(`started (pid ${runDetached(id, { anyway: opts.anyway })})`);
       }

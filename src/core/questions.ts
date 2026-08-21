@@ -29,6 +29,7 @@ export const AnswersSchema = z.object({
   answers: z.array(z.object({ questionId: z.string().min(1), answer: z.string() })),
 });
 
+export type Question = z.infer<typeof QuestionSchema>;
 export type Questions = z.infer<typeof QuestionsSchema>;
 export type Answers = z.infer<typeof AnswersSchema>;
 
