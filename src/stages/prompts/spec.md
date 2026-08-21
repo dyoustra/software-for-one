@@ -61,3 +61,9 @@ no trailing commas, no comments, and one complete object per line in the
 
 Write only `.sfo/SPEC.md`, `.sfo/CRITERIA.jsonl`, `.sfo/QUESTIONS.json`, and
 `.sfo/DECISIONS.jsonl`.
+
+Once you have chosen the stack, rewrite the project's root `.gitignore` for it —
+dependency directories, build output, caches, virtual environments, and anything
+else a build would generate. Keep the existing `.sfo/logs/` line. The build stage
+commits with `git add -A`, so anything missing from this file ends up in history
+permanently.

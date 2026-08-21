@@ -7,6 +7,7 @@ import { writeArtifact, appendArtifact } from "../core/artifacts.js";
 import { recordCost } from "../core/cost.js";
 import { writeEstimate } from "../core/estimate.js";
 import { commitStage } from "../core/repo.js";
+import { gitignoreFor } from "../core/archetype.js";
 import type { TriageOutcome, TriagePath } from "../stages/triage.js";
 
 export type TriageFn = (idea: string) => Promise<TriageOutcome>;
@@ -68,10 +69,9 @@ export async function createProject(
   }
   fs.mkdirSync(sfoDir(id, env), { recursive: true });
   execFileSync("git", ["init", "-q"], { cwd: dir });
-  // Stage logs are hundreds of KB of stream-json and fully regenerable.
-  // Committing them would bury the artifact diffs that are the point of
-  // keeping a repo at all.
-  fs.writeFileSync(path.join(dir, ".gitignore"), ".sfo/logs/\n");
+  // Archetype is not known until the spec stage runs, so seed the union. The
+  // spec stage rewrites this once it has chosen.
+  fs.writeFileSync(path.join(dir, ".gitignore"), gitignoreFor("unknown"));
 
   appendArtifact(id, "IDEA.md", idea, env);
   writeArtifact(
