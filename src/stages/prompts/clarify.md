@@ -1,11 +1,35 @@
-Read `.sfo/SPEC.md`, `.sfo/QUESTIONS.md`, and `.sfo/ANSWERS.md`.
+Read `.sfo/SPEC.md`, `.sfo/CRITERIA.jsonl`, `.sfo/QUESTIONS.json`, and `.sfo/ANSWERS.json`.
 
-The human has answered the questions. Fold their answers into `.sfo/SPEC.md`, editing it in place — do not write a new document. Where an answer contradicts a default you previously chose, the answer wins.
+`.sfo/ANSWERS.json` is `{"answers":[{"questionId":"Q-001","answer":"<free text>"}]}`. Each `answer` is the raw text the human typed, not an option key. "A, but with a `--materialize` flag" is not "A" — the qualification is a real requirement and must survive into `.sfo/SPEC.md` or `.sfo/CRITERIA.jsonl`. An answer that names no option at all is still an answer; take it at its word.
 
-Append each answered question to `.sfo/DECISIONS.md` in the standard format, with
-`- decided_by: human (ANSWERS.md)`. Every entry carries `decided_by` — entries you
-decide yourself use `- decided_by: agent`. Never omit the field.
+Fold the answers into `.sfo/SPEC.md`, editing it in place — do not write a new document. Where an answer contradicts a default you previously chose, the answer wins.
 
-If an answer opens a genuinely new ambiguity that would change the architecture, add it to `.sfo/QUESTIONS.md` under `## Blocking` and stop. Otherwise leave `.sfo/QUESTIONS.md` alone.
+**Write each file as you finish it, not all at the end.** Stages get killed mid-run; partial output that a re-run can build on beats losing the work to a dropped connection.
 
-Write only `.sfo/SPEC.md`, `.sfo/QUESTIONS.md`, and `.sfo/DECISIONS.md`.
+Update `.sfo/CRITERIA.jsonl` wherever an answer changes what must be true — adding criteria, removing ones the answer rules out, rewording ones it narrows. Rewrite the whole file, one JSON object per line, no wrapping array:
+
+    {"id":"AC-001","group":"Enumeration and file identification","text":"Given a directory containing a file whose name embeds U+202F, that file appears in the candidate set."}
+
+Keep a criterion's `id` and `group` unchanged when you reword its `text` — the id is how later stages track the same requirement across revisions. New criteria get fresh `AC-` ids that no line in the file has used, including ids freed by criteria you just removed. Every `text` stays one self-contained sentence a test can check, readable alone without its group heading.
+
+Append one record per answered question to `.sfo/DECISIONS.jsonl`, one object per line:
+
+    {"id":"D-014","decision":"<short name>","chose":"<what the human chose, in their words>","considered":"<the options offered>","why":"<their reasoning, or the question this settles>","decided_by":"human","blast_radius":"local","at":"<ISO 8601>"}
+
+`decided_by` is `human` for every one of these — the human decided them, not you. Any decision you make yourself in this stage is a separate record with `"decided_by":"agent"`. Never omit the field: absence cannot be distinguished from a bug. Give each record an `id` that continues past the highest `D-` already in the file. `blast_radius` is exactly one of `local`, `structural`, `external`. `at` must be a real ISO 8601 timestamp.
+
+If an answer opens a genuinely new ambiguity that would change the architecture, add a question to `.sfo/QUESTIONS.json` and stop. Otherwise leave `.sfo/QUESTIONS.json` alone.
+
+When you do add one, rewrite the whole file: carry **every** existing question through unchanged — same `id`, `section`, `text`, `context`, and `options` — and append the new one with a fresh `Q-` id that no existing question uses. Duplicate ids are rejected and the stage fails, so never reuse the id of the question whose answer prompted the new one.
+
+    {"questions":[
+      {"id":"Q-001","section":"blocking","text":"<question>","context":"<why this matters, 1-2 sentences>",
+       "options":[{"key":"A","label":"<option>","tradeoff":"<what it costs>"},
+                  {"key":"B","label":"<option>","tradeoff":"<what it costs>"}]}
+    ]}
+
+`section` is exactly `blocking` or `preference`; a new question raised here is `blocking`. At least two options per question. Do not add an "Other" option — free text is always accepted.
+
+Every one of these files is schema-validated when read. A malformed line fails the next stage rather than being skipped, so emit strict JSON: double quotes, no trailing commas, no comments, and one complete object per line in the `.jsonl` files.
+
+Write only `.sfo/SPEC.md`, `.sfo/CRITERIA.jsonl`, `.sfo/QUESTIONS.json`, and `.sfo/DECISIONS.jsonl`. Never write `.sfo/ANSWERS.json`.
