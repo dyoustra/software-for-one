@@ -10,5 +10,7 @@ describe("buildProgram", () => {
     expect(names).toContain("answer");
     expect(names).toContain("stage");
     expect(names).toContain("cost");
+    expect(names).toContain("criteria");
+    expect(names).toContain("decisions");
   });
 });

@@ -102,6 +102,24 @@ export function buildProgram(): Command {
       showCost(id);
     }));
 
+  program
+    .command("criteria")
+    .description("Show a project's acceptance criteria")
+    .argument("<id>", "project id")
+    .action(guarded(async (id: string) => {
+      const { showCriteria } = await import("./commands/criteria.js");
+      showCriteria(id);
+    }));
+
+  program
+    .command("decisions")
+    .description("Show the calls the pipeline made, highest blast radius first")
+    .argument("<id>", "project id")
+    .action(guarded(async (id: string) => {
+      const { showDecisions } = await import("./commands/decisions.js");
+      showDecisions(id);
+    }));
+
   return program;
 }
 
