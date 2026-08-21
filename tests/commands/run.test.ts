@@ -105,10 +105,14 @@ describe("guardRunnable and the prior-art verdict", () => {
     expect(() => guardRunnable("p", env)).not.toThrow();
   });
 
-  it("does not choke on a malformed PRIOR_ART.json", () => {
+  it("refuses to run on a malformed PRIOR_ART.json rather than ignoring it", () => {
+    // Deliberately the opposite of `sfo status`, which swallows so one bad
+    // artifact cannot break the whole listing. A gate fails closed: the file
+    // most likely to be garbled mid-write is the one saying "do not build
+    // this", and silently ceasing to gate is the worst available outcome.
     seed("awaiting_human");
     fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "PRIOR_ART.json"), "{ not json");
-    expect(() => guardRunnable("p", env)).not.toThrow();
+    expect(() => guardRunnable("p", env)).toThrow(/unreadable PRIOR_ART\.json/);
   });
 });
 
@@ -126,5 +130,44 @@ describe("detachedArgs", () => {
 
   it("does not pass --anyway when the human did not ask for it", () => {
     expect(detachedArgs("p")).not.toContain("--anyway");
+  });
+});
+
+describe("corrupt prior art fails closed", () => {
+  function seedParkedAtResearch() {
+    fs.mkdirSync(path.join(env.SFO_HOME, "p", ".sfo"), { recursive: true });
+    writeState(
+      {
+        id: "p",
+        title: "T",
+        currentStage: "research",
+        status: "awaiting_human",
+        attempts: {},
+        pid: null,
+        heartbeatAt: null,
+        createdAt: "2026-08-21T00:00:00.000Z",
+        updatedAt: "2026-08-21T00:00:00.000Z",
+      },
+      env,
+    );
+  }
+
+  it("refuses to run when the verdict cannot be read", () => {
+    // The most likely file to garble is the one that said "do not build this",
+    // so an unreadable verdict must block rather than silently stop gating.
+    seedParkedAtResearch();
+    fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "PRIOR_ART.json"), "{ truncated");
+    expect(() => guardRunnable("p", env)).toThrow(/unreadable PRIOR_ART\.json/);
+  });
+
+  it("still lets --anyway through a corrupt verdict", () => {
+    seedParkedAtResearch();
+    fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "PRIOR_ART.json"), "{ truncated");
+    expect(() => guardRunnable("p", env, { anyway: true })).not.toThrow();
+  });
+
+  it("is unaffected when there is no prior art at all", () => {
+    seedParkedAtResearch();
+    expect(() => guardRunnable("p", env)).not.toThrow();
   });
 });

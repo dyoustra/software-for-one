@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { advance } from "../core/orchestrator.js";
 import { ClaudeCodeRunner } from "../runner/claude-code.js";
 import { readState, isStale } from "../core/state.js";
-import { blockingPriorArt } from "../core/priorart.js";
+import { blockingPriorArt, readPriorArt } from "../core/priorart.js";
 import type { Env } from "../core/paths.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -63,6 +63,20 @@ export function guardRunnable(id: string, env?: Env, opts: GuardOptions = {}): v
   // straight past it — the orchestrator's gate only fires on the run that
   // produced the verdict — so the refusal has to happen here, and it has to
   // carry the recommendation. An override the user cannot see is not a choice.
+  // A gate fails closed. `blockingPriorArt` swallows a malformed file because
+  // `sfo status` must list every project without dying on one bad artifact —
+  // but here that would mean a garbled verdict silently stops gating, and the
+  // most likely thing to garble is the file that said "do not build this".
+  if (state.status === "awaiting_human" && state.currentStage === "research") {
+    try {
+      readPriorArt(id, env);
+    } catch (error) {
+      throw new Error(
+        `${id} has an unreadable PRIOR_ART.json (${error instanceof Error ? error.message : String(error)}) — re-run with \`sfo stage ${id} research\`, or \`sfo run ${id} --anyway\` to proceed without the verdict`,
+      );
+    }
+  }
+
   const art = blockingPriorArt(state, env);
   if (art) {
     const reason =
