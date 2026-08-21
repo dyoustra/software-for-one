@@ -7,6 +7,11 @@ export const TriageResultSchema = z.object({
   title: z.string(),
   reason: z.string(),
   counterOffer: z.string().nullable(),
+  // Required, not optional: an estimate the model may omit produces no
+  // estimate at all, which is indistinguishable from the feature not working.
+  estimateLowUsd: z.number().nonnegative(),
+  estimateHighUsd: z.number().nonnegative(),
+  estimateBasis: z.string(),
 });
 
 export type TriageResult = z.infer<typeof TriageResultSchema>;
@@ -32,7 +37,12 @@ Classify the idea:
 
 Never simply reject. For "out_of_scope", set counterOffer to the nearest thing this pipeline CAN build, phrased as a concrete alternative. Leave counterOffer null otherwise.
 
-Also produce a short title (under 6 words) suitable for a directory name.`;
+Also produce a short title (under 6 words) suitable for a directory name.
+
+Also estimate what the research + spec + clarify stages will cost, as a USD range.
+For calibration: a single-purpose CLI with a handful of searches ran $3-6 end to end;
+a broad idea needing extensive research could be several times that. Give the range
+you actually believe, and state the basis in one sentence.`;
 
 /**
  * Which route a triage call takes.

@@ -7,6 +7,7 @@ import { createProject, slugify, warnSlowTriagePath } from "../../src/commands/n
 import { readState } from "../../src/core/state.js";
 import { readArtifact } from "../../src/core/artifacts.js";
 import { readCostRecords } from "../../src/core/cost.js";
+import { readEstimate } from "../../src/core/estimate.js";
 
 let env: Record<string, string>;
 
@@ -24,12 +25,20 @@ const USAGE = {
   cacheReadInputTokens: 4,
 };
 
+/** Triage now returns a rough estimate alongside the verdict, on one call. */
+const ESTIMATE = {
+  estimateLowUsd: 3,
+  estimateHighUsd: 6,
+  estimateBasis: "Single-purpose CLI with a handful of searches.",
+};
+
 const triageOk = vi.fn().mockResolvedValue({
   result: {
     verdict: "ready",
     title: "Subway Tracker",
     reason: "clear",
     counterOffer: null,
+    ...ESTIMATE,
   },
   usage: USAGE,
   via: "cli",
@@ -121,6 +130,24 @@ describe("createProject", () => {
     expect(readArtifact(id, "TRIAGE.md", env)).toContain("ready");
   });
 
+  it("records the rough front-half estimate, before any of it is spent", async () => {
+    const id = await createProject("track the L train", triageOk, "aaa111", env);
+    const [front] = readEstimate(id, env);
+    expect(front.phase).toBe("front");
+    expect(front.lowUsd).toBe(3);
+    expect(front.highUsd).toBe(6);
+    expect(front.basis).toMatch(/CLI/);
+  });
+
+  it("commits the estimate with the capture snapshot", async () => {
+    const id = await createProject("track the L train", triageOk, "aaa111", env);
+    const tracked = execFileSync("git", ["show", "--name-only", "--format=", "HEAD"], {
+      cwd: path.join(env.SFO_HOME, id),
+      encoding: "utf8",
+    });
+    expect(tracked).toContain(".sfo/ESTIMATE.jsonl");
+  });
+
   it("refuses to clobber an existing project on id collision", async () => {
     await createProject("first idea", triageOk, "aaa111", env);
     await expect(createProject("second idea", triageOk, "aaa111", env)).rejects.toThrow(
@@ -139,7 +166,7 @@ describe("createProject", () => {
 
   it("records the route triage actually took", async () => {
     const t = vi.fn().mockResolvedValue({
-      result: { verdict: "ready", title: "Fast Path", reason: "r", counterOffer: null },
+      result: { verdict: "ready", title: "Fast Path", reason: "r", counterOffer: null, ...ESTIMATE },
       usage: USAGE,
       via: "sdk",
     });
@@ -149,7 +176,7 @@ describe("createProject", () => {
 
   it("still creates the project when triage reports no usage", async () => {
     const t = vi.fn().mockResolvedValue({
-      result: { verdict: "ready", title: "No Usage", reason: "r", counterOffer: null },
+      result: { verdict: "ready", title: "No Usage", reason: "r", counterOffer: null, ...ESTIMATE },
     });
     const id = await createProject("x", t, "ccc333", env);
     expect(readCostRecords(id, env)).toEqual([]);
@@ -162,6 +189,7 @@ describe("createProject", () => {
         title: "Train An LLM",
         reason: "not buildable",
         counterOffer: "an inference playground",
+        ...ESTIMATE,
       },
     });
     const id = await createProject("make an llm", t, "bbb222", env);

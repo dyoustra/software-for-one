@@ -39,6 +39,12 @@ export function buildProgram(): Command {
         randomBytes(3).toString("hex"),
       );
       console.log(`captured: ${id}`);
+
+      // Printed before anything is spent: the front half runs on `sfo run`,
+      // and this is the last cheap moment to walk away.
+      const { readEstimate, formatEstimate } = await import("./core/estimate.js");
+      const front = readEstimate(id).find((e) => e.phase === "front");
+      if (front) console.log(formatEstimate(front));
     }));
 
   program

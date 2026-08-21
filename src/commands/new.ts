@@ -5,6 +5,7 @@ import { projectDir, sfoDir, type Env } from "../core/paths.js";
 import { writeState } from "../core/state.js";
 import { writeArtifact, appendArtifact } from "../core/artifacts.js";
 import { recordCost } from "../core/cost.js";
+import { writeEstimate } from "../core/estimate.js";
 import { commitStage } from "../core/repo.js";
 import type { TriageOutcome, TriagePath } from "../stages/triage.js";
 
@@ -99,6 +100,21 @@ export async function createProject(
       heartbeatAt: null,
       createdAt: now,
       updatedAt: now,
+    },
+    env,
+  );
+
+  // Rides the triage call that already happened rather than paying for a
+  // second one. Rough by construction: it knows only the idea's shape, and
+  // exists so the user can bail before the front half's real spend.
+  writeEstimate(
+    id,
+    {
+      phase: "front",
+      lowUsd: verdict.estimateLowUsd,
+      highUsd: verdict.estimateHighUsd,
+      basis: verdict.estimateBasis,
+      at: now,
     },
     env,
   );

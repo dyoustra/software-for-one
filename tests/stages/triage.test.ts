@@ -7,11 +7,19 @@ import {
   triageOutputSchema,
 } from "../../src/stages/triage.js";
 
+/** The estimate fields are required, so every fake payload carries them. */
+const ESTIMATE = {
+  estimateLowUsd: 3,
+  estimateHighUsd: 6,
+  estimateBasis: "Single-purpose CLI with a handful of searches.",
+};
+
 const READY = {
   verdict: "ready",
   title: "Subway Tracker",
   reason: "Scope and platform are clear.",
   counterOffer: null,
+  ...ESTIMATE,
 };
 
 const USAGE = {
@@ -50,6 +58,14 @@ describe("triageOutputSchema", () => {
 
   it("forbids extra properties", () => {
     expect((triageOutputSchema() as any).additionalProperties).toBe(false);
+  });
+
+  it("requires the estimate fields, so the model cannot quietly skip them", () => {
+    const schema = triageOutputSchema() as any;
+    expect(schema.required).toEqual(
+      expect.arrayContaining(["estimateLowUsd", "estimateHighUsd", "estimateBasis"]),
+    );
+    expect(schema.properties.estimateLowUsd.type).toBe("number");
   });
 });
 
@@ -186,6 +202,7 @@ describe("triage routing", () => {
       title: "Train An LLM",
       reason: "Training a foundation model is not buildable here.",
       counterOffer: "A local inference playground with a chat UI.",
+      ...ESTIMATE,
     };
     const { result } = await triage("make an LLM", { path: "sdk", sdk: fakeSdk(payload) });
     expect(result.verdict).toBe("out_of_scope");
@@ -193,12 +210,12 @@ describe("triage routing", () => {
   });
 
   it("rejects a verdict outside the enum on the sdk path", async () => {
-    const bad = { verdict: "maybe", title: "t", reason: "r", counterOffer: null };
+    const bad = { verdict: "maybe", title: "t", reason: "r", counterOffer: null, ...ESTIMATE };
     await expect(triage("x", { path: "sdk", sdk: fakeSdk(bad) })).rejects.toThrow();
   });
 
   it("rejects a verdict outside the enum on the cli path", async () => {
-    const bad = { verdict: "maybe", title: "t", reason: "r", counterOffer: null };
+    const bad = { verdict: "maybe", title: "t", reason: "r", counterOffer: null, ...ESTIMATE };
     await expect(triage("x", { path: "cli", cli: fakeCli(bad) })).rejects.toThrow();
   });
 
@@ -207,8 +224,23 @@ describe("triage routing", () => {
     await expect(triage("x", { path: "cli", cli })).rejects.toThrow(/exited with code 1/);
   });
 
+  it("carries a cost estimate back from the same call, not a second one", async () => {
+    const sdk = fakeSdk(READY);
+    const { result } = await triage("track the L train", { path: "sdk", sdk });
+
+    expect(sdk).toHaveBeenCalledTimes(1);
+    expect(result.estimateLowUsd).toBe(3);
+    expect(result.estimateHighUsd).toBe(6);
+    expect(result.estimateBasis).toMatch(/CLI/);
+  });
+
+  it("rejects a payload with no estimate, rather than silently producing none", async () => {
+    const noEstimate = { verdict: "ready", title: "t", reason: "r", counterOffer: null };
+    await expect(triage("x", { path: "sdk", sdk: fakeSdk(noEstimate) })).rejects.toThrow();
+  });
+
   it("accepts only the three known verdicts", () => {
-    const bad = { verdict: "maybe", title: "t", reason: "r", counterOffer: null };
+    const bad = { verdict: "maybe", title: "t", reason: "r", counterOffer: null, ...ESTIMATE };
     expect(TriageResultSchema.safeParse(bad).success).toBe(false);
   });
 });
