@@ -6,7 +6,7 @@
     "sfo": "./dist/cli.js"
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-assets.mjs",
     "test": "vitest run",
     "sfo": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit -p tsconfig.test.json"

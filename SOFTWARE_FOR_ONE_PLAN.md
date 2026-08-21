@@ -60,7 +60,7 @@ npm install -D typescript vitest @types/node tsx
   "type": "module",
   "bin": { "sfo": "./dist/cli.js" },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/copy-assets.mjs",
     "test": "vitest run",
     "sfo": "tsx src/cli.ts"
   }
@@ -1066,7 +1066,40 @@ export function loadPrompt(stage: string): string {
 Run: `npx vitest run tests/stages/prompts.test.ts`
 Expected: PASS — 2 tests
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 6: Copy prompts into the build output**
+
+`tsc` emits only `.ts` files, so the prompt `.md` files never reach `dist/` and the built CLI throws `no prompt for stage:` at runtime. The vitest suite does not catch this because it imports from `src/`.
+
+`scripts/copy-assets.mjs`:
+
+```javascript
+import fs from "node:fs";
+import path from "node:path";
+
+const SRC = "src/stages/prompts";
+const DEST = "dist/stages/prompts";
+const REQUIRED = ["research.md", "spec.md", "clarify.md"];
+
+fs.cpSync(SRC, DEST, { recursive: true });
+
+const missing = REQUIRED.filter((f) => !fs.existsSync(path.join(DEST, f)));
+if (missing.length > 0) {
+  console.error(`copy-assets: missing from ${DEST}: ${missing.join(", ")}`);
+  process.exit(1);
+}
+console.log(`copy-assets: ${REQUIRED.length} prompts -> ${DEST}`);
+```
+
+Wire it into the build script: `"build": "tsc && node scripts/copy-assets.mjs"`.
+
+The assertion after the copy is the point — a copy step that silently no-ops reintroduces the same bug. Verify end to end:
+
+```bash
+rm -rf dist && npm run build
+node -e "import('./dist/stages/prompts.js').then(m => console.log(m.loadPrompt('spec').length))"
+```
+
+- [ ] **Step 7: Commit**
 
 ```bash
 git add -A && git commit -m "feat: stage prompts as versioned files"
