@@ -4,20 +4,37 @@ import os from "node:os";
 import path from "node:path";
 import { advance } from "../../src/core/orchestrator.js";
 import { writeState, readState, type ProjectState } from "../../src/core/state.js";
-import type { Runner, RunStageInput, StageResult } from "../../src/runner/types.js";
+import { readCostRecords } from "../../src/core/cost.js";
+import type { Runner, RunStageInput, StageResult, StageUsage } from "../../src/runner/types.js";
 
 let env: Record<string, string>;
+
+const USAGE: StageUsage = {
+  costUsd: 0.05,
+  durationMs: 1000,
+  numTurns: 1,
+  inputTokens: 2,
+  outputTokens: 4,
+  cacheCreationInputTokens: 10,
+  cacheReadInputTokens: 20,
+};
 
 class FakeRunner implements Runner {
   calls: RunStageInput[] = [];
   constructor(
     private readonly ok = true,
     private readonly delayMs = 0,
+    private readonly usage: StageUsage | undefined = undefined,
   ) {}
   async runStage(input: RunStageInput): Promise<StageResult> {
     this.calls.push(input);
     if (this.delayMs > 0) await new Promise((r) => setTimeout(r, this.delayMs));
-    return { ok: this.ok, exitCode: this.ok ? 0 : 1, logPath: input.logPath };
+    return {
+      ok: this.ok,
+      exitCode: this.ok ? 0 : 1,
+      logPath: input.logPath,
+      usage: this.usage,
+    };
   }
 }
 
@@ -148,6 +165,31 @@ describe("advance", () => {
 
     await expect(advance("p", new FakeRunner(), env)).rejects.toThrow(/failed at stage "clarify"/);
     expect(readState("p", env).status).toBe("failed");
+  });
+
+  it("records cost for a stage that failed, not only for ones that succeeded", async () => {
+    // A failed stage still burned tokens. Recording only the happy path would
+    // under-report the bill by exactly the amount of the wasted work.
+    seed("capture");
+    await advance("p", new FakeRunner(false, 0, USAGE), env);
+
+    const records = readCostRecords("p", env);
+    expect(records).toHaveLength(1);
+    expect(records[0].stage).toBe("research");
+    expect(records[0].ok).toBe(false);
+    expect(records[0].usage.costUsd).toBe(0.05);
+  });
+
+  it("records one cost line per stage it ran", async () => {
+    seed("capture");
+    await advance("p", new FakeRunner(true, 0, USAGE), env);
+    expect(readCostRecords("p", env).map((r) => r.stage)).toEqual(["research", "spec"]);
+  });
+
+  it("writes no cost file when the runner reports no usage", async () => {
+    seed("capture");
+    await advance("p", new FakeRunner(), env);
+    expect(readCostRecords("p", env)).toEqual([]);
   });
 
   it("refuses to advance a project that is already done", async () => {

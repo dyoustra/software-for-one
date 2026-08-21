@@ -1,6 +1,7 @@
 import { readState, writeState } from "./state.js";
 import { nextStage, blocksOnHuman } from "./stages.js";
 import { artifactExists } from "./artifacts.js";
+import { recordCost } from "./cost.js";
 import { loadPrompt } from "../stages/prompts.js";
 import { projectDir, logPath, type Env } from "./paths.js";
 import type { Runner } from "../runner/types.js";
@@ -140,6 +141,10 @@ export async function advance(
     } finally {
       stopHeartbeat();
     }
+
+    // Recorded before the ok/failed branch: a stage that failed still spent
+    // money, and billing only the happy path under-reports every retry.
+    recordCost(id, upcoming, result.ok, result.usage, env);
 
     // The heartbeat rewrote state under us, so re-read before mutating rather
     // than writing back a stale in-memory copy.

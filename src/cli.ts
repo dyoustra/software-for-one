@@ -90,6 +90,15 @@ export function buildProgram(): Command {
       await runSingleStage(id, stage);
     }));
 
+  program
+    .command("cost")
+    .description("Show what has been spent")
+    .argument("[id]", "project id; omit for every project")
+    .action(guarded(async (id?: string) => {
+      const { showCost } = await import("./commands/cost.js");
+      showCost(id);
+    }));
+
   return program;
 }
 

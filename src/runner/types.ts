@@ -5,10 +5,23 @@ export interface RunStageInput {
   model?: string;
 }
 
+/** What one `claude -p` invocation cost, as reported by its own result event. */
+export interface StageUsage {
+  costUsd: number;
+  durationMs: number;
+  numTurns: number;
+  inputTokens: number;
+  outputTokens: number;
+  cacheCreationInputTokens: number;
+  cacheReadInputTokens: number;
+}
+
 export interface StageResult {
   ok: boolean;
   exitCode: number;
   logPath: string;
+  /** Absent when the process died before emitting a result event. */
+  usage?: StageUsage;
 }
 
 export interface Runner {

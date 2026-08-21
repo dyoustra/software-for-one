@@ -4,14 +4,28 @@ import os from "node:os";
 import path from "node:path";
 import { runSingleStage } from "../../src/commands/stage.js";
 import { writeState, readState, type ProjectState } from "../../src/core/state.js";
-import type { Runner, RunStageInput, StageResult } from "../../src/runner/types.js";
+import { readCostRecords } from "../../src/core/cost.js";
+import type { Runner, RunStageInput, StageResult, StageUsage } from "../../src/runner/types.js";
 
 let env: Record<string, string>;
 
+const USAGE: StageUsage = {
+  costUsd: 0.07,
+  durationMs: 1000,
+  numTurns: 1,
+  inputTokens: 2,
+  outputTokens: 4,
+  cacheCreationInputTokens: 10,
+  cacheReadInputTokens: 20,
+};
+
 class FakeRunner implements Runner {
-  constructor(private readonly ok = true) {}
+  constructor(
+    private readonly ok = true,
+    private readonly usage: StageUsage | undefined = undefined,
+  ) {}
   async runStage(input: RunStageInput): Promise<StageResult> {
-    return { ok: this.ok, exitCode: this.ok ? 0 : 1, logPath: input.logPath };
+    return { ok: this.ok, exitCode: this.ok ? 0 : 1, logPath: input.logPath, usage: this.usage };
   }
 }
 
@@ -62,5 +76,15 @@ describe("runSingleStage", () => {
     const after = readState("p", env);
     expect(after.status).toBe("awaiting_human");
     expect(after.currentStage).toBe("clarify");
+  });
+
+  it("records the cost of a re-run, including one that fails again", async () => {
+    seed("failed");
+    await runSingleStage("p", "research", env, new FakeRunner(false, USAGE));
+    await runSingleStage("p", "research", env, new FakeRunner(true, USAGE));
+
+    const records = readCostRecords("p", env);
+    expect(records.map((r) => r.ok)).toEqual([false, true]);
+    expect(records).toHaveLength(2);
   });
 });

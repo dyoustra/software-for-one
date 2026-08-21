@@ -2,6 +2,7 @@ import { ClaudeCodeRunner } from "../runner/claude-code.js";
 import { loadPrompt } from "../stages/prompts.js";
 import { projectDir, logPath, type Env } from "../core/paths.js";
 import { readState, writeState } from "../core/state.js";
+import { recordCost } from "../core/cost.js";
 import type { Runner } from "../runner/types.js";
 
 /**
@@ -24,6 +25,9 @@ export async function runSingleStage(
     prompt: loadPrompt(stage),
     logPath: logPath(id, stage, env),
   });
+
+  // Re-runs are appended, not replaced — the bill counts every attempt.
+  recordCost(id, stage, result.ok, result.usage, env);
 
   if (result.ok && state.status === "failed") {
     // `advance` refuses failed projects and its error tells the user to come
