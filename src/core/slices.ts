@@ -41,8 +41,17 @@ function validate(slices: Slice[]): void {
   for (const s of slices) walk(s.id, []);
 }
 
+/**
+ * Validated on read, which is the path that actually matters: SLICES.jsonl is
+ * written by the `plan` stage as a file, so `writeSlices` never runs in
+ * production and its checks would be dead code. An unvalidated cyclic file
+ * makes `nextRunnable` return null with slices still unbuilt — which the build
+ * loop reads as "finished" rather than "malformed plan".
+ */
 export function readSlices(id: string, env?: Env): Slice[] {
-  return readRecords(artifactPath(id, SLICES_FILE, env), SliceSchema);
+  const slices = readRecords(artifactPath(id, SLICES_FILE, env), SliceSchema);
+  validate(slices);
+  return slices;
 }
 
 export function writeSlices(id: string, slices: Slice[], env?: Env): void {
@@ -80,4 +89,20 @@ export function nextRunnable(
     if (s.prerequisites.every((p) => passed.has(p))) return s;
   }
   return null;
+}
+
+/** Slice criterion ids that match no criterion — a slice building nothing real. */
+export function unknownCriterionIds(slices: Slice[], criterionIds: string[]): string[] {
+  const known = new Set(criterionIds);
+  return [...new Set(slices.flatMap((s) => s.criterionIds).filter((c) => !known.has(c)))].sort();
+}
+
+/**
+ * Criteria no slice claims. These are the dangerous ones: a criterion missing
+ * from every slice is never built, never tested, and never reported — it simply
+ * drops out of the contract with nothing raising an objection.
+ */
+export function uncoveredCriterionIds(slices: Slice[], criterionIds: string[]): string[] {
+  const covered = new Set(slices.flatMap((s) => s.criterionIds));
+  return criterionIds.filter((c) => !covered.has(c));
 }
