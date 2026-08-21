@@ -14,6 +14,18 @@ export function openQuestions(id: string, env?: Env): Question[] {
   const questions = readQuestions(id, env);
   if (!questions) return [];
 
-  const answered = new Set((readAnswers(id, env)?.answers ?? []).map((a) => a.questionId));
-  return questions.questions.filter((q) => !answered.has(q.id));
+  // Keyed by id, but verified by text. An answer whose recorded text no longer
+  // matches the question bearing that id means the id was reused for something
+  // else — so the question counts as unanswered and gets asked again, rather
+  // than silently inheriting an answer written against different wording.
+  const answered = new Map(
+    (readAnswers(id, env)?.answers ?? []).map((a) => [a.questionId, a.questionText]),
+  );
+
+  return questions.questions.filter((q) => {
+    if (!answered.has(q.id)) return true;
+    const answeredText = answered.get(q.id);
+    // Answers written before questionText existed carry no text to verify.
+    return answeredText !== undefined && answeredText !== q.text;
+  });
 }

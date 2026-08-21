@@ -92,10 +92,12 @@ describe("promptForAnswers", () => {
     });
 
     expect(asked).toHaveLength(1);
+    // questionText is recorded so a stage that reuses an id cannot inherit
+    // an answer written against different wording.
     expect(readAnswers("p", env)?.answers).toEqual([
-      { questionId: "Q-001", answer: "first pass" },
-      { questionId: "Q-002", answer: "first pass" },
-      { questionId: "Q-003", answer: "second pass" },
+      { questionId: "Q-001", answer: "first pass", questionText: "question Q-001" },
+      { questionId: "Q-002", answer: "first pass", questionText: "question Q-002" },
+      { questionId: "Q-003", answer: "second pass", questionText: "question Q-003" },
     ]);
   });
 });

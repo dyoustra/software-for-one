@@ -38,14 +38,19 @@ export async function promptForAnswers(id: string, env?: Env, ask?: Ask): Promis
   }
 
   const reader = ask ? { ask, close: () => {} } : stdinReader();
-  const answers: { questionId: string; answer: string }[] = [];
+  const answers: { questionId: string; answer: string; questionText: string }[] = [];
 
   try {
     for (const q of open) {
       console.log(`\n[${q.section}] ${q.text}`);
       if (q.context) console.log(`  ${q.context}`);
       for (const o of q.options) console.log(`  ${o.key} — ${o.label} — ${o.tradeoff}`);
-      answers.push({ questionId: q.id, answer: await reader.ask("> ") });
+      answers.push({
+        questionId: q.id,
+        answer: await reader.ask("> "),
+        // Recorded so a later stage reusing this id cannot inherit the answer.
+        questionText: q.text,
+      });
     }
   } finally {
     reader.close();

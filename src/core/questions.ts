@@ -26,7 +26,20 @@ export const QuestionsSchema = z.object({ questions: z.array(QuestionSchema) });
  * type here would throw that away and leave the clarify stage with "A".
  */
 export const AnswersSchema = z.object({
-  answers: z.array(z.object({ questionId: z.string().min(1), answer: z.string() })),
+  answers: z.array(
+    z.object({
+      questionId: z.string().min(1),
+      answer: z.string(),
+      /**
+       * The question text as asked. Optional so files written before this
+       * existed still parse. It exists because matching on id alone is unsafe:
+       * if a stage regenerates QUESTIONS.json and restarts numbering, a new
+       * Q-001 inherits the old Q-001's answer, is treated as answered, and is
+       * never asked — silently, and against text the human never read.
+       */
+      questionText: z.string().optional(),
+    }),
+  ),
 });
 
 export type Question = z.infer<typeof QuestionSchema>;

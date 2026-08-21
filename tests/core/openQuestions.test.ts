@@ -56,3 +56,38 @@ describe("openQuestions", () => {
     expect(openQuestions("p", env)).toEqual([]);
   });
 });
+
+describe("question id reuse", () => {
+  it("re-asks when an id was reused for a different question", () => {
+    // A stage that regenerates QUESTIONS.json and restarts numbering would
+    // otherwise hand the new Q-001 the old Q-001's answer, silently, against
+    // wording the human never read.
+    writeQuestions("p", { questions: [q("Q-001")] }, env);
+    writeAnswers(
+      "p",
+      { answers: [{ questionId: "Q-001", answer: "A", questionText: "question Q-001" }] },
+      env,
+    );
+
+    const renumbered = { ...q("Q-001"), text: "an entirely different question" };
+    writeQuestions("p", { questions: [renumbered] }, env);
+
+    expect(openQuestions("p", env).map((x) => x.id)).toEqual(["Q-001"]);
+  });
+
+  it("stays answered when the id and text both match", () => {
+    writeQuestions("p", { questions: [q("Q-001")] }, env);
+    writeAnswers(
+      "p",
+      { answers: [{ questionId: "Q-001", answer: "A", questionText: "question Q-001" }] },
+      env,
+    );
+    expect(openQuestions("p", env)).toEqual([]);
+  });
+
+  it("trusts the id for answers written before questionText existed", () => {
+    writeQuestions("p", { questions: [q("Q-001")] }, env);
+    writeAnswers("p", { answers: [{ questionId: "Q-001", answer: "A" }] }, env);
+    expect(openQuestions("p", env)).toEqual([]);
+  });
+});
