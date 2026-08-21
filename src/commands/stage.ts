@@ -3,6 +3,7 @@ import { loadPrompt } from "../stages/prompts.js";
 import { projectDir, logPath, type Env } from "../core/paths.js";
 import { readState, writeState } from "../core/state.js";
 import { recordCost } from "../core/cost.js";
+import { commitStage } from "../core/repo.js";
 import type { Runner } from "../runner/types.js";
 
 /**
@@ -43,9 +44,14 @@ export async function runSingleStage(
       },
       env,
     );
+    commitStage(id, stage, env);
     console.log(`${stage} ok — ${id} is no longer failed, run \`sfo run ${id}\` to continue`);
     return;
   }
+
+  // The whole point of `sfo stage`: without a commit, a re-run silently
+  // overwrites the artifacts it was supposed to be compared against.
+  if (result.ok) commitStage(id, stage, env);
 
   console.log(result.ok ? `${stage} ok` : `${stage} failed (exit ${result.exitCode})`);
 }

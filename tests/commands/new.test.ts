@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { createProject, slugify, warnSlowTriagePath } from "../../src/commands/new.js";
 import { readState } from "../../src/core/state.js";
 import { readArtifact } from "../../src/core/artifacts.js";
@@ -85,6 +86,34 @@ describe("createProject", () => {
   it("initialises a git repo", async () => {
     const id = await createProject("track the L train", triageOk, "aaa111", env);
     expect(fs.existsSync(path.join(env.SFO_HOME, id, ".git"))).toBe(true);
+  });
+
+  it("makes an initial commit, so the repo has a history to diff against", async () => {
+    const id = await createProject("track the L train", triageOk, "aaa111", env);
+    const dir = path.join(env.SFO_HOME, id);
+
+    const tracked = execFileSync("git", ["show", "--name-only", "--format=", "HEAD"], {
+      cwd: dir,
+      encoding: "utf8",
+    })
+      .split("\n")
+      .filter(Boolean);
+
+    expect(tracked).toContain(".gitignore");
+    expect(tracked).toContain(".sfo/IDEA.md");
+    expect(tracked).toContain(".sfo/TRIAGE.md");
+    expect(tracked).toContain(".sfo/state.json");
+  });
+
+  it("ignores stage logs, which are large and fully regenerable", async () => {
+    const id = await createProject("track the L train", triageOk, "aaa111", env);
+    const dir = path.join(env.SFO_HOME, id);
+    fs.mkdirSync(path.join(dir, ".sfo", "logs"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".sfo", "logs", "research.log"), "x".repeat(1000));
+
+    const status = execFileSync("git", ["status", "--porcelain"], { cwd: dir, encoding: "utf8" });
+    expect(status).not.toContain("logs");
+    expect(status.trim()).toBe("");
   });
 
   it("stores the triage verdict as an artifact", async () => {

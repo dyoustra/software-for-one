@@ -1,9 +1,11 @@
 import fs from "node:fs";
+import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { projectDir, sfoDir, type Env } from "../core/paths.js";
 import { writeState } from "../core/state.js";
 import { writeArtifact, appendArtifact } from "../core/artifacts.js";
 import { recordCost } from "../core/cost.js";
+import { commitStage } from "../core/repo.js";
 import type { TriageOutcome, TriagePath } from "../stages/triage.js";
 
 export type TriageFn = (idea: string) => Promise<TriageOutcome>;
@@ -65,6 +67,10 @@ export async function createProject(
   }
   fs.mkdirSync(sfoDir(id, env), { recursive: true });
   execFileSync("git", ["init", "-q"], { cwd: dir });
+  // Stage logs are hundreds of KB of stream-json and fully regenerable.
+  // Committing them would bury the artifact diffs that are the point of
+  // keeping a repo at all.
+  fs.writeFileSync(path.join(dir, ".gitignore"), ".sfo/logs/\n");
 
   appendArtifact(id, "IDEA.md", idea, env);
   writeArtifact(
@@ -101,6 +107,10 @@ export async function createProject(
   // title it produced. Triage spends real money and is otherwise invisible
   // to `sfo cost`.
   recordCost(id, "triage", true, usage, env, via);
+
+  // The repo's initial commit. Placed after recordCost so the capture snapshot
+  // includes what triage spent, not just what it decided.
+  commitStage(id, "capture", env);
 
   return id;
 }

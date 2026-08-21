@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { advance } from "../../src/core/orchestrator.js";
 import { writeState, readState, type ProjectState } from "../../src/core/state.js";
 import { readCostRecords } from "../../src/core/cost.js";
@@ -51,8 +52,23 @@ function seed(stage: string): ProjectState {
     updatedAt: "2026-08-21T00:00:00.000Z",
   };
   fs.mkdirSync(path.join(env.SFO_HOME, "p", ".sfo"), { recursive: true });
+  execFileSync("git", ["init", "-q"], { cwd: path.join(env.SFO_HOME, "p") });
   writeState(s, env);
   return s;
+}
+
+/** Commit subjects, newest last. Empty on an unborn branch. */
+function subjects(): string[] {
+  try {
+    const out = execFileSync("git", ["log", "--reverse", "--format=%s"], {
+      cwd: path.join(env.SFO_HOME, "p"),
+      encoding: "utf8",
+      stdio: "pipe",
+    });
+    return out.split("\n").filter(Boolean);
+  } catch {
+    return []; // unborn branch: no commits yet
+  }
 }
 
 beforeEach(() => {
@@ -190,6 +206,23 @@ describe("advance", () => {
     seed("capture");
     await advance("p", new FakeRunner(), env);
     expect(readCostRecords("p", env)).toEqual([]);
+  });
+
+  it("commits after every stage it completes, so each one is diffable", async () => {
+    seed("capture");
+    await advance("p", new FakeRunner(), env);
+
+    expect(subjects()).toEqual([
+      expect.stringContaining("stage(research)"),
+      expect.stringContaining("stage(spec)"),
+    ]);
+  });
+
+  it("does not commit a failed stage, so the retry diffs against the last good state", async () => {
+    seed("capture");
+    await advance("p", new FakeRunner(false), env);
+
+    expect(subjects()).toEqual([]);
   });
 
   it("refuses to advance a project that is already done", async () => {

@@ -2,6 +2,7 @@ import { readState, writeState } from "./state.js";
 import { nextStage, blocksOnHuman } from "./stages.js";
 import { artifactExists } from "./artifacts.js";
 import { recordCost } from "./cost.js";
+import { commitStage } from "./repo.js";
 import { loadPrompt } from "../stages/prompts.js";
 import { projectDir, logPath, type Env } from "./paths.js";
 import type { Runner } from "../runner/types.js";
@@ -161,5 +162,9 @@ export async function advance(
       writeState(state, env);
       return;
     }
+
+    // Only on success. A failed stage's partial output stays uncommitted so the
+    // retry diffs against the last state that was actually good.
+    commitStage(id, upcoming, env);
   }
 }
