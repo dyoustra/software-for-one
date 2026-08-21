@@ -52,7 +52,7 @@ The distinction is mechanical and needs no model judgment:
 - A test that **fails** means the code is missing. That is the expected, correct state before the build runs.
 - A test that **errors** — an import that does not resolve, a symbol nothing defines, a syntax error — is structurally broken. The test itself is wrong.
 
-`test-repair` runs the suite against a bare skeleton and fixes only the errors. After it passes, **tests are locked**.
+`test-repair` is **one pass**: run against a bare skeleton, fix everything that errors, re-run, confirm zero errors remain. If any do, **fail the stage loudly** — something is wrong that repair cannot reach (a missing dependency, an incoherent criterion) and a human should see it. It does not iterate; iterating invites oscillation, fixing one import while breaking another. After it passes, **tests are locked**.
 
 Locked means enforced, not requested. `verify` hashes every test file after `test-repair` and re-checks the hashes on each run; a changed test file fails the gate outright, regardless of whether the suite passes. Today's session showed prompt instructions get followed unevenly under pressure, and "do not weaken the tests" is exactly the instruction an agent under pressure reinterprets. The gate cannot be a request.
 
@@ -60,7 +60,11 @@ This is why Phase 2 ships **no test-change adjudicator**. The spec designed one 
 
 ## 5. The build is sliced by the pipeline, not by the agent
 
-`plan` cuts the criteria into coherent groups (enumeration, naming, collisions, journal). `build` runs once per group; `verify` runs after each; **each passing slice commits**.
+**`plan` refines the spec's grouping rather than inventing one.** The spec stage already clusters criteria into coherent sections as a side effect of organising them — the first real run produced nine (`Enumeration`, `Name generation`, `Collision handling`, `Dry run and apply`, `Journal and undo`, `Abstention`, `Failure modes`, `Metadata`, `Sampling`) while holding the research and the whole design in context, which is more than `plan` will ever have. `plan` merges groups too small to justify a build invocation, splits ones that sprawl, and declares prerequisites. The spec's groups are organised for human readability rather than build tractability, so they are a strong default, not the final answer.
+
+`build` runs once per slice; `verify` runs after each; **each passing slice commits**.
+
+**Slices declare prerequisites; a failed slice skips its dependents.** Not a full dependency graph — parallelism is moot with one build agent, and the block-delivery-on-dependency case went away with partial delivery. What remains is cost: attempting `journal` after `collisions` failed burns a slice to fail again. Skipping also makes the summary honest — "collisions failed; journal skipped because it depends on collisions" rather than two apparently independent failures.
 
 The argument is checkpointing, and it is empirical rather than theoretical: the first real run lost a 336-second, $1.25, 24-turn research stage to a dropped VPN and wrote zero artifacts. A crash in a sliced build costs one slice.
 
@@ -190,7 +194,6 @@ B depends on A: `plan` slices `CRITERIA.jsonl`, and re-running Phase 1 to regene
 
 ## 15. Open questions
 
-- How large should a slice be? Too small multiplies fixed per-invocation cost; too large recreates the untractable-starting-point problem.
-- Does `test-repair` need its own retry bound, or is one pass enough?
+- How large should a slice be? Too small multiplies fixed per-invocation cost; too large recreates the untractable-starting-point problem. `plan` refining the spec's grouping gives a starting point, but the right size is empirical — the first build run is the evidence.
 - Whether `review` earns its cost once tests are written blind — §13 makes this measurable rather than assumed.
 - Whether 43 criteria is the right density, or whether the spec prompt needs a "criteria that would catch a real defect" nudge. Only answerable by running a build against them.
