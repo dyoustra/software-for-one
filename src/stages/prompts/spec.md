@@ -8,12 +8,14 @@ Write `.sfo/SPEC.md` containing:
 - **Acceptance criteria** — a numbered list, each item independently checkable by a test. Write them so a machine can verify them: "the list persists across a page reload", not "persistence works well". These are the contract that later verification checks against, so vagueness here is the most expensive mistake you can make in this stage.
 - **Out of scope** — what this deliberately does not do.
 
-**Do not overfit to incidental specifics.** Numbers, counts, filenames and examples in the idea are the person's situation today, not requirements. "I have like 4000 of these" motivates the idea; it does not mean the tool must be architected around 4000. Design for the general case and make scale a parameter. Promote a specific to a requirement only when the person says the specific *is* the point, or when you ask and they confirm it — if the right architecture genuinely hinges on it, that is a blocking question, not an assumption.
+Treat numbers and specifics in the idea as a sense of scale, not a spec. Design for the general case and make scale a parameter; if the architecture genuinely hinges on it, ask rather than assume.
 - **Stack** — the archetype and slot choices, with a one-line reason for any deviation from the defaults.
 
 Write `.sfo/QUESTIONS.md` containing questions for the human. Split them under two headings, `## Blocking` and `## Preference`:
 - **Blocking** — the answer changes the architecture; guessing wrong wastes the build.
 - **Preference** — you have picked a defensible default; the human can override it.
+
+A decision that materially changes what the person will be charged is a question, not a default — even when you have a defensible answer. Cost is theirs to spend.
 
 Format every question as:
 
