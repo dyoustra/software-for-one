@@ -22,8 +22,38 @@ export function buildProgram(): Command {
       console.log(`captured: ${id}`);
     });
 
-  program.command("run").description("Advance a project");
-  program.command("status").description("Show all projects");
+  program
+    .command("run")
+    .description("Advance a project until done or blocked")
+    .argument("<id>", "project id")
+    .option("--attach", "run in this process and stream progress")
+    .action(async (id: string, opts: { attach?: boolean }) => {
+      const { runAttached, runDetached, guardAlreadyRunning } = await import("./commands/run.js");
+      guardAlreadyRunning(id);
+      if (opts.attach) {
+        await runAttached(id);
+      } else {
+        console.log(`started (pid ${runDetached(id)})`);
+      }
+    });
+
+  program
+    .command("status")
+    .description("Show all projects")
+    .action(async () => {
+      const { listProjects, formatStatus } = await import("./commands/status.js");
+      console.log(formatStatus(listProjects()));
+    });
+
+  program
+    .command("logs")
+    .description("Show the current stage's log")
+    .argument("<id>", "project id")
+    .option("-f, --follow", "tail the log")
+    .action(async (id: string, opts: { follow?: boolean }) => {
+      const { showLogs } = await import("./commands/logs.js");
+      showLogs(id, opts.follow ?? false);
+    });
 
   return program;
 }
