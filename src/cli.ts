@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { randomBytes } from "node:crypto";
-import { createProject } from "./commands/new.js";
-import { triage } from "./stages/triage.js";
+import { createProject, warnSlowTriagePath } from "./commands/new.js";
+import { triage, selectTriagePath } from "./stages/triage.js";
 
 /**
  * Commander does not catch throws from async actions, so without this every
@@ -28,7 +28,16 @@ export function buildProgram(): Command {
     .description("Capture an idea and start a run")
     .argument("<idea>", "the idea, in your own words")
     .action(guarded(async (idea: string) => {
-      const id = await createProject(idea, triage, randomBytes(3).toString("hex"));
+      // Selected here, and warned about here, so the message lands before the
+      // call rather than after ten seconds of unexplained silence.
+      const path = selectTriagePath();
+      warnSlowTriagePath(path);
+
+      const id = await createProject(
+        idea,
+        (i) => triage(i, { path }),
+        randomBytes(3).toString("hex"),
+      );
       console.log(`captured: ${id}`);
     }));
 

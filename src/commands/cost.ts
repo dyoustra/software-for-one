@@ -21,12 +21,23 @@ function table(header: string[], rows: string[][], aligns: Align[]): string {
   return [line(header), ...rows.map(line)].join("\n");
 }
 
-const PROJECT_ALIGN: Align[] = ["l", "r", "r", "r", "r", "r", "r", "r"];
+const PROJECT_ALIGN: Align[] = ["l", "r", "l", "r", "r", "r", "r", "r", "r"];
+
+/**
+ * Both routes when a stage ran on each, because the two are not the same
+ * request: the CLI path loads tools and CLAUDE.md the SDK path never sees, so
+ * a mixed row is worth showing rather than collapsing to whichever ran last.
+ */
+function viaCell(records: CostRecord[]): string {
+  const seen = [...new Set(records.map((r) => r.via))].sort();
+  return seen.length === 0 ? "-" : seen.join("+");
+}
 
 function usageCells(records: CostRecord[]): string[] {
   const t = totalCost(records);
   return [
     String(records.length),
+    viaCell(records),
     money(t.costUsd),
     tokens(t.inputTokens),
     tokens(t.outputTokens),
@@ -55,7 +66,7 @@ export function formatProjectCost(records: CostRecord[]): string {
   rows.push(["TOTAL", ...usageCells(records)]);
 
   return table(
-    ["STAGE", "RUNS", "COST $", "IN", "OUT", "CACHE W", "CACHE R", "TIME"],
+    ["STAGE", "RUNS", "VIA", "COST $", "IN", "OUT", "CACHE W", "CACHE R", "TIME"],
     rows,
     PROJECT_ALIGN,
   );
@@ -73,7 +84,7 @@ export function formatAllCosts(projects: ProjectCost[]): string {
   rows.push(["TOTAL", ...usageCells(projects.flatMap((p) => p.records))]);
 
   return table(
-    ["PROJECT", "RUNS", "COST $", "IN", "OUT", "CACHE W", "CACHE R", "TIME"],
+    ["PROJECT", "RUNS", "VIA", "COST $", "IN", "OUT", "CACHE W", "CACHE R", "TIME"],
     rows,
     PROJECT_ALIGN,
   );

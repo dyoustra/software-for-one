@@ -4,11 +4,20 @@ import type { StageUsage } from "../runner/types.js";
 
 export const COST_FILE = "COST.jsonl";
 
+/**
+ * Which route the model call took. Declared here rather than imported from the
+ * triage stage to keep core independent of the stages above it; the two are
+ * the same pair of strings on purpose.
+ */
+export type CostVia = "sdk" | "cli";
+
 export interface CostRecord {
   stage: string;
   /** ISO timestamp of when the run finished. */
   at: string;
   ok: boolean;
+  /** Absent in records written before the SDK path existed; read as "cli". */
+  via: CostVia;
   usage: StageUsage;
 }
 
@@ -22,13 +31,28 @@ const USAGE_FIELDS = [
   "cacheReadInputTokens",
 ] as const;
 
-function isCostRecord(value: unknown): value is CostRecord {
-  if (typeof value !== "object" || value === null) return false;
+/**
+ * `via` is deliberately not required. Records written before the SDK path
+ * existed have no such field, and dropping them would erase spend that really
+ * happened — a silent under-report, which is the worse failure. Anything that
+ * is not exactly "sdk" reads as "cli", the only route those records could
+ * have taken.
+ */
+function parseCostRecord(value: unknown): CostRecord | null {
+  if (typeof value !== "object" || value === null) return null;
   const rec = value as Record<string, unknown>;
-  if (typeof rec.stage !== "string" || typeof rec.at !== "string") return false;
-  if (typeof rec.usage !== "object" || rec.usage === null) return false;
+  if (typeof rec.stage !== "string" || typeof rec.at !== "string") return null;
+  if (typeof rec.usage !== "object" || rec.usage === null) return null;
   const usage = rec.usage as Record<string, unknown>;
-  return USAGE_FIELDS.every((f) => typeof usage[f] === "number");
+  if (!USAGE_FIELDS.every((f) => typeof usage[f] === "number")) return null;
+
+  return {
+    stage: rec.stage,
+    at: rec.at,
+    ok: rec.ok === true,
+    via: rec.via === "sdk" ? "sdk" : "cli",
+    usage: usage as unknown as StageUsage,
+  };
 }
 
 /**
@@ -42,9 +66,12 @@ export function recordCost(
   ok: boolean,
   usage: StageUsage | undefined,
   env?: Env,
+  // Defaults to "cli" because every spawned stage runs through the claude
+  // binary; only triage can currently take the SDK route.
+  via: CostVia = "cli",
 ): void {
   if (!usage) return;
-  const record: CostRecord = { stage, at: new Date().toISOString(), ok, usage };
+  const record: CostRecord = { stage, at: new Date().toISOString(), ok, via, usage };
   fs.mkdirSync(sfoDir(id, env), { recursive: true });
   fs.appendFileSync(artifactPath(id, COST_FILE, env), `${JSON.stringify(record)}\n`);
 }
@@ -65,8 +92,8 @@ export function readCostRecords(id: string, env?: Env): CostRecord[] {
     try {
       // A run killed mid-append leaves a truncated final line. One bad line
       // must not cost the user visibility into everything before it.
-      const parsed: unknown = JSON.parse(trimmed);
-      if (isCostRecord(parsed)) out.push(parsed);
+      const parsed = parseCostRecord(JSON.parse(trimmed) as unknown);
+      if (parsed) out.push(parsed);
     } catch {
       // Not JSON; skip.
     }

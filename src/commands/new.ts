@@ -4,9 +4,32 @@ import { projectDir, sfoDir, type Env } from "../core/paths.js";
 import { writeState } from "../core/state.js";
 import { writeArtifact, appendArtifact } from "../core/artifacts.js";
 import { recordCost } from "../core/cost.js";
-import type { TriageOutcome } from "../stages/triage.js";
+import type { TriageOutcome, TriagePath } from "../stages/triage.js";
 
 export type TriageFn = (idea: string) => Promise<TriageOutcome>;
+
+const CLI_PATH_WARNING = [
+  "sfo: no ANTHROPIC_API_KEY set — running triage through the claude CLI.",
+  "     Slower (~10s vs ~2s) and roughly 30x the cost per capture.",
+  "     Set ANTHROPIC_API_KEY to use the fast path.",
+].join("\n");
+
+/**
+ * Printed BEFORE the call, not after: on the CLI path the user otherwise
+ * waits ten seconds with no idea why. Announced at all because the two paths
+ * are not the same request — the CLI hands the model a tool roster and
+ * whatever CLAUDE.md it finds, so it can reach a different verdict. A silent
+ * fallback would hand someone a 30x-costlier, behaviourally-different
+ * classifier without telling them.
+ *
+ * Lives in the command layer: the library returns data and does not print.
+ */
+export function warnSlowTriagePath(
+  path: TriagePath,
+  log: (message: string) => void = console.error,
+): void {
+  if (path === "cli") log(CLI_PATH_WARNING);
+}
 
 /**
  * Trims AFTER slicing, not before: a 40-char cut that lands on a separator
@@ -30,7 +53,7 @@ export async function createProject(
   suffix: string,
   env?: Env,
 ): Promise<string> {
-  const { result: verdict, usage } = await runTriage(idea);
+  const { result: verdict, usage, via } = await runTriage(idea);
   const id = `${slugify(verdict.title)}-${suffix}`;
 
   const dir = projectDir(id, env);
@@ -77,7 +100,7 @@ export async function createProject(
   // Only recordable once triage has returned, since the id derives from the
   // title it produced. Triage spends real money and is otherwise invisible
   // to `sfo cost`.
-  recordCost(id, "triage", true, usage, env);
+  recordCost(id, "triage", true, usage, env, via);
 
   return id;
 }

@@ -52,6 +52,16 @@ describe("recordCost", () => {
     recordCost("p", "research", true, undefined, env);
     expect(fs.existsSync(costFile("p"))).toBe(false);
   });
+
+  it("records which route the call took", () => {
+    recordCost("p", "triage", true, usage(), env, "sdk");
+    expect(readCostRecords("p", env)[0].via).toBe("sdk");
+  });
+
+  it("defaults to the CLI route, which is what every spawned stage uses", () => {
+    recordCost("p", "research", true, usage(), env);
+    expect(readCostRecords("p", env)[0].via).toBe("cli");
+  });
 });
 
 describe("readCostRecords", () => {
@@ -74,16 +84,54 @@ describe("readCostRecords", () => {
     fs.appendFileSync(costFile("p"), '{"hello":"world"}\n');
     expect(readCostRecords("p", env)).toHaveLength(1);
   });
+
+  it("keeps a legacy record that predates the via field, reading it as cli", () => {
+    // Dropping it would silently erase spend that really happened, which is
+    // worse than labelling a pre-SDK record with the only route that existed.
+    const legacy = {
+      stage: "research",
+      at: "2026-08-01T00:00:00.000Z",
+      ok: true,
+      usage: usage({ costUsd: 0.42 }),
+    };
+    fs.mkdirSync(path.dirname(costFile("p")), { recursive: true });
+    fs.appendFileSync(costFile("p"), `${JSON.stringify(legacy)}\n`);
+
+    const records = readCostRecords("p", env);
+    expect(records).toHaveLength(1);
+    expect(records[0].usage.costUsd).toBe(0.42);
+    expect(records[0].via).toBe("cli");
+  });
+
+  it("reads an unrecognised via as cli rather than dropping the record", () => {
+    const odd = {
+      stage: "research",
+      at: "2026-08-01T00:00:00.000Z",
+      ok: true,
+      via: "carrier-pigeon",
+      usage: usage(),
+    };
+    fs.mkdirSync(path.dirname(costFile("p")), { recursive: true });
+    fs.appendFileSync(costFile("p"), `${JSON.stringify(odd)}\n`);
+    expect(readCostRecords("p", env)[0].via).toBe("cli");
+  });
 });
 
 describe("totalCost", () => {
   it("sums every numeric field", () => {
     const records: CostRecord[] = [
-      { stage: "research", at: "2026-08-21T00:00:00.000Z", ok: true, usage: usage() },
+      {
+        stage: "research",
+        at: "2026-08-21T00:00:00.000Z",
+        ok: true,
+        via: "cli",
+        usage: usage(),
+      },
       {
         stage: "spec",
         at: "2026-08-21T00:01:00.000Z",
         ok: false,
+        via: "cli",
         usage: usage({ costUsd: 0.4, numTurns: 3, inputTokens: 8 }),
       },
     ];

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createProject, slugify } from "../../src/commands/new.js";
+import { createProject, slugify, warnSlowTriagePath } from "../../src/commands/new.js";
 import { readState } from "../../src/core/state.js";
 import { readArtifact } from "../../src/core/artifacts.js";
 import { readCostRecords } from "../../src/core/cost.js";
@@ -31,6 +31,29 @@ const triageOk = vi.fn().mockResolvedValue({
     counterOffer: null,
   },
   usage: USAGE,
+  via: "cli",
+});
+
+describe("warnSlowTriagePath", () => {
+  // The warning has to precede the call, not follow it: on the CLI path the
+  // user otherwise waits ten seconds with no idea why.
+  it("names the missing variable, both costs, and the fix on the cli path", () => {
+    const lines: string[] = [];
+    warnSlowTriagePath("cli", (m) => lines.push(m));
+
+    const text = lines.join("\n");
+    expect(text).toContain("ANTHROPIC_API_KEY");
+    expect(text).toContain("claude CLI");
+    expect(text).toMatch(/10s/);
+    expect(text).toMatch(/2s/);
+    expect(text).toMatch(/30x/);
+  });
+
+  it("stays quiet on the sdk path", () => {
+    const lines: string[] = [];
+    warnSlowTriagePath("sdk", (m) => lines.push(m));
+    expect(lines).toEqual([]);
+  });
 });
 
 describe("slugify", () => {
@@ -83,6 +106,16 @@ describe("createProject", () => {
     const records = readCostRecords(id, env);
     expect(records.map((r) => r.stage)).toContain("triage");
     expect(records.find((r) => r.stage === "triage")?.usage.costUsd).toBe(0.34);
+  });
+
+  it("records the route triage actually took", async () => {
+    const t = vi.fn().mockResolvedValue({
+      result: { verdict: "ready", title: "Fast Path", reason: "r", counterOffer: null },
+      usage: USAGE,
+      via: "sdk",
+    });
+    const id = await createProject("x", t, "ddd444", env);
+    expect(readCostRecords(id, env)[0].via).toBe("sdk");
   });
 
   it("still creates the project when triage reports no usage", async () => {

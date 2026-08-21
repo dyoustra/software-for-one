@@ -1,12 +1,13 @@
 import { describe, it, expect } from "vitest";
 import { formatProjectCost, formatAllCosts } from "../../src/commands/cost.js";
-import type { CostRecord } from "../../src/core/cost.js";
+import type { CostRecord, CostVia } from "../../src/core/cost.js";
 
-function rec(stage: string, costUsd: number, ok = true): CostRecord {
+function rec(stage: string, costUsd: number, ok = true, via: CostVia = "cli"): CostRecord {
   return {
     stage,
     at: "2026-08-21T00:00:00.000Z",
     ok,
+    via,
     usage: {
       costUsd,
       durationMs: 1000,
@@ -44,6 +45,21 @@ describe("formatProjectCost", () => {
   it("says so when nothing has been spent", () => {
     expect(formatProjectCost([])).toMatch(/no cost/i);
   });
+
+  it("shows which route each stage took, so cheap and expensive runs differ", () => {
+    const out = formatProjectCost([rec("triage", 0.01, true, "sdk"), rec("spec", 0.25)]);
+    expect(out).toContain("VIA");
+    expect(out).toMatch(/triage\s+1\s+sdk/);
+    expect(out).toMatch(/spec\s+1\s+cli/);
+  });
+
+  it("names both routes when a stage ran on each", () => {
+    const out = formatProjectCost([
+      rec("triage", 0.01, false, "sdk"),
+      rec("triage", 0.34, true, "cli"),
+    ]);
+    expect(out).toMatch(/triage\s+2\s+cli\+sdk/);
+  });
 });
 
 describe("formatAllCosts", () => {
@@ -60,5 +76,14 @@ describe("formatAllCosts", () => {
 
   it("says so when there are no projects", () => {
     expect(formatAllCosts([])).toMatch(/no projects/i);
+  });
+
+  it("shows the route per project", () => {
+    const out = formatAllCosts([
+      { id: "aaa", records: [rec("triage", 0.01, true, "sdk")] },
+      { id: "bbb", records: [rec("spec", 0.25)] },
+    ]);
+    expect(out).toMatch(/aaa\s+1\s+sdk/);
+    expect(out).toMatch(/bbb\s+1\s+cli/);
   });
 });
