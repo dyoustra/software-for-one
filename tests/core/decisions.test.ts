@@ -49,3 +49,13 @@ describe("decisions", () => {
     expect(readDecisions("p", env)).toEqual([]);
   });
 });
+
+describe("timestamp validation", () => {
+  it("rejects an unparseable at value", () => {
+    expect(DecisionSchema.safeParse({ ...decision, at: "sometime tuesday" }).success).toBe(false);
+  });
+
+  it("accepts an ISO timestamp", () => {
+    expect(DecisionSchema.safeParse({ ...decision, at: "2026-08-21T18:00:00.000Z" }).success).toBe(true);
+  });
+});

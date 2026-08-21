@@ -14,7 +14,14 @@ export const DecisionSchema = z.object({
    */
   decided_by: z.enum(["agent", "human"]),
   blast_radius: z.enum(["local", "structural", "external"]),
-  at: z.string(),
+  /**
+   * Validated as a real timestamp, not just a string. The review UI sorts and
+   * displays by this; an unparseable value would fail silently there rather
+   * than at the point it was written.
+   */
+  at: z.string().refine((v) => !Number.isNaN(Date.parse(v)), {
+    message: "at must be a parseable timestamp",
+  }),
 });
 
 export type Decision = z.infer<typeof DecisionSchema>;
