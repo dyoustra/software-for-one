@@ -57,3 +57,19 @@ describe("verifyRecipeFor", () => {
     }
   });
 });
+
+describe("recipe gates correctness, not style", () => {
+  it("does not gate on formatting", () => {
+    // A slice satisfying every criterion must not fail on blank lines, and
+    // nothing in the build loop runs a fixing format pass before the gate.
+    const names = verifyRecipeFor("cli-python").map((s: VerifyStep) => s.name);
+    expect(names).not.toContain("format");
+  });
+
+  it("installs without --frozen, which a fresh project cannot satisfy", () => {
+    // --frozen asserts a current uv.lock; a scaffolded project has none, and a
+    // build agent adding dependencies is meant to change it.
+    const install = verifyRecipeFor("cli-python").find((s: VerifyStep) => s.name === "install");
+    expect(install?.args).not.toContain("--frozen");
+  });
+});

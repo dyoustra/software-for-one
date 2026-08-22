@@ -286,9 +286,8 @@ export interface VerifyStep {
  */
 const RECIPES: Record<string, VerifyStep[]> = {
   "cli-python": [
-    { name: "install", command: "uv", args: ["sync", "--frozen"], scopeable: false },
+    { name: "install", command: "uv", args: ["sync"], scopeable: false },
     { name: "lint", command: "uv", args: ["run", "ruff", "check", "."], scopeable: false },
-    { name: "format", command: "uv", args: ["run", "ruff", "format", "--check", "."], scopeable: false },
     { name: "typecheck", command: "uv", args: ["run", "mypy", "--strict", "."], scopeable: false },
     { name: "test", command: "uv", args: ["run", "pytest", "-q"], scopeable: true },
   ],
@@ -844,6 +843,10 @@ You are building **one slice**, named in your instructions. Make its tests pass.
 **Write as you go.** Save working code as you complete each piece rather than
 holding everything until the end — a stage killed midway must leave usable work
 behind.
+
+Format your own output before you finish, using the project's formatter. The
+verification gate checks whether the code is correct, not whether it is tidy —
+so tidiness is your job, and nothing downstream will fix it for you.
 
 When you make a choice the spec did not settle, append it to
 `.sfo/DECISIONS.jsonl` with `"decided_by":"agent"` and an honest

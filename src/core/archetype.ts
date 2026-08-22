@@ -41,10 +41,18 @@ export interface VerifyStep {
  * quote or a semicolon in a filename must not become an injection.
  */
 const RECIPES: Record<string, VerifyStep[]> = {
+  // No --frozen on install: that flag asserts an existing, current uv.lock,
+  // which is exactly what a freshly-scaffolded project lacks — and a build
+  // agent legitimately adds dependencies as it works, so the lock is *meant*
+  // to change. --frozen belongs in CI, not in a build in progress.
+  //
+  // No format gate either. Formatting is not correctness, and nothing here
+  // runs a fixing pass, so a slice satisfying every criterion would fail on
+  // blank lines. The build prompt asks the agent to format its own output;
+  // the gate checks whether the code is right.
   "cli-python": [
-    { name: "install", command: "uv", args: ["sync", "--frozen"], scopeable: false },
+    { name: "install", command: "uv", args: ["sync"], scopeable: false },
     { name: "lint", command: "uv", args: ["run", "ruff", "check", "."], scopeable: false },
-    { name: "format", command: "uv", args: ["run", "ruff", "format", "--check", "."], scopeable: false },
     { name: "typecheck", command: "uv", args: ["run", "mypy", "--strict", "."], scopeable: false },
     { name: "test", command: "uv", args: ["run", "pytest", "-q"], scopeable: true },
   ],
