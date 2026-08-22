@@ -140,7 +140,13 @@ describe("advance", () => {
     const resumed = new FakeRunner();
     await advance("p", resumed, env);
 
-    expect(resumed.calls.map((c) => path.basename(c.logPath))).toEqual(["clarify.log"]);
+    // The point of this test is the resume, so it asserts clarify ran FIRST
+    // rather than pinning the whole downstream sequence — that belongs in
+    // stages.test.ts, and duplicating it here means every future stage breaks
+    // a test about resuming.
+    const resumedLogs = resumed.calls.map((c) => path.basename(c.logPath));
+    expect(resumedLogs[0]).toBe("clarify.log");
+    expect(resumedLogs).not.toContain("research.log");
     expect(readState("p", env).status).toBe("done");
   });
 

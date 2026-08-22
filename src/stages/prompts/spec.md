@@ -31,6 +31,12 @@ Questions for the human go in `.sfo/QUESTIONS.json`. Every question is either
 
 A decision that materially changes what the person will be charged is a question, not a default — even when you have a defensible answer. Cost is theirs to spend.
 
+This is the **only** point at which the human is asked anything. Nothing later
+stops to check the build plan or confirm scope, so a question you decline to ask
+here is a question that never gets asked. Ambition is the one most often missed:
+where the idea admits a small version and a thorough one, the difference is the
+person's money and their answer, not yours.
+
 Write `.sfo/QUESTIONS.json`:
 
     {"questions":[

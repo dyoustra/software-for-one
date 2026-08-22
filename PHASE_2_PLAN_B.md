@@ -674,6 +674,19 @@ sane before committing to the build.
 Write only `.sfo/SLICES.jsonl` and `.sfo/PLAN.md`.
 ```
 
+**Decided: `plan` does not gate on a human.** A plan review a human
+rubber-stamps is a round-trip that buys nothing, and the product's premise is
+that you dictate an idea and walk away. Everything needing a human is asked at
+`clarify`, which can append a follow-up question and park again. Two
+consequences: `PLAN.md` is reframed as an after-the-fact record rather than an
+approval document, and `spec.md` now states that clarify is the only gate — so a
+question it declines to ask is never asked, scope most of all.
+
+**The stage sequence and all six prompts landed together**, ahead of the
+per-task steps below: extending `PIPELINE_STAGES` without the prompt files
+walks the pipeline straight into `no prompt for stage: plan`. They are one
+atomic change, and splitting them across four tasks hid that.
+
 - [ ] **Step 2: Add `plan` to the stage sequence**
 
 In `src/core/stages.ts`, extend `PHASE_1_STAGES` into the full sequence, renaming it `PIPELINE_STAGES`, and add `plan` after `clarify`. Keep `blocksOnHuman` as-is. Update every import.
