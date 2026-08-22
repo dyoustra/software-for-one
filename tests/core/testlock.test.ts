@@ -52,3 +52,42 @@ describe("testlock", () => {
     expect(verifyTestLock("p", "tests", env)).toEqual([]);
   });
 });
+
+describe("build artifacts must not trip the lock", () => {
+  it("ignores __pycache__ and .pytest_cache written by a test run", () => {
+    // Without this the first pytest run adds files nobody edited, every later
+    // verify reports a violation, and the gate gets switched off as noise.
+    lockTests("p", "tests", env);
+
+    fs.mkdirSync(path.join(dir, "tests", "__pycache__"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "tests", "__pycache__", "test_a.cpython-312.pyc"), "bytecode");
+    fs.mkdirSync(path.join(dir, "tests", ".pytest_cache", "v", "cache"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "tests", ".pytest_cache", "v", "cache", "lastfailed"), "{}");
+
+    expect(verifyTestLock("p", "tests", env)).toEqual([]);
+  });
+
+  it("still catches a real edit alongside cache noise", () => {
+    lockTests("p", "tests", env);
+    fs.mkdirSync(path.join(dir, "tests", "__pycache__"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "tests", "__pycache__", "x.pyc"), "bytecode");
+    fs.writeFileSync(path.join(dir, "tests", "test_a.py"), "def test_a(): assert False\n");
+
+    expect(verifyTestLock("p", "tests", env)).toEqual(["tests/test_a.py"]);
+  });
+});
+
+describe("an empty test tree is a failure, not a pass", () => {
+  it("refuses to lock a tree with no test files", () => {
+    fs.rmSync(path.join(dir, "tests"), { recursive: true, force: true });
+    fs.mkdirSync(path.join(dir, "tests"), { recursive: true });
+    expect(() => lockTests("p", "tests", env)).toThrow(/nothing to lock/i);
+  });
+
+  it("refuses to lock a tree containing only build artifacts", () => {
+    fs.rmSync(path.join(dir, "tests"), { recursive: true, force: true });
+    fs.mkdirSync(path.join(dir, "tests", "__pycache__"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "tests", "__pycache__", "x.pyc"), "bytecode");
+    expect(() => lockTests("p", "tests", env)).toThrow(/nothing to lock/i);
+  });
+});

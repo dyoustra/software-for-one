@@ -820,6 +820,8 @@ Runs the archetype's recipe with `execFile` (never a shell), returns per-step re
 
 Test at minimum: a passing recipe reports every step; a failing step short-circuits the rest; a tampered test file fails the gate before the suite runs; an empty recipe reports "no gates available" rather than success.
 
+**`lockTests` throws on an empty test tree**, and `walk` filters `__pycache__`, `.pytest_cache` and compiled artifacts — a lock that trips on pytest's own output would fire constantly on noise and get switched off, and a gate nobody trusts is worse than none.
+
 - [ ] **Step 2: Write the build prompt**
 
 `src/stages/prompts/build.md`:
