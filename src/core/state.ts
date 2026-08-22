@@ -9,7 +9,19 @@ export const ProjectStateSchema = z.object({
   title: z.string(),
   currentStage: z.string(),
   status: z.enum(["running", "awaiting_human", "failed", "done"]),
+  /** Retries per stage, keyed by stage name. */
   attempts: z.record(z.string(), z.number()),
+  /**
+   * Retries per build slice, keyed by slice id. A separate dictionary rather
+   * than more keys in `attempts`: two key spaces sharing one record have
+   * nothing marking the boundary, so `attempts["S-01"]` reads as a stage named
+   * S-01 to every consumer, and the day a stage and a slice share a name one
+   * silently overwrites the other. `.default({})` makes the split free — every
+   * state.json written before this field parses with an empty one.
+   */
+  sliceAttempts: z.record(z.string(), z.number()).default({}),
+  slicesPassed: z.array(z.string()).default([]),
+  slicesFailed: z.array(z.string()).default([]),
   pid: z.number().nullable(),
   heartbeatAt: z.string().nullable(),
   createdAt: z.string(),
@@ -18,11 +30,22 @@ export const ProjectStateSchema = z.object({
 
 export type ProjectState = z.infer<typeof ProjectStateSchema>;
 
-export function writeState(state: ProjectState, env?: Env): void {
-  const target = artifactPath(state.id, "state.json", env);
+/**
+ * What a caller must supply: the defaulted fields are optional here, so code
+ * written before they existed still compiles and still produces a complete
+ * file, because `writeState` fills them in.
+ */
+export type ProjectStateInput = z.input<typeof ProjectStateSchema>;
+
+export function writeState(state: ProjectStateInput, env?: Env): void {
+  // Parsed rather than written through, so defaults land on disk instead of
+  // being re-applied on every read. A state.json missing half its fields is
+  // readable but tells `sfo status` nothing.
+  const complete = ProjectStateSchema.parse(state);
+  const target = artifactPath(complete.id, "state.json", env);
   const tmp = `${target}.tmp`;
-  fs.mkdirSync(sfoDir(state.id, env), { recursive: true });
-  fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
+  fs.mkdirSync(sfoDir(complete.id, env), { recursive: true });
+  fs.writeFileSync(tmp, JSON.stringify(complete, null, 2));
   fs.renameSync(tmp, target);
 }
 

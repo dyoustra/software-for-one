@@ -1,12 +1,17 @@
-import { readState, writeState } from "./state.js";
+import fs from "node:fs";
+import path from "node:path";
+import { readState, writeState, type ProjectState } from "./state.js";
 import { nextStage, blocksOnHuman } from "./stages.js";
 import { artifactExists } from "./artifacts.js";
-import { readCriteria } from "./criteria.js";
+import { readCriteria, type Criterion } from "./criteria.js";
+import { readSlices, nextRunnable, type Slice } from "./slices.js";
 import { recordCost } from "./cost.js";
 import { budgetState, formatBudget, type BudgetState } from "./budget.js";
 import { readDecisions, appendDecision } from "./decisions.js";
 import { commitStage } from "./repo.js";
 import { readPriorArt, blocksPipeline } from "./priorart.js";
+import { lockTests } from "./testlock.js";
+import { runVerify, detectArchetype, TEST_DIR, type VerifyResult } from "./verify.js";
 import { loadPrompt } from "../stages/prompts.js";
 import { projectDir, logPath, type Env } from "./paths.js";
 import type { Runner } from "../runner/types.js";
@@ -16,9 +21,24 @@ const HUMAN_INPUT: Record<string, string> = { clarify: "ANSWERS.json" };
 
 export const HEARTBEAT_INTERVAL_MS = 30_000;
 
+/**
+ * Two, then the slice is abandoned along with everything downstream of it. A
+ * third attempt is where an agent stops fixing the code and starts weakening
+ * what it cannot satisfy.
+ */
+export const MAX_SLICE_ATTEMPTS = 2;
+
+export type VerifyFn = (id: string, archetype: string, slice: Slice, env?: Env) => VerifyResult;
+
 export interface AdvanceOptions {
   /** Overridable so tests can exercise ticking without waiting 30s. */
   heartbeatMs?: number;
+  /**
+   * Injected for the same reason `Runner` is: the real gate shells out to a
+   * project's toolchain, which a test of the slice loop has no business
+   * installing. Production never passes it.
+   */
+  verify?: VerifyFn;
 }
 
 /**
@@ -62,7 +82,7 @@ function isPark(pick: string | null | Park): pick is Park {
 /** What to run next, or the reason nothing runs. */
 function pickStage(
   id: string,
-  state: { currentStage: string; status: string },
+  state: ProjectState,
   env: Env | undefined,
 ): string | null | Park {
   const target = pickTarget(id, state, env);
@@ -91,7 +111,7 @@ function pickStage(
  */
 function pickTarget(
   id: string,
-  state: { currentStage: string; status: string },
+  state: ProjectState,
   env: Env | undefined,
 ): string | null | Park {
   const current = state.currentStage;
@@ -103,6 +123,13 @@ function pickTarget(
   ) {
     return current;
   }
+
+  // `build` is the one stage that can be half-done. Its slice loop parks on the
+  // budget and can be killed mid-slice, and in both cases `currentStage` is
+  // already "build" — so the ordinary `nextStage` answer is "review", which
+  // would step over every slice still unbuilt and let the later stages report
+  // on work that never happened.
+  if (current === "build" && buildUnfinished(id, state, env)) return "build";
 
   const upcoming = nextStage(current);
   if (upcoming === null) return null;
@@ -184,6 +211,208 @@ function warnOnDroppedCriteria(before: string[], after: string[], stage: string)
   }
 }
 
+/** Is there still a slice that could be built? */
+function buildUnfinished(id: string, state: ProjectState, env: Env | undefined): boolean {
+  try {
+    const progress = { passed: state.slicesPassed, failed: state.slicesFailed };
+    return nextRunnable(readSlices(id, env), progress) !== null;
+  } catch {
+    // A malformed SLICES.jsonl means nobody can say what is built. Re-entering
+    // build fails loudly there instead of letting review pass over it.
+    return true;
+  }
+}
+
+function reason(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** The state a stage that could not complete leaves behind. */
+function failedState(state: ProjectState, stage: string): ProjectState {
+  return {
+    ...state,
+    status: "failed",
+    pid: null,
+    attempts: { ...state.attempts, [stage]: (state.attempts[stage] ?? 0) + 1 },
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Stops the project and records why. A human park moves onto the stage that is
+ * waiting for the human; a budget park stays where it is, because the picked
+ * stage never ran and marking it current would make the next `pickStage` ask
+ * for the one after it — silently skipping work the ceiling only postponed.
+ */
+function applyPark(id: string, state: ProjectState, park: Park, env: Env | undefined): void {
+  const target =
+    park.park === "budget" ? state.currentStage : (nextStage(state.currentStage) ?? state.currentStage);
+  writeState(
+    {
+      ...state,
+      currentStage: target,
+      status: "awaiting_human",
+      pid: null,
+      updatedAt: new Date().toISOString(),
+    },
+    env,
+  );
+  if (park.park === "budget") recordBudgetPark(id, park.stage, park.budget, env);
+}
+
+/**
+ * `loadPrompt("build")` is the same text for every slice; the agent still has
+ * to be told which slice is its own. The criteria are appended rather than
+ * left to be looked up, so "make exactly these pass" is unambiguous.
+ */
+function buildPromptFor(slice: Slice, criteria: Criterion[]): string {
+  const mine = criteria.filter((c) => slice.criterionIds.includes(c.id));
+  return [
+    loadPrompt("build"),
+    "",
+    `## Your slice: ${slice.id} — ${slice.name}`,
+    "",
+    "Make exactly these criteria pass:",
+    "",
+    ...mine.map((c) => `- ${c.id}: ${c.text}`),
+  ].join("\n");
+}
+
+/**
+ * A slice that fails the gate is worth nothing without the output that says
+ * why, and the agent's own log ends before verification starts. Appended, not
+ * overwritten: the second attempt's failure is rarely the first one's.
+ */
+function writeVerifyLog(
+  id: string,
+  stageName: string,
+  verdict: VerifyResult,
+  env: Env | undefined,
+): void {
+  const lines = [
+    `--- ${new Date().toISOString()} ${verdict.ok ? "pass" : "fail"}`,
+    ...(verdict.reason ? [verdict.reason] : []),
+    ...verdict.steps.map((s) =>
+      s.ok ? `[ok] ${s.name}` : `[exit ${s.exitCode ?? "could not run"}] ${s.name}\n${s.output}`,
+    ),
+    "",
+  ];
+  try {
+    const file = logPath(id, `${stageName}.verify`, env);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.appendFileSync(file, lines.join("\n"));
+  } catch {
+    // Diagnostics must never cost the build the result they describe.
+  }
+}
+
+type BuildOutcome =
+  | { outcome: "complete" }
+  | { outcome: "parked"; park: Park }
+  | { outcome: "failed"; reason: string };
+
+/**
+ * Builds one slice at a time, verifying each before moving on.
+ *
+ * State is persisted after every slice, which is the entire reason the pipeline
+ * slices at all: a run killed by a dropped connection resumes at the next
+ * unbuilt slice instead of paying again for the ones that already passed.
+ */
+async function runSlices(
+  id: string,
+  runner: Runner,
+  env: Env | undefined,
+  heartbeatMs: number,
+  verify: VerifyFn,
+): Promise<BuildOutcome> {
+  let slices: Slice[];
+  let criteria: Criterion[];
+  try {
+    slices = readSlices(id, env);
+    criteria = readCriteria(id, env);
+  } catch (err) {
+    return { outcome: "failed", reason: `${reason(err)} — re-run \`sfo stage ${id} plan\`` };
+  }
+
+  // Nothing to build is not "done": every criterion is supposed to live in
+  // exactly one slice, so an empty plan means the build would deliver nothing
+  // while every later stage reported success.
+  if (slices.length === 0) {
+    return { outcome: "failed", reason: `no slices to build — re-run \`sfo stage ${id} plan\`` };
+  }
+
+  while (true) {
+    let state = readState(id, env);
+    const slice = nextRunnable(slices, {
+      passed: state.slicesPassed,
+      failed: state.slicesFailed,
+    });
+    if (!slice) return { outcome: "complete" };
+
+    const stageName = `build-${slice.id}`;
+
+    // Checked before spending, not after. A ceiling discovered post-hoc is a
+    // report, not a limit.
+    const budget = budgetState(id, env);
+    if (budget?.exceeded) {
+      return { outcome: "parked", park: { park: "budget", stage: stageName, budget } };
+    }
+
+    const stopHeartbeat = startHeartbeat(id, env, heartbeatMs);
+    let result;
+    try {
+      result = await runner.runStage({
+        workdir: projectDir(id, env),
+        prompt: buildPromptFor(slice, criteria),
+        logPath: logPath(id, stageName, env),
+      });
+    } finally {
+      stopHeartbeat();
+    }
+    recordCost(id, stageName, result.ok, result.usage, env);
+
+    // Detected per slice rather than once for the run: the first slice can be
+    // the one that writes the manifest the archetype is recognised by.
+    const verdict: VerifyResult = result.ok
+      ? verify(id, detectArchetype(id, env), slice, env)
+      : {
+          ok: false,
+          steps: [],
+          tamperedTests: [],
+          reason: `the build agent exited ${result.exitCode}`,
+        };
+    writeVerifyLog(id, stageName, verdict, env);
+
+    // The heartbeat rewrote state under us while the slice ran.
+    state = readState(id, env);
+
+    if (verdict.ok) {
+      writeState(
+        {
+          ...state,
+          slicesPassed: [...state.slicesPassed, slice.id],
+          updatedAt: new Date().toISOString(),
+        },
+        env,
+      );
+      commitStage(id, stageName, env);
+      continue;
+    }
+
+    const attempts = (state.sliceAttempts[slice.id] ?? 0) + 1;
+    writeState(
+      {
+        ...state,
+        sliceAttempts: { ...state.sliceAttempts, [slice.id]: attempts },
+        slicesFailed:
+          attempts >= MAX_SLICE_ATTEMPTS ? [...state.slicesFailed, slice.id] : state.slicesFailed,
+        updatedAt: new Date().toISOString(),
+      },
+      env,
+    );
+  }
+}
+
 export async function advance(
   id: string,
   runner: Runner,
@@ -216,23 +445,7 @@ export async function advance(
     }
 
     if (isPark(upcoming)) {
-      // A human park moves onto the stage that is waiting for the human. A
-      // budget park stays where it is: the picked stage never ran, and marking
-      // it current would make the next `pickStage` ask for the one after it —
-      // silently skipping the work the ceiling only postponed.
-      const target =
-        upcoming.park === "budget"
-          ? state.currentStage
-          : (nextStage(state.currentStage) ?? state.currentStage);
-      state = {
-        ...state,
-        currentStage: target,
-        status: "awaiting_human",
-        pid: null,
-        updatedAt: new Date().toISOString(),
-      };
-      writeState(state, env);
-      if (upcoming.park === "budget") recordBudgetPark(id, upcoming.stage, upcoming.budget, env);
+      applyPark(id, state, upcoming, env);
       return;
     }
 
@@ -245,6 +458,31 @@ export async function advance(
       updatedAt: new Date().toISOString(),
     };
     writeState(state, env);
+
+    // `build` is not one call to an agent but a loop over slices, each verified
+    // as it lands. Verification is deliberately not a stage of its own: a slice
+    // that builds and fails its gate must not be able to reach a later stage
+    // that reports otherwise.
+    if (upcoming === "build") {
+      const built = await runSlices(id, runner, env, heartbeatMs, opts.verify ?? runVerify);
+      state = readState(id, env);
+
+      if (built.outcome === "parked") {
+        applyPark(id, state, built.park, env);
+        return;
+      }
+      if (built.outcome === "failed") {
+        console.error(`sfo: build cannot start — ${built.reason}`);
+        state = failedState(state, upcoming);
+        writeState(state, env);
+        return;
+      }
+
+      // Each passing slice committed itself; this catches the state left by any
+      // that failed, so what was abandoned is in the history too.
+      commitStage(id, upcoming, env);
+      continue;
+    }
 
     const criteriaBefore = criterionIds(id, env);
     const stopHeartbeat = startHeartbeat(id, env, heartbeatMs);
@@ -296,6 +534,27 @@ export async function advance(
         };
         writeState(state, env);
         commitStage(id, upcoming, env);
+        return;
+      }
+    }
+
+    // Freezing the suite is what makes every later gate mean anything: from
+    // here the build is graded against tests it cannot renegotiate.
+    //
+    // `lockTests` refuses an empty tree, and that refusal is fatal rather than
+    // skipped. An empty tree means test-write produced nothing, so there is no
+    // contract to build against — and an unlocked project would then run the
+    // whole build and deliver a summary claiming verification that never
+    // happened. Failing here costs one stage; failing silently costs the run.
+    if (upcoming === "test-repair") {
+      try {
+        lockTests(id, TEST_DIR, env);
+      } catch (err) {
+        console.error(
+          `sfo: cannot freeze the test suite — ${reason(err)}. Re-run \`sfo stage ${id} test-write\`.`,
+        );
+        state = failedState(state, upcoming);
+        writeState(state, env);
         return;
       }
     }

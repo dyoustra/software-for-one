@@ -3,9 +3,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { advance } from "../../src/core/orchestrator.js";
+import { advance, type VerifyFn } from "../../src/core/orchestrator.js";
 import { writeState, readState, type ProjectState } from "../../src/core/state.js";
 import { writeCriteria } from "../../src/core/criteria.js";
+import { writeSlices, type Slice } from "../../src/core/slices.js";
+import { readTestLock, verifyTestLock } from "../../src/core/testlock.js";
 import { readCostRecords } from "../../src/core/cost.js";
 import { writeBudget } from "../../src/core/budget.js";
 import { readDecisions } from "../../src/core/decisions.js";
@@ -31,12 +33,12 @@ class FakeRunner implements Runner {
     private readonly delayMs = 0,
     private readonly usage: StageUsage | undefined = undefined,
     /** Stands in for a stage rewriting artifacts while it runs. */
-    private readonly onRun?: () => void,
+    private readonly onRun?: (stage: string) => void,
   ) {}
   async runStage(input: RunStageInput): Promise<StageResult> {
     this.calls.push(input);
     if (this.delayMs > 0) await new Promise((r) => setTimeout(r, this.delayMs));
-    this.onRun?.();
+    this.onRun?.(stageOf(input));
     return {
       ok: this.ok,
       exitCode: this.ok ? 0 : 1,
@@ -46,6 +48,80 @@ class FakeRunner implements Runner {
   }
 }
 
+/** The stage a call was for, read back the way the runner names its log. */
+function stageOf(input: RunStageInput): string {
+  return path.basename(input.logPath, ".log");
+}
+
+const CRITERIA = [
+  { id: "AC-001", group: "G", text: "one" },
+  { id: "AC-002", group: "G", text: "two" },
+  { id: "AC-003", group: "G", text: "three" },
+];
+
+/** Two slices in a chain and one independent, so a failure can skip a dependent. */
+const SLICES: Slice[] = [
+  { id: "S-01", name: "Enumeration", criterionIds: ["AC-001"], prerequisites: [] },
+  { id: "S-02", name: "Naming", criterionIds: ["AC-002"], prerequisites: ["S-01"] },
+  { id: "S-03", name: "Reporting", criterionIds: ["AC-003"], prerequisites: [] },
+];
+
+/**
+ * What the real stages leave on disk for the ones after them. The build has no
+ * slices and test-repair has no suite to freeze unless these files exist, and
+ * both of those are genuine pipeline failures — so a test that wants to reach
+ * the build has to produce them the way the pipeline does, at the stage that
+ * produces them.
+ */
+function producesArtifacts(slices: Slice[] = SLICES): (stage: string) => void {
+  return (stage) => {
+    if (stage === "spec") writeCriteria("p", CRITERIA, env);
+    if (stage === "plan") writeSlices("p", slices, env);
+    if (stage === "test-write") {
+      const dir = path.join(env.SFO_HOME, "p", "tests");
+      fs.mkdirSync(dir, { recursive: true });
+      for (const s of slices) {
+        const name = s.id.toLowerCase().replace(/[^a-z0-9]/g, "");
+        fs.writeFileSync(path.join(dir, `test_${name}.py`), `def test_${name}(): assert False\n`);
+      }
+    }
+  };
+}
+
+/** Runs the whole pipeline as far as it will go, artifacts and all. */
+function pipelineRunner(): FakeRunner {
+  return new FakeRunner(true, 0, undefined, producesArtifacts());
+}
+
+const PASSES: VerifyFn = () => ({ ok: true, steps: [], tamperedTests: [] });
+const FAILS: VerifyFn = () => ({ ok: false, steps: [], tamperedTests: [], reason: "gate failed" });
+
+/** Fails the named slices, passes the rest. */
+function failing(...ids: string[]): VerifyFn {
+  return (id, archetype, slice, env) =>
+    ids.includes(slice.id) ? FAILS(id, archetype, slice, env) : PASSES(id, archetype, slice, env);
+}
+
+/** Dies mid-stage the way a dropped connection does: no state written, no result. */
+class KilledRunner implements Runner {
+  calls: RunStageInput[] = [];
+  constructor(
+    private readonly killAt: string,
+    private readonly onRun: (stage: string) => void,
+  ) {}
+  async runStage(input: RunStageInput): Promise<StageResult> {
+    this.calls.push(input);
+    const stage = stageOf(input);
+    if (stage === this.killAt) throw new Error("connection dropped");
+    this.onRun(stage);
+    return { ok: true, exitCode: 0, logPath: input.logPath };
+  }
+}
+
+function sliceStages(runner: FakeRunner): string[] {
+  return runner.calls.map(stageOf).filter((s) => s.startsWith("build-"));
+}
+
 function seed(stage: string, id = "p"): ProjectState {
   const s: ProjectState = {
     id,
@@ -53,6 +129,9 @@ function seed(stage: string, id = "p"): ProjectState {
     currentStage: stage,
     status: "awaiting_human",
     attempts: {},
+    sliceAttempts: {},
+    slicesPassed: [],
+    slicesFailed: [],
     pid: null,
     heartbeatAt: null,
     createdAt: "2026-08-21T00:00:00.000Z",
@@ -124,8 +203,8 @@ describe("advance", () => {
     // nextStage("clarify") then returns null and the project is marked done
     // having never run the stage that folds in the answers.
     seed("capture");
-    const first = new FakeRunner();
-    await advance("p", first, env);
+    const first = pipelineRunner();
+    await advance("p", first, env, { verify: PASSES });
 
     expect(first.calls.map((c) => path.basename(c.logPath))).toEqual([
       "research.log",
@@ -137,8 +216,8 @@ describe("advance", () => {
     // The human answers.
     fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.json"), '{"answers":[]}');
 
-    const resumed = new FakeRunner();
-    await advance("p", resumed, env);
+    const resumed = pipelineRunner();
+    await advance("p", resumed, env, { verify: PASSES });
 
     // The point of this test is the resume, so it asserts clarify ran FIRST
     // rather than pinning the whole downstream sequence — that belongs in
@@ -152,13 +231,13 @@ describe("advance", () => {
 
   it("does not run clarify twice when advanced again after it completed", async () => {
     seed("capture");
-    await advance("p", new FakeRunner(), env);
+    await advance("p", pipelineRunner(), env, { verify: PASSES });
     fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.json"), '{"answers":[]}');
-    await advance("p", new FakeRunner(), env);
+    await advance("p", pipelineRunner(), env, { verify: PASSES });
     expect(readState("p", env).status).toBe("done");
 
-    const again = new FakeRunner();
-    await advance("p", again, env);
+    const again = pipelineRunner();
+    await advance("p", again, env, { verify: PASSES });
     expect(again.calls).toHaveLength(0);
   });
 
@@ -425,5 +504,184 @@ describe("budget ceiling", () => {
     const out = formatStatus(listProjects(env));
     expect(out).toMatch(/broke .*over budget/);
     expect(out).toMatch(/asking .*needs you/);
+  });
+});
+
+/** Drives the real pipeline from capture, through the human gate, into the build. */
+async function runPipeline(runner: Runner, opts: { verify?: VerifyFn } = {}): Promise<void> {
+  seed("capture");
+  await advance("p", runner, env, opts);
+  fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.json"), '{"answers":[]}');
+  await advance("p", runner, env, opts);
+}
+
+describe("freezing the test suite", () => {
+  it("locks every test file once test-repair has finished", async () => {
+    await runPipeline(pipelineRunner(), { verify: PASSES });
+
+    expect(Object.keys(readTestLock("p", env))).toHaveLength(SLICES.length);
+  });
+
+  it("notices a test edited after the lock", async () => {
+    await runPipeline(pipelineRunner(), { verify: PASSES });
+    fs.writeFileSync(path.join(env.SFO_HOME, "p", "tests", "test_s01.py"), "def test_s01(): pass\n");
+
+    expect(verifyTestLock("p", "tests", env)).toEqual(["tests/test_s01.py"]);
+  });
+
+  it("fails at test-repair rather than build against a suite that does not exist", async () => {
+    // An empty test tree means test-write produced nothing. Carrying on would
+    // build, verify and deliver a project whose gates check nothing at all.
+    const noTests = new FakeRunner(true, 0, undefined, (stage) => {
+      if (stage === "spec") writeCriteria("p", CRITERIA, env);
+      if (stage === "plan") writeSlices("p", SLICES, env);
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await runPipeline(noTests, { verify: PASSES });
+
+    const s = readState("p", env);
+    expect(s.status).toBe("failed");
+    expect(s.currentStage).toBe("test-repair");
+    expect(sliceStages(noTests)).toEqual([]);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("cannot freeze the test suite"));
+    error.mockRestore();
+  });
+});
+
+describe("the slice loop", () => {
+  it("builds every slice in order and commits each one that passes", async () => {
+    const runner = pipelineRunner();
+    await runPipeline(runner, { verify: PASSES });
+
+    expect(sliceStages(runner)).toEqual(["build-S-01", "build-S-02", "build-S-03"]);
+    expect(readState("p", env).slicesPassed).toEqual(["S-01", "S-02", "S-03"]);
+    // One commit per slice, so a killed run resumes against a clean tree.
+    expect(subjects().filter((s) => s.startsWith("stage(build-S-"))).toHaveLength(3);
+    expect(subjects().some((s) => s.startsWith("stage(build-S-01)"))).toBe(true);
+  });
+
+  it("gives up on a slice after two attempts, skips its dependents, and builds the rest", async () => {
+    const runner = pipelineRunner();
+    await runPipeline(runner, { verify: failing("S-01") });
+
+    // S-02 depends on S-01, so it is never attempted; S-03 does not, so it is.
+    expect(sliceStages(runner)).toEqual(["build-S-01", "build-S-01", "build-S-03"]);
+    const s = readState("p", env);
+    expect(s.sliceAttempts["S-01"]).toBe(2);
+    expect(s.slicesFailed).toEqual(["S-01"]);
+    expect(s.slicesPassed).toEqual(["S-03"]);
+  });
+
+  it("keeps slice attempts out of the stage retry counter", async () => {
+    const runner = pipelineRunner();
+    await runPipeline(runner, { verify: failing("S-01") });
+
+    // Two dictionaries, so nothing reading `attempts` by stage name can mistake
+    // a slice for a stage that has been retried.
+    expect(readState("p", env).attempts).toEqual({});
+  });
+
+  it("resumes at the next unbuilt slice after a run is killed mid-build", async () => {
+    // A dropped connection mid-slice is the failure this loop exists for: the
+    // run dies with S-01 built and paid for, and must not build it again.
+    const killed = new KilledRunner("build-S-02", producesArtifacts());
+    seed("capture");
+    await advance("p", killed, env, { verify: PASSES });
+    fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.json"), '{"answers":[]}');
+    await expect(advance("p", killed, env, { verify: PASSES })).rejects.toThrow(/connection/);
+
+    expect(readState("p", env).slicesPassed).toEqual(["S-01"]);
+
+    const resumed = pipelineRunner();
+    await advance("p", resumed, env, { verify: PASSES });
+
+    expect(sliceStages(resumed)).toEqual(["build-S-02", "build-S-03"]);
+    expect(readState("p", env).slicesPassed).toEqual(["S-01", "S-02", "S-03"]);
+    expect(readState("p", env).status).toBe("done");
+  });
+
+  it("fails the build when the plan left no slices to build", async () => {
+    const noSlices = new FakeRunner(true, 0, undefined, (stage) => {
+      if (stage === "spec") writeCriteria("p", CRITERIA, env);
+      if (stage === "test-write") {
+        const dir = path.join(env.SFO_HOME, "p", "tests");
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, "test_s01.py"), "def test_s01(): assert False\n");
+      }
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await runPipeline(noSlices, { verify: PASSES });
+
+    expect(readState("p", env).status).toBe("failed");
+    expect(readState("p", env).currentStage).toBe("build");
+    error.mockRestore();
+  });
+
+  it("runs the real gate when none is injected, and fails a slice it cannot verify", async () => {
+    // The project has no manifest, so no archetype is recognised and no recipe
+    // exists. "Nothing to check" must not read as "everything checks out".
+    const runner = pipelineRunner();
+    await runPipeline(runner, {});
+
+    const s = readState("p", env);
+    expect(s.slicesPassed).toEqual([]);
+    expect(s.slicesFailed).toEqual(["S-01", "S-03"]);
+    const log = fs.readFileSync(
+      path.join(env.SFO_HOME, "p", ".sfo", "logs", "build-S-01.verify.log"),
+      "utf8",
+    );
+    expect(log).toContain("no gates available");
+  });
+});
+
+describe("the ceiling during a build", () => {
+  /**
+   * Every stage costs the same, so the ceiling can be aimed at a slice
+   * boundary: half a stage past the last stage before the build, which the
+   * first slice then overruns. Deliberately not set to an exact multiple —
+   * `exceeded` compares floats, and 0.05 seven times is not 0.35.
+   */
+  const PRE_BUILD_STAGES = 6;
+
+  async function spendToTheCeilingMidBuild(): Promise<FakeRunner> {
+    const runner = new FakeRunner(true, 0, USAGE, producesArtifacts());
+    seed("capture");
+    writeBudget("p", USAGE.costUsd * (PRE_BUILD_STAGES + 0.5), env);
+    await advance("p", runner, env, { verify: PASSES });
+    fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.json"), '{"answers":[]}');
+    await advance("p", runner, env, { verify: PASSES });
+    return runner;
+  }
+
+  it("stops at the slice boundary rather than part-way through the build", async () => {
+    const runner = await spendToTheCeilingMidBuild();
+
+    expect(sliceStages(runner)).toEqual(["build-S-01"]);
+    const s = readState("p", env);
+    expect(s.status).toBe("awaiting_human");
+    expect(s.currentStage).toBe("build");
+    expect(s.slicesPassed).toEqual(["S-01"]);
+  });
+
+  it("records the halt against the slice it refused, with the numbers", async () => {
+    await spendToTheCeilingMidBuild();
+
+    const decisions = readDecisions("p", env);
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0].decision).toContain("build-S-02");
+    expect(decisions[0].blast_radius).toBe("external");
+  });
+
+  it("resumes at the refused slice once the ceiling is raised, not at the first", async () => {
+    await spendToTheCeilingMidBuild();
+    writeBudget("p", 100, env);
+
+    const resumed = pipelineRunner();
+    await advance("p", resumed, env, { verify: PASSES });
+
+    expect(sliceStages(resumed)).toEqual(["build-S-02", "build-S-03"]);
+    expect(readState("p", env).status).toBe("done");
   });
 });
