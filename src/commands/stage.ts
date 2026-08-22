@@ -22,6 +22,16 @@ export async function runSingleStage(
 ): Promise<void> {
   const state = readState(id, env);
 
+  // The build prompt reads "you are building one slice, named in your
+  // instructions" — and this command has no slice to name. Running it anyway
+  // spends a full stage on an agent told to build something unspecified.
+  if (stage === "build") {
+    throw new Error(
+      `the build stage runs one slice at a time and \`sfo stage\` has no slice to give it — ` +
+        `use \`sfo retry ${id}\` to clear a failed slice, then \`sfo run ${id}\``,
+    );
+  }
+
   // `sfo stage` is the manual escape hatch, so the ceiling warns rather than
   // refuses — invoking it by hand IS the human decision the ceiling routes to.
   // But spending past a ceiling in silence is the failure this whole product

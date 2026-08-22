@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { readState, writeState, type ProjectState } from "./state.js";
-import { nextStage, blocksOnHuman } from "./stages.js";
+import { nextStage, blocksOnHuman, recoveryHint } from "./stages.js";
 import { artifactExists } from "./artifacts.js";
 import { readCriteria, type Criterion } from "./criteria.js";
 import { readSlices, nextRunnable, type Slice } from "./slices.js";
@@ -537,7 +537,7 @@ export async function advance(
   // "advance past this", so the status has to be the gate.
   if (state.status === "failed") {
     throw new Error(
-      `${id} failed at stage "${state.currentStage}" — re-run it with \`sfo stage ${id} ${state.currentStage}\` before advancing`,
+      `${id} failed at stage "${state.currentStage}" — ${recoveryHint(id, state.currentStage)}`,
     );
   }
 

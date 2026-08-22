@@ -169,3 +169,16 @@ describe("the ceiling warns but does not block the manual escape hatch", () => {
     expect(await captureRun("spec")).not.toMatch(/ceiling/);
   });
 });
+
+describe("the build stage cannot be re-run by name", () => {
+  it("refuses `sfo stage <id> build` and points at retry", async () => {
+    // The build prompt says "you are building one slice, named in your
+    // instructions" and this command has no slice to name. Running it anyway
+    // spends a full stage on an agent told to build something unspecified.
+    seed("failed", "build");
+    const runner = new FakeRunner(true, USAGE);
+
+    await expect(runSingleStage("p", "build", env, runner)).rejects.toThrow(/sfo retry p/);
+    expect(readCostRecords("p", env)).toHaveLength(0);
+  });
+});

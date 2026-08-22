@@ -6,6 +6,7 @@ import { ClaudeCodeRunner } from "../runner/claude-code.js";
 import { readState, isStale } from "../core/state.js";
 import { blockingPriorArt, readPriorArt } from "../core/priorart.js";
 import { budgetState, formatBudget } from "../core/budget.js";
+import { recoveryHint } from "../core/stages.js";
 import type { Env } from "../core/paths.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -53,7 +54,7 @@ export function guardRunnable(id: string, env?: Env, opts: GuardOptions = {}): v
   }
   if (state.status === "failed") {
     throw new Error(
-      `${id} failed at stage "${state.currentStage}" — re-run it with \`sfo stage ${id} ${state.currentStage}\` before advancing`,
+      `${id} failed at stage "${state.currentStage}" — ${recoveryHint(id, state.currentStage)}`,
     );
   }
 

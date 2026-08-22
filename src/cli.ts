@@ -142,6 +142,16 @@ export function buildProgram(): Command {
     }));
 
   program
+    .command("retry")
+    .description("Clear a failed slice so the build attempts it again")
+    .argument("<id>", "project id")
+    .argument("[slice]", "slice id; omit to retry every failed slice")
+    .action(guarded(async (id: string, slice?: string) => {
+      const { retrySlices } = await import("./commands/retry.js");
+      console.log(retrySlices(id, slice));
+    }));
+
+  program
     .command("criteria")
     .description("Show a project's acceptance criteria")
     .argument("<id>", "project id")

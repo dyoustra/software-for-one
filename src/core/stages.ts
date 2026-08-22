@@ -37,3 +37,16 @@ export function nextStage(stage: string): Stage | null {
 export function blocksOnHuman(stage: string): boolean {
   return HUMAN_STAGES.has(stage);
 }
+
+/**
+ * How to recover from a stage that failed. `build` is the exception: it runs
+ * one slice at a time, and `sfo stage` has no slice to name — pointing there
+ * would send the build prompt an instruction it says it requires and has not
+ * been given.
+ */
+export function recoveryHint(id: string, stage: string): string {
+  if (stage === "build") {
+    return `clear the failed slices with \`sfo retry ${id}\`, then \`sfo run ${id}\``;
+  }
+  return `re-run it with \`sfo stage ${id} ${stage}\` before advancing`;
+}
