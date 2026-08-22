@@ -168,6 +168,15 @@ export function buildProgram(): Command {
       showDecisions(id);
     }));
 
+  program
+    .command("slices")
+    .description("Show the build slices, in the order they will be built")
+    .argument("<id>", "project id")
+    .action(guarded(async (id: string) => {
+      const { showSlices } = await import("./commands/slices.js");
+      showSlices(id);
+    }));
+
   return program;
 }
 
