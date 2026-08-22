@@ -5,6 +5,8 @@ import path from "node:path";
 import { listProjects, formatStatus } from "../../src/commands/status.js";
 import { writeState } from "../../src/core/state.js";
 import { writePriorArt, type PriorArt } from "../../src/core/priorart.js";
+import { writeBudget } from "../../src/core/budget.js";
+import { recordCost } from "../../src/core/cost.js";
 
 let env: Record<string, string>;
 
@@ -124,5 +126,58 @@ describe("formatStatus", () => {
     const line = formatStatus(listProjects(env));
     expect(line.length).toBeLessThan(160);
     expect(line).toContain("…");
+  });
+});
+
+describe("the budget note", () => {
+  const usage = {
+    costUsd: 6, durationMs: 10, numTurns: 1,
+    inputTokens: 1, outputTokens: 1, cacheCreationInputTokens: 0, cacheReadInputTokens: 0,
+  };
+
+  it("says the project is out of money rather than that it needs an answer", () => {
+    seed("a-111", "clarify", "awaiting_human");
+    writeBudget("a-111", 5, env);
+    recordCost("a-111", "spec", true, usage, env);
+
+    const out = formatStatus(listProjects(env));
+    expect(out).toContain("over budget ($6.00 of $5.00)");
+    expect(out).not.toContain("needs you");
+  });
+
+  it("clears as soon as the ceiling is raised", () => {
+    seed("a-111", "clarify", "awaiting_human");
+    writeBudget("a-111", 5, env);
+    recordCost("a-111", "spec", true, usage, env);
+    writeBudget("a-111", 50, env);
+
+    expect(listProjects(env)[0]?.note).toBeUndefined();
+  });
+
+  it("leaves the prior-art verdict in front, since that one can end the project", () => {
+    seed("a-111", "research", "awaiting_human");
+    seedPriorArt("a-111", noGap);
+    writeBudget("a-111", 5, env);
+    recordCost("a-111", "research", true, usage, env);
+
+    expect(listProjects(env)[0]?.note).toBe("stopped: use ai-renamer instead");
+  });
+
+  it("does not annotate a project that is not parked", () => {
+    seed("a-111", "spec", "running");
+    writeBudget("a-111", 5, env);
+    recordCost("a-111", "spec", true, usage, env);
+
+    expect(listProjects(env)[0]?.note).toBeUndefined();
+  });
+
+  it("survives a malformed BUDGET.json instead of dropping the project", () => {
+    // `sfo status` lists everything or it is useless; the gates in `advance`
+    // and `guardRunnable` are where a bad ceiling fails closed.
+    seed("a-111", "clarify", "awaiting_human");
+    fs.writeFileSync(path.join(env.SFO_HOME, "a-111", ".sfo", "BUDGET.json"), "{ not json");
+    const listed = listProjects(env);
+    expect(listed).toHaveLength(1);
+    expect(listed[0]?.note).toBeUndefined();
   });
 });

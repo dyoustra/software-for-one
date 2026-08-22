@@ -27,7 +27,12 @@ export function buildProgram(): Command {
     .command("new")
     .description("Capture an idea and start a run")
     .argument("<idea>", "the idea, in your own words")
-    .action(guarded(async (idea: string) => {
+    .option("--budget <usd>", "park the project when spend reaches this many dollars")
+    .action(guarded(async (idea: string, opts: { budget?: string }) => {
+      // Parsed before triage, so a malformed ceiling costs nothing.
+      const { parseBudget } = await import("./commands/budget.js");
+      const ceiling = opts.budget === undefined ? null : parseBudget(opts.budget);
+
       // Selected here, and warned about here, so the message lands before the
       // call rather than after ten seconds of unexplained silence.
       const path = selectTriagePath();
@@ -39,6 +44,12 @@ export function buildProgram(): Command {
         randomBytes(3).toString("hex"),
       );
       console.log(`captured: ${id}`);
+
+      if (ceiling !== null) {
+        const { writeBudget } = await import("./core/budget.js");
+        writeBudget(id, ceiling);
+        console.log(`budget ceiling: $${ceiling.toFixed(2)}`);
+      }
 
       // Printed before anything is spent: the front half runs on `sfo run`,
       // and this is the last cheap moment to walk away.
@@ -71,6 +82,17 @@ export function buildProgram(): Command {
       } else {
         console.log(`started (pid ${runDetached(id, { anyway: opts.anyway })})`);
       }
+    }));
+
+  program
+    .command("budget")
+    .description("Show or set a project's spending ceiling")
+    .argument("<id>", "project id")
+    .argument("[usd]", "new ceiling in dollars; omit to show the current one")
+    .action(guarded(async (id: string, usd?: string) => {
+      const { showBudget, setBudget } = await import("./commands/budget.js");
+      if (usd === undefined) showBudget(id);
+      else setBudget(id, usd);
     }));
 
   program

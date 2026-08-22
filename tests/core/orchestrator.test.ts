@@ -7,6 +7,9 @@ import { advance } from "../../src/core/orchestrator.js";
 import { writeState, readState, type ProjectState } from "../../src/core/state.js";
 import { writeCriteria } from "../../src/core/criteria.js";
 import { readCostRecords } from "../../src/core/cost.js";
+import { writeBudget } from "../../src/core/budget.js";
+import { readDecisions } from "../../src/core/decisions.js";
+import { listProjects, formatStatus } from "../../src/commands/status.js";
 import type { Runner, RunStageInput, StageResult, StageUsage } from "../../src/runner/types.js";
 
 let env: Record<string, string>;
@@ -43,9 +46,9 @@ class FakeRunner implements Runner {
   }
 }
 
-function seed(stage: string): ProjectState {
+function seed(stage: string, id = "p"): ProjectState {
   const s: ProjectState = {
-    id: "p",
+    id,
     title: "T",
     currentStage: stage,
     status: "awaiting_human",
@@ -55,8 +58,8 @@ function seed(stage: string): ProjectState {
     createdAt: "2026-08-21T00:00:00.000Z",
     updatedAt: "2026-08-21T00:00:00.000Z",
   };
-  fs.mkdirSync(path.join(env.SFO_HOME, "p", ".sfo"), { recursive: true });
-  execFileSync("git", ["init", "-q"], { cwd: path.join(env.SFO_HOME, "p") });
+  fs.mkdirSync(path.join(env.SFO_HOME, id, ".sfo"), { recursive: true });
+  execFileSync("git", ["init", "-q"], { cwd: path.join(env.SFO_HOME, id) });
   writeState(s, env);
   return s;
 }
@@ -311,5 +314,110 @@ describe("criteria drift", () => {
 
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
+  });
+});
+
+describe("budget ceiling", () => {
+  /** Spends the ceiling through the pipeline itself rather than seeding a bill. */
+  async function spendToTheCeiling(): Promise<void> {
+    seed("capture");
+    writeBudget("p", USAGE.costUsd, env);
+    await advance("p", new FakeRunner(true, 0, USAGE), env);
+  }
+
+  it("parks before the next stage rather than after paying for it", async () => {
+    // research costs exactly the ceiling. Checking after recording cost would
+    // let spec run too — an overshoot of a whole stage, which at real prices
+    // ($0.30–$1.25 a stage) is an overrun, not a rounding error.
+    await spendToTheCeiling();
+
+    expect(readCostRecords("p", env).map((r) => r.stage)).toEqual(["research"]);
+    const s = readState("p", env);
+    expect(s.status).toBe("awaiting_human");
+    expect(s.pid).toBeNull();
+  });
+
+  it("runs nothing at all when the project is already over its ceiling", async () => {
+    await spendToTheCeiling();
+
+    const again = new FakeRunner(true, 0, USAGE);
+    await advance("p", again, env);
+
+    expect(again.calls).toHaveLength(0);
+    expect(readCostRecords("p", env)).toHaveLength(1);
+  });
+
+  it("resumes the stage the ceiling refused once the ceiling is raised", async () => {
+    // The stage never ran, so parking must not move currentStage onto it:
+    // pickStage would then ask for the stage *after* it and the refused work
+    // would be skipped, silently, exactly when the user paid to continue.
+    await spendToTheCeiling();
+    writeBudget("p", 100, env);
+
+    const resumed = new FakeRunner(true, 0, USAGE);
+    await advance("p", resumed, env);
+
+    expect(resumed.calls.map((c) => path.basename(c.logPath))).toEqual(["spec.log"]);
+    expect(readState("p", env).currentStage).toBe("clarify");
+  });
+
+  it("leaves a project with no ceiling alone, however much it spends", async () => {
+    seed("capture");
+    const runner = new FakeRunner(true, 0, { ...USAGE, costUsd: 1000 });
+    await advance("p", runner, env);
+
+    expect(runner.calls.map((c) => path.basename(c.logPath))).toEqual([
+      "research.log",
+      "spec.log",
+    ]);
+    expect(readState("p", env).currentStage).toBe("clarify");
+  });
+
+  it("runs on when spend is still under the ceiling", async () => {
+    seed("capture");
+    writeBudget("p", USAGE.costUsd * 10, env);
+    const runner = new FakeRunner(true, 0, USAGE);
+    await advance("p", runner, env);
+
+    expect(runner.calls).toHaveLength(2);
+    expect(readState("p", env).status).toBe("awaiting_human");
+    expect(readState("p", env).currentStage).toBe("clarify");
+  });
+
+  it("records the halt as a decision, with the numbers that forced it", async () => {
+    await spendToTheCeiling();
+
+    const decisions = readDecisions("p", env);
+    expect(decisions).toHaveLength(1);
+    expect(decisions[0].decided_by).toBe("agent");
+    expect(decisions[0].blast_radius).toBe("external");
+    expect(decisions[0].why).toContain("0.05");
+    expect(decisions[0].decision).toContain("spec");
+  });
+
+  it("does not re-record the same halt every time the user retries", async () => {
+    await spendToTheCeiling();
+    await advance("p", new FakeRunner(true, 0, USAGE), env);
+    await advance("p", new FakeRunner(true, 0, USAGE), env);
+
+    expect(readDecisions("p", env)).toHaveLength(1);
+  });
+
+  it("tells a budget park apart from one that is waiting on the human", async () => {
+    // Both are `awaiting_human`. Collapsing them tells someone who is out of
+    // money to go answer questions, and vice versa.
+    seed("capture", "broke");
+    writeBudget("broke", USAGE.costUsd, env);
+    await advance("broke", new FakeRunner(true, 0, USAGE), env);
+
+    seed("capture", "asking");
+    await advance("asking", new FakeRunner(true, 0, USAGE), env);
+
+    expect(readState("broke", env).currentStage).toBe("research");
+    expect(readState("asking", env).currentStage).toBe("clarify");
+
+    const out = formatStatus(listProjects(env));
+    expect(out).toMatch(/broke .*over budget/);
+    expect(out).toMatch(/asking .*needs you/);
   });
 });

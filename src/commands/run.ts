@@ -5,6 +5,7 @@ import { advance } from "../core/orchestrator.js";
 import { ClaudeCodeRunner } from "../runner/claude-code.js";
 import { readState, isStale } from "../core/state.js";
 import { blockingPriorArt, readPriorArt } from "../core/priorart.js";
+import { budgetState, formatBudget } from "../core/budget.js";
 import type { Env } from "../core/paths.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -53,6 +54,16 @@ export function guardRunnable(id: string, env?: Env, opts: GuardOptions = {}): v
   if (state.status === "failed") {
     throw new Error(
       `${id} failed at stage "${state.currentStage}" — re-run it with \`sfo stage ${id} ${state.currentStage}\` before advancing`,
+    );
+  }
+
+  // Deliberately above the `--anyway` escape hatch: that flag is scoped to the
+  // prior-art verdict, and a spending ceiling the user set is not an opinion
+  // the pipeline gets to override on their behalf.
+  const budget = budgetState(id, env);
+  if (budget?.exceeded) {
+    throw new Error(
+      `${id} is at its budget ceiling — ${formatBudget(budget)}. Raise it with \`sfo budget ${id} <usd>\`, or keep what is already built`,
     );
   }
 

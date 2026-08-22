@@ -1,5 +1,6 @@
 import { readCostRecords, totalCost, type CostRecord } from "../core/cost.js";
 import { readState } from "../core/state.js";
+import { budgetState, formatBudget } from "../core/budget.js";
 import { listProjects } from "./status.js";
 import type { Env } from "../core/paths.js";
 
@@ -96,6 +97,8 @@ export function showCost(id: string | undefined, env?: Env): void {
     // quietly showing an empty bill.
     readState(id, env);
     console.log(formatProjectCost(readCostRecords(id, env)));
+    const budget = budgetState(id, env);
+    if (budget) console.log(`\n${formatBudget(budget)}`);
     return;
   }
 

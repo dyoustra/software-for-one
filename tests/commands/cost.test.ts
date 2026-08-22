@@ -1,6 +1,11 @@
-import { describe, it, expect } from "vitest";
-import { formatProjectCost, formatAllCosts } from "../../src/commands/cost.js";
-import type { CostRecord, CostVia } from "../../src/core/cost.js";
+import { describe, it, expect, vi } from "vitest";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { formatProjectCost, formatAllCosts, showCost } from "../../src/commands/cost.js";
+import { writeState } from "../../src/core/state.js";
+import { writeBudget } from "../../src/core/budget.js";
+import { recordCost, type CostRecord, type CostVia } from "../../src/core/cost.js";
 
 function rec(stage: string, costUsd: number, ok = true, via: CostVia = "cli"): CostRecord {
   return {
@@ -85,5 +90,35 @@ describe("formatAllCosts", () => {
     ]);
     expect(out).toMatch(/aaa\s+1\s+sdk/);
     expect(out).toMatch(/bbb\s+1\s+cli/);
+  });
+});
+
+describe("showCost", () => {
+  it("shows the ceiling alongside the bill, so the number has something to mean", () => {
+    const env = { SFO_HOME: fs.mkdtempSync(path.join(os.tmpdir(), "sfo-cost-")) };
+    fs.mkdirSync(path.join(env.SFO_HOME, "p", ".sfo"), { recursive: true });
+    writeState(
+      {
+        id: "p",
+        title: "T",
+        currentStage: "spec",
+        status: "awaiting_human",
+        attempts: {},
+        pid: null,
+        heartbeatAt: null,
+        createdAt: "2026-08-21T00:00:00.000Z",
+        updatedAt: "2026-08-21T00:00:00.000Z",
+      },
+      env,
+    );
+    writeBudget("p", 10, env);
+    recordCost("p", "research", true, rec("research", 4).usage, env);
+
+    const lines: string[] = [];
+    const log = vi.spyOn(console, "log").mockImplementation((m) => void lines.push(String(m)));
+    showCost("p", env);
+    log.mockRestore();
+
+    expect(lines.join("\n")).toContain("$4.00 spent of a $10.00 ceiling");
   });
 });

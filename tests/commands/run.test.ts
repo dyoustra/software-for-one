@@ -5,6 +5,8 @@ import path from "node:path";
 import { guardRunnable, detachedArgs } from "../../src/commands/run.js";
 import { writeState, type ProjectState } from "../../src/core/state.js";
 import { writePriorArt, type PriorArt } from "../../src/core/priorart.js";
+import { writeBudget } from "../../src/core/budget.js";
+import { recordCost } from "../../src/core/cost.js";
 
 let env: Record<string, string>;
 
@@ -168,6 +170,47 @@ describe("corrupt prior art fails closed", () => {
 
   it("is unaffected when there is no prior art at all", () => {
     seedParkedAtResearch();
+    expect(() => guardRunnable("p", env)).not.toThrow();
+  });
+});
+
+describe("guardRunnable and the budget ceiling", () => {
+  const usage = {
+    costUsd: 3, durationMs: 10, numTurns: 1,
+    inputTokens: 1, outputTokens: 1, cacheCreationInputTokens: 0, cacheReadInputTokens: 0,
+  };
+
+  function spend(dollars: number) {
+    recordCost("p", "research", true, { ...usage, costUsd: dollars }, env);
+  }
+
+  it("refuses a project that has spent its ceiling", () => {
+    // `sfo run` spawns a detached child with stdio: "ignore". Left to the
+    // child, this refusal would print "started (pid N)" and then vanish.
+    seed("awaiting_human");
+    writeBudget("p", 5, env);
+    spend(5);
+    expect(() => guardRunnable("p", env)).toThrow(/budget ceiling/);
+    expect(() => guardRunnable("p", env)).toThrow(/sfo budget p <usd>/);
+  });
+
+  it("refuses it even with --anyway, which is scoped to the prior-art verdict", () => {
+    seed("awaiting_human");
+    writeBudget("p", 5, env);
+    spend(6);
+    expect(() => guardRunnable("p", env, { anyway: true })).toThrow(/budget ceiling/);
+  });
+
+  it("allows a project still under its ceiling", () => {
+    seed("awaiting_human");
+    writeBudget("p", 5, env);
+    spend(1);
+    expect(() => guardRunnable("p", env)).not.toThrow();
+  });
+
+  it("allows a project with no ceiling, whatever it has spent", () => {
+    seed("awaiting_human");
+    spend(500);
     expect(() => guardRunnable("p", env)).not.toThrow();
   });
 });

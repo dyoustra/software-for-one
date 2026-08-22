@@ -3,6 +3,8 @@ import { nextStage, blocksOnHuman } from "./stages.js";
 import { artifactExists } from "./artifacts.js";
 import { readCriteria } from "./criteria.js";
 import { recordCost } from "./cost.js";
+import { budgetState, formatBudget, type BudgetState } from "./budget.js";
+import { readDecisions, appendDecision } from "./decisions.js";
 import { commitStage } from "./repo.js";
 import { readPriorArt, blocksPipeline } from "./priorart.js";
 import { loadPrompt } from "../stages/prompts.js";
@@ -39,8 +41,40 @@ function startHeartbeat(id: string, env: Env | undefined, intervalMs: number): (
   return () => clearInterval(timer);
 }
 
-/** Sentinel: stop and wait for the human rather than running anything. */
-const PARK = Symbol("park");
+/**
+ * Stop and wait for the human rather than running anything, and why.
+ *
+ * Both reasons halt the pipeline, but they ask different things of the user —
+ * "answer my questions" versus "raise the ceiling or take what is built" — so
+ * the reason has to survive as far as the caller, not collapse to one sentinel.
+ */
+type Park =
+  | { park: "human" }
+  /** `stage` is the one that was refused, not the one that last ran. */
+  | { park: "budget"; stage: string; budget: BudgetState };
+
+const HUMAN_PARK: Park = { park: "human" };
+
+function isPark(pick: string | null | Park): pick is Park {
+  return pick !== null && typeof pick === "object";
+}
+
+/** What to run next, or the reason nothing runs. */
+function pickStage(
+  id: string,
+  state: { currentStage: string; status: string },
+  env: Env | undefined,
+): string | null | Park {
+  const target = pickTarget(id, state, env);
+  if (!isPark(target) && target !== null) {
+    // Checked here, before dispatch, and never after recording what a stage
+    // cost. Charging first and checking afterwards overshoots by exactly one
+    // stage every time, and a stage costs the same order as a small ceiling.
+    const budget = budgetState(id, env);
+    if (budget?.exceeded) return { park: "budget", stage: target, budget };
+  }
+  return target;
+}
 
 /**
  * Decides what to run next, and the parked case is the subtle one.
@@ -55,11 +89,11 @@ const PARK = Symbol("park");
  * Re-running it is not a risk: running sets status to `running`, and the parked
  * branch requires `awaiting_human`, so the stage cannot select itself twice.
  */
-function pickStage(
+function pickTarget(
   id: string,
   state: { currentStage: string; status: string },
   env: Env | undefined,
-): string | null | typeof PARK {
+): string | null | Park {
   const current = state.currentStage;
 
   if (
@@ -74,9 +108,48 @@ function pickStage(
   if (upcoming === null) return null;
 
   if (blocksOnHuman(upcoming) && !artifactExists(id, HUMAN_INPUT[upcoming], env)) {
-    return PARK;
+    return HUMAN_PARK;
   }
   return upcoming;
+}
+
+/**
+ * A halt the user has to act on and pay for is a decision, so it belongs in the
+ * trace with the numbers that forced it. The id encodes the stage and the
+ * ceiling that stopped it: re-running `sfo run` against an unchanged ceiling
+ * must not append the same halt again, while raising the ceiling and hitting it
+ * a second time is a genuinely new event and gets its own record.
+ */
+function recordBudgetPark(
+  id: string,
+  stage: string,
+  budget: BudgetState,
+  env: Env | undefined,
+): void {
+  const decisionId = `D-budget-${stage}-${budget.ceiling}`;
+  try {
+    if (readDecisions(id, env).some((d) => d.id === decisionId)) return;
+  } catch {
+    // A stage writes this file too, so a malformed one is possible. Losing the
+    // trace is better than letting it stop the pipeline from parking.
+    return;
+  }
+
+  appendDecision(
+    id,
+    {
+      id: decisionId,
+      decision: `Whether to run "${stage}" with the budget ceiling already spent`,
+      chose: "park the project and hand the call back to the human",
+      considered: "run the stage anyway; abandon the project",
+      why: `${formatBudget(budget)} — raise it with \`sfo budget ${id} <usd>\` or take what is already built`,
+      decided_by: "agent",
+      // The user's money and their delivery, not an internal detail.
+      blast_radius: "external",
+      at: new Date().toISOString(),
+    },
+    env,
+  );
 }
 
 
@@ -142,8 +215,15 @@ export async function advance(
       return;
     }
 
-    if (upcoming === PARK) {
-      const target = nextStage(state.currentStage) ?? state.currentStage;
+    if (isPark(upcoming)) {
+      // A human park moves onto the stage that is waiting for the human. A
+      // budget park stays where it is: the picked stage never ran, and marking
+      // it current would make the next `pickStage` ask for the one after it —
+      // silently skipping the work the ceiling only postponed.
+      const target =
+        upcoming.park === "budget"
+          ? state.currentStage
+          : (nextStage(state.currentStage) ?? state.currentStage);
       state = {
         ...state,
         currentStage: target,
@@ -152,6 +232,7 @@ export async function advance(
         updatedAt: new Date().toISOString(),
       };
       writeState(state, env);
+      if (upcoming.park === "budget") recordBudgetPark(id, upcoming.stage, upcoming.budget, env);
       return;
     }
 
