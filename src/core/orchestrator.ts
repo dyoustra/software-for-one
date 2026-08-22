@@ -14,6 +14,7 @@ import { lockTests } from "./testlock.js";
 import {
   runVerify,
   detectArchetype,
+  verifiabilityProblem,
   slicesWithoutTests,
   TEST_DIR,
   type VerifyResult,
@@ -419,26 +420,40 @@ async function runSlices(
   // An archetype nobody registered has no recipe, so every slice would report
   // "no gates available" and fail twice before anyone learned that the one
   // stage that picks the stack picked a stack this cannot grade.
+  let archetype: string;
   try {
-    detectArchetype(id, env);
+    archetype = detectArchetype(id, env);
   } catch (err) {
     return { outcome: "failed", reason: `${reason(err)} — re-run \`sfo stage ${id} spec\`` };
   }
 
-  // Checked over the whole plan, once, before any slice is paid for. The suite
-  // is hash-locked by now so this answer cannot change mid-build, and a slice
-  // whose tests cannot be found is a broken contract between test-write and
-  // the gate — one re-run of test-write fixes every one of them, which is only
-  // possible if they are all named here rather than discovered one at a time.
+  // Everything that can stop a build is checked here, once, before any slice
+  // is paid for — and reported together rather than one at a time. Each would
+  // otherwise present as an ordinary slice failure, indistinguishable from
+  // code that does not work, and cost two attempts on every slice to say so.
+  // They are collected because they have different remedies: told only the
+  // first, the user fixes it, pays for another run, and meets the second.
+  const blockers: string[] = [];
+
+  // test-repair is the stage that scaffolds the toolchain.
+  const unverifiable = verifiabilityProblem(id, archetype, env);
+  if (unverifiable) {
+    blockers.push(`${unverifiable} — re-run \`sfo stage ${id} test-repair\``);
+  }
+
+  // The suite is hash-locked by now, so this answer cannot change mid-build. A
+  // slice whose tests cannot be found is a broken contract between test-write
+  // and the gate, and one re-run of test-write fixes every one of them — which
+  // is only possible if they are all named here rather than met one at a time.
   const untested = slicesWithoutTests(id, slices, env);
   if (untested.length > 0) {
-    return {
-      outcome: "failed",
-      reason:
-        `no test file under ${TEST_DIR}/ is named for ${untested.join(", ")} — ` +
+    blockers.push(
+      `no test file under ${TEST_DIR}/ is named for ${untested.join(", ")} — ` +
         `re-run \`sfo stage ${id} test-write\` so every slice has a test file named for its id`,
-    };
+    );
   }
+
+  if (blockers.length > 0) return { outcome: "failed", reason: blockers.join("; ") };
 
   while (true) {
     let state = readState(id, env);

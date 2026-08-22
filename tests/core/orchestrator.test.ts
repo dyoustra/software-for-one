@@ -80,18 +80,37 @@ const SLICES: Slice[] = [
  */
 function producesArtifacts(
   slices: Slice[] = SLICES,
-  /** The stack the spec stage recorded, written as text the way it writes it. */
-  archetype?: string,
+  /**
+   * The stack the spec stage recorded, written as text the way it writes it.
+   * `null` means it recorded none — deliberately not `undefined`, which would
+   * be swallowed by the caller's default parameter and silently yield one.
+   */
+  archetype: string | null = "cli-python",
 ): (stage: string) => void {
   return (stage) => {
     if (stage === "spec") writeCriteria("p", CRITERIA, env);
-    if (stage === "spec" && archetype !== undefined) {
+    if (stage === "spec" && archetype !== null) {
       fs.writeFileSync(
         path.join(env.SFO_HOME, "p", ".sfo", ARCHETYPE_FILE),
         `{"archetype":"${archetype}","why":"the idea is a CLI"}`,
       );
     }
     if (stage === "plan") writeSlices("p", slices, env);
+    // test-repair scaffolds the toolchain in production, so the fake does too.
+    // Without it every fixture models a project the pipeline can no longer
+    // produce — one whose gate could never have run.
+    if (stage === "test-repair" && archetype === "cli-python") {
+      fs.writeFileSync(
+        path.join(env.SFO_HOME, "p", "pyproject.toml"),
+        '[project]\nname = "p"\nversion = "0.1.0"\n',
+      );
+    }
+    if (stage === "test-repair" && archetype === "cli-node") {
+      fs.writeFileSync(
+        path.join(env.SFO_HOME, "p", "package.json"),
+        '{"name":"p","scripts":{"lint":"true","typecheck":"true","test":"true"}}',
+      );
+    }
     if (stage === "test-write") {
       const dir = path.join(env.SFO_HOME, "p", "tests");
       fs.mkdirSync(dir, { recursive: true });
@@ -104,7 +123,7 @@ function producesArtifacts(
 }
 
 /** Runs the whole pipeline as far as it will go, artifacts and all. */
-function pipelineRunner(archetype?: string): FakeRunner {
+function pipelineRunner(archetype: string | null = "cli-python"): FakeRunner {
   return new FakeRunner(true, 0, undefined, producesArtifacts(SLICES, archetype));
 }
 
@@ -668,20 +687,29 @@ describe("the slice loop", () => {
     error.mockRestore();
   });
 
-  it("runs the real gate when none is injected, and fails a slice it cannot verify", async () => {
-    // The project has no manifest, so no archetype is recognised and no recipe
-    // exists. "Nothing to check" must not read as "everything checks out".
+  it("refuses to start a build it could never have graded, before spending on one", async () => {
+    // No archetype and no manifest, so no recipe exists. "Nothing to check"
+    // must not read as "everything checks out" — and finding that out is worth
+    // nothing if it costs two attempts on every slice to say it.
+    const runner = pipelineRunner(null);
+    await runPipeline(runner, {});
+
+    const s = readState("p", env);
+    expect(s.status).toBe("failed");
+    expect(s.slicesPassed).toEqual([]);
+    expect(s.slicesFailed).toEqual([]);
+    expect(runner.calls.filter((c) => stageOf(c).startsWith("build-"))).toHaveLength(0);
+  });
+
+  it("runs the real gate when none is injected rather than assuming a pass", async () => {
+    // The gate itself is wired by default; this is the only test that reaches
+    // runVerify without an injected seam.
     const runner = pipelineRunner();
     await runPipeline(runner, {});
 
     const s = readState("p", env);
     expect(s.slicesPassed).toEqual([]);
     expect(s.slicesFailed).toEqual(["S-01", "S-03"]);
-    const log = fs.readFileSync(
-      path.join(env.SFO_HOME, "p", ".sfo", "logs", "build-S-01.verify.log"),
-      "utf8",
-    );
-    expect(log).toContain("no gates available");
   });
 });
 
@@ -742,9 +770,11 @@ describe("what the build refuses to start on", () => {
     // other slices' unimplemented tests, and is retried once — the entire
     // build's cost, with nothing in the output naming the real cause.
     const misnamed = new FakeRunner(true, 0, USAGE, (stage) => {
-      if (stage === "spec") writeCriteria("p", CRITERIA, env);
-      if (stage === "plan") writeSlices("p", SLICES, env);
+      // Everything else the pipeline produces is present, so this test fails
+      // on the naming alone rather than on a project that was never buildable.
+      producesArtifacts(SLICES)(stage);
       if (stage === "test-write") {
+        fs.rmSync(path.join(env.SFO_HOME, "p", "tests"), { recursive: true, force: true });
         const dir = path.join(env.SFO_HOME, "p", "tests");
         fs.mkdirSync(dir, { recursive: true });
         fs.writeFileSync(path.join(dir, "test_everything.py"), "def test_all(): assert False\n");
@@ -763,6 +793,29 @@ describe("what the build refuses to start on", () => {
       expect.stringMatching(/no test file under tests\/ is named for S-01, S-02, S-03/),
     );
     expect(error).toHaveBeenCalledWith(expect.stringContaining("test-write"));
+    error.mockRestore();
+  });
+
+  it("reports every blocker at once, not one per paid run", async () => {
+    // The two have different remedies, so reporting only the first costs the
+    // user a full run to discover the second.
+    const broken = new FakeRunner(true, 0, USAGE, (stage) => {
+      producesArtifacts(SLICES, null)(stage);
+      if (stage === "test-write") {
+        const dir = path.join(env.SFO_HOME, "p", "tests");
+        fs.rmSync(dir, { recursive: true, force: true });
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, "test_everything.py"), "def test_all(): assert False\n");
+      }
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await runPipeline(broken, { verify: PASSES });
+
+    const said = error.mock.calls.map((c) => String(c[0])).join("\n");
+    expect(said).toMatch(/no verification recipe/);
+    expect(said).toMatch(/no test file under tests\//);
+    expect(sliceStages(broken)).toEqual([]);
     error.mockRestore();
   });
 

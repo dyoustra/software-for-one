@@ -8,6 +8,7 @@ import {
   sliceTestFiles,
   slicesWithoutTests,
   detectArchetype,
+  verifiabilityProblem,
   TEST_DIR,
 } from "../../src/core/verify.js";
 import { ARCHETYPE_FILE } from "../../src/core/stack.js";
@@ -236,5 +237,46 @@ describe("detectArchetype", () => {
   it("still sniffs the manifest for a project recorded before ARCHETYPE.json existed", () => {
     fs.writeFileSync(path.join(dir, "pyproject.toml"), "[project]\n");
     expect(detectArchetype("p", env)).toBe("cli-python");
+  });
+});
+
+describe("verifiabilityProblem", () => {
+  it("passes a python project whose manifest is present", () => {
+    fs.writeFileSync(path.join(dir, "pyproject.toml"), '[project]\nname = "p"\n');
+    expect(verifiabilityProblem("p", "cli-python", env)).toBeNull();
+  });
+
+  it("names the missing manifest rather than letting the toolchain fail per slice", () => {
+    // Without this, `uv sync` fails on every slice and reads as broken code.
+    expect(verifiabilityProblem("p", "cli-python", env)).toMatch(/pyproject\.toml is missing/);
+  });
+
+  it("rejects an archetype with no recipe instead of grinding through slices", () => {
+    expect(verifiabilityProblem("p", "unknown", env)).toMatch(/no verification recipe/);
+  });
+
+  it("names the npm scripts the recipe runs but the manifest lacks", () => {
+    // `npm run lint` with no lint script exits 1, which reads as a lint
+    // failure — the build then fails every slice over a missing config line.
+    fs.writeFileSync(
+      path.join(dir, "package.json"),
+      '{"name":"p","scripts":{"test":"vitest run"}}',
+    );
+    const problem = verifiabilityProblem("p", "cli-node", env);
+    expect(problem).toMatch(/lint/);
+    expect(problem).toMatch(/typecheck/);
+  });
+
+  it("passes a node project declaring every script the recipe invokes", () => {
+    fs.writeFileSync(
+      path.join(dir, "package.json"),
+      '{"name":"p","scripts":{"lint":"eslint .","typecheck":"tsc --noEmit"}}',
+    );
+    expect(verifiabilityProblem("p", "cli-node", env)).toBeNull();
+  });
+
+  it("reports a malformed package.json as unrunnable, not as a passing gate", () => {
+    fs.writeFileSync(path.join(dir, "package.json"), "{ not json");
+    expect(verifiabilityProblem("p", "cli-node", env)).toMatch(/not valid JSON/);
   });
 });

@@ -98,6 +98,63 @@ function testFilePattern(sliceId: string): RegExp {
  * broken contract rather than a slice to grind through — see
  * `slicesWithoutTests`, which catches it before the build spends anything.
  */
+/** The file each archetype's toolchain needs before it can run at all. */
+const MANIFEST: Record<string, string> = {
+  "cli-python": "pyproject.toml",
+  "cli-node": "package.json",
+};
+
+/**
+ * Derived from the recipe rather than listed separately, so a recipe that
+ * starts invoking a new script cannot drift from the check that the script
+ * exists. `npm run lint` on a package.json without a `lint` script exits 1,
+ * which reads as a lint failure — the build then fails every slice twice over
+ * a missing line of config.
+ */
+function requiredNpmScripts(recipe: VerifyStep[]): string[] {
+  return recipe
+    .filter((step) => step.command === "npm" && step.args[0] === "run" && step.args[1])
+    .map((step) => step.args[1] as string);
+}
+
+/**
+ * Whether this project can be graded at all, answered once before any slice is
+ * paid for. Every problem here would otherwise surface as an ordinary slice
+ * failure — the same output as code that does not work — and cost two attempts
+ * on every slice to say so. The distinction matters: nothing was wrong with the
+ * build, the gate was never able to run.
+ */
+export function verifiabilityProblem(id: string, archetype: string, env?: Env): string | null {
+  const recipe = verifyRecipeFor(archetype);
+  if (recipe.length === 0) {
+    return `no verification recipe for archetype "${archetype}" — nothing could be checked`;
+  }
+
+  const dir = projectDir(id, env);
+  const manifest = MANIFEST[archetype];
+  if (manifest && !fs.existsSync(path.join(dir, manifest))) {
+    return `${manifest} is missing, so the ${archetype} toolchain cannot run`;
+  }
+
+  if (archetype === "cli-node") {
+    let scripts: Record<string, unknown> = {};
+    try {
+      const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8")) as {
+        scripts?: Record<string, unknown>;
+      };
+      scripts = pkg.scripts ?? {};
+    } catch {
+      return "package.json is not valid JSON, so the cli-node toolchain cannot run";
+    }
+    const missing = requiredNpmScripts(recipe).filter((name) => !scripts[name]);
+    if (missing.length > 0) {
+      return `package.json has no ${missing.join(" or ")} script, which the gate runs`;
+    }
+  }
+
+  return null;
+}
+
 export function sliceTestFiles(id: string, slice: Slice, env?: Env): string[] {
   const pattern = testFilePattern(slice.id);
   return walk(path.join(projectDir(id, env), TEST_DIR))
