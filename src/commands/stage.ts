@@ -2,6 +2,7 @@ import { ClaudeCodeRunner } from "../runner/claude-code.js";
 import { loadPrompt } from "../stages/prompts.js";
 import { projectDir, logPath, type Env } from "../core/paths.js";
 import { readState, writeState } from "../core/state.js";
+import { budgetState, formatBudget } from "../core/budget.js";
 import { recordCost } from "../core/cost.js";
 import { commitStage } from "../core/repo.js";
 import type { Runner } from "../runner/types.js";
@@ -20,6 +21,18 @@ export async function runSingleStage(
   runner: Runner = new ClaudeCodeRunner(),
 ): Promise<void> {
   const state = readState(id, env);
+
+  // `sfo stage` is the manual escape hatch, so the ceiling warns rather than
+  // refuses — invoking it by hand IS the human decision the ceiling routes to.
+  // But spending past a ceiling in silence is the failure this whole product
+  // exists to prevent, so it is said out loud before the money goes.
+  const budget = budgetState(id, env);
+  if (budget?.exceeded) {
+    console.log(
+      `warning: ${id} is over its ceiling — ${formatBudget(budget)}.\n` +
+        `running ${stage} anyway will spend past it. Raise it with \`sfo budget ${id} <usd>\`.`,
+    );
+  }
 
   const result = await runner.runStage({
     workdir: projectDir(id, env),

@@ -14,7 +14,12 @@ export interface BudgetState {
 export function readBudget(id: string, env?: Env): number | null {
   const file = artifactPath(id, BUDGET_FILE, env);
   if (!fs.existsSync(file)) return null;
-  const parsed = JSON.parse(fs.readFileSync(file, "utf8")) as { ceilingUsd?: unknown };
+  let parsed: { ceilingUsd?: unknown };
+  try {
+    parsed = JSON.parse(fs.readFileSync(file, "utf8")) as { ceilingUsd?: unknown };
+  } catch {
+    throw new Error(`${BUDGET_FILE} is not valid JSON`);
+  }
   return typeof parsed.ceilingUsd === "number" ? parsed.ceilingUsd : null;
 }
 

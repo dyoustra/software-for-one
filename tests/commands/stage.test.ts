@@ -1,11 +1,12 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { runSingleStage } from "../../src/commands/stage.js";
 import { writeState, readState, type ProjectState } from "../../src/core/state.js";
-import { readCostRecords } from "../../src/core/cost.js";
+import { readCostRecords, recordCost } from "../../src/core/cost.js";
+import { writeBudget } from "../../src/core/budget.js";
 import type { Runner, RunStageInput, StageResult, StageUsage } from "../../src/runner/types.js";
 
 let env: Record<string, string>;
@@ -117,5 +118,54 @@ describe("runSingleStage", () => {
     const records = readCostRecords("p", env);
     expect(records.map((r) => r.ok)).toEqual([false, true]);
     expect(records).toHaveLength(2);
+  });
+});
+
+describe("the ceiling warns but does not block the manual escape hatch", () => {
+  function overCeiling() {
+    seed("awaiting_human");
+    writeBudget("p", 1, env);
+    recordCost("p", "research", true, { ...USAGE, costUsd: 5 }, env);
+  }
+
+  function captureRun(stage: string) {
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((m) => void lines.push(String(m)));
+    return runSingleStage("p", stage, env, new FakeRunner(true, USAGE)).finally(() => {
+      spy.mockRestore();
+    }).then(() => lines.join("\n"));
+  }
+
+  it("warns before spending when the project is over its ceiling", async () => {
+    overCeiling();
+    const out = await captureRun("spec");
+
+    expect(out).toMatch(/over its ceiling/);
+    expect(out).toMatch(/sfo budget p <usd>/);
+  });
+
+  it("warns but still runs the stage — it is an override, not a gate", async () => {
+    // sfo run refuses over-ceiling projects. This command must not, or the
+    // documented recovery path (re-run a stage by hand) dead-ends the moment
+    // a ceiling is hit.
+    overCeiling();
+    await captureRun("spec");
+
+    expect(readCostRecords("p", env).map((r) => r.stage)).toEqual(["research", "spec"]);
+  });
+
+  it("says nothing about budget when the project is under its ceiling", async () => {
+    seed("awaiting_human");
+    writeBudget("p", 100, env);
+    recordCost("p", "research", true, { ...USAGE, costUsd: 5 }, env);
+
+    expect(await captureRun("spec")).not.toMatch(/ceiling/);
+  });
+
+  it("says nothing about budget when no ceiling is set", async () => {
+    seed("awaiting_human");
+    recordCost("p", "research", true, { ...USAGE, costUsd: 500 }, env);
+
+    expect(await captureRun("spec")).not.toMatch(/ceiling/);
   });
 });

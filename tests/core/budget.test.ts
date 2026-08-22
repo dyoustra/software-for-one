@@ -60,4 +60,13 @@ describe("budget", () => {
     recordCost("p", "research", true, usage, env);
     expect(budgetState("p", env)).toBeNull();
   });
+
+  it("names the file when BUDGET.json is malformed", () => {
+    // A raw JSON.parse message ("Unexpected token }") tells the user nothing
+    // about which file to go fix. Both gates throw on this, so nothing is
+    // spent — but the message is the only thing they get.
+    writeBudget("p", 10, env);
+    fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "BUDGET.json"), "{ nope");
+    expect(() => readBudget("p", env)).toThrow(/BUDGET\.json is not valid JSON/);
+  });
 });
