@@ -6,9 +6,11 @@ import {
   runVerify,
   runRecipe,
   sliceTestFiles,
+  slicesWithoutTests,
   detectArchetype,
   TEST_DIR,
 } from "../../src/core/verify.js";
+import { ARCHETYPE_FILE } from "../../src/core/stack.js";
 import { lockTests } from "../../src/core/testlock.js";
 import type { Slice } from "../../src/core/slices.js";
 import type { VerifyStep } from "../../src/core/archetype.js";
@@ -31,6 +33,11 @@ function touching(name: string, file: string, exit = 0): VerifyStep {
     args: ["-e", `require("fs").writeFileSync(${JSON.stringify(file)}, "");process.exit(${exit})`],
     scopeable: false,
   };
+}
+
+/** What the spec stage does with the stack it chose: writes the file itself. */
+function recordArchetype(body: string): void {
+  fs.writeFileSync(path.join(dir, ".sfo", ARCHETYPE_FILE), body);
 }
 
 beforeEach(() => {
@@ -152,12 +159,66 @@ describe("scoping a slice to its own tests", () => {
     ]);
   });
 
-  it("returns nothing when no file matches, so the whole suite runs", () => {
+  it("returns nothing when no file matches", () => {
     expect(sliceTestFiles("p", { ...SLICE, id: "S-99" }, env)).toEqual([]);
+  });
+
+  it("fails the gate rather than running the whole suite when it cannot find a slice's tests", () => {
+    // Running the whole suite is safe but expensive and silent: an early slice
+    // fails on later slices' unimplemented tests, twice, and nothing in the
+    // output says the test file was simply named something else.
+    lockTests("p", TEST_DIR, env);
+    const result = runVerify("p", "cli-python", { ...SLICE, id: "S-99" }, env);
+
+    expect(result.ok).toBe(false);
+    expect(result.steps).toEqual([]);
+    expect(result.reason).toMatch(/no test file matches S-99/);
+  });
+});
+
+describe("slicesWithoutTests", () => {
+  it("names every slice whose tests cannot be located, in plan order", () => {
+    const slices = [
+      { ...SLICE, id: "S-99" },
+      SLICE,
+      { ...SLICE, id: "S-98" },
+    ];
+    expect(slicesWithoutTests("p", slices, env)).toEqual(["S-99", "S-98"]);
+  });
+
+  it("is empty when every slice has a file named for it", () => {
+    expect(slicesWithoutTests("p", [SLICE], env)).toEqual([]);
   });
 });
 
 describe("detectArchetype", () => {
+  it("prefers the archetype the spec stage recorded over the manifest", () => {
+    // The manifest is evidence; the record is the decision. A Python project
+    // whose build agent added a package.json must not start being graded as a
+    // Node one.
+    recordArchetype('{"archetype":"cli-python","why":"a Python CLI"}');
+    fs.writeFileSync(path.join(dir, "package.json"), "{}");
+
+    expect(detectArchetype("p", env)).toBe("cli-python");
+  });
+
+  it("uses the recorded archetype before any manifest exists at all", () => {
+    // The state slice 1 is verified in on a real Python project: the record is
+    // the only thing that can name the stack.
+    recordArchetype('{"archetype":"cli-python","why":"a Python CLI"}');
+    expect(detectArchetype("p", env)).toBe("cli-python");
+  });
+
+  it("refuses an archetype nobody registered instead of quietly sniffing past it", () => {
+    // Falling back here would grade the project as whatever its manifest looks
+    // like — an archetype nobody chose — or as "unknown", which reports "no
+    // gates available" on every slice without ever naming the real cause.
+    recordArchetype('{"archetype":"cli-rust","why":"rust is fast"}');
+    fs.writeFileSync(path.join(dir, "pyproject.toml"), "[project]\n");
+
+    expect(() => detectArchetype("p", env)).toThrow(/ARCHETYPE\.json/);
+  });
+
   it("reads the python archetype off its manifest", () => {
     fs.writeFileSync(path.join(dir, "pyproject.toml"), "[project]\n");
     expect(detectArchetype("p", env)).toBe("cli-python");
@@ -170,5 +231,10 @@ describe("detectArchetype", () => {
 
   it("admits it does not know rather than guessing a recipe", () => {
     expect(detectArchetype("p", env)).toBe("unknown");
+  });
+
+  it("still sniffs the manifest for a project recorded before ARCHETYPE.json existed", () => {
+    fs.writeFileSync(path.join(dir, "pyproject.toml"), "[project]\n");
+    expect(detectArchetype("p", env)).toBe("cli-python");
   });
 });

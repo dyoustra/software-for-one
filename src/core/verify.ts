@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { verifyRecipeFor, type VerifyStep } from "./archetype.js";
+import { readStack } from "./stack.js";
 import { verifyTestLock, readTestLock } from "./testlock.js";
 import { projectDir, type Env } from "./paths.js";
 import type { Slice } from "./slices.js";
@@ -38,14 +39,27 @@ export interface VerifyResult {
 }
 
 /**
- * The spec stage records the chosen stack in prose, so there is no
- * machine-readable archetype on disk to read back. The manifest is the next
- * best evidence and has the advantage of describing what the project actually
- * became rather than what was planned. An unrecognised project falls through to
+ * The archetype this project is graded as.
+ *
+ * The recorded choice wins. The spec stage picks the stack and writes it to
+ * `.sfo/ARCHETYPE.json`, and what the deciding stage wrote down beats anything
+ * inferred after the fact — sniffing cannot tell a Python project whose
+ * manifest has not been created yet from one that is not Python at all.
+ *
+ * Sniffing survives as the fallback for projects created before the record
+ * existed, and because a manifest describes what the project actually became
+ * rather than what was planned. An unrecognised project falls through to
  * "unknown", which has no recipe — the gate then reports that it verified
  * nothing instead of passing.
+ *
+ * Throws when the record exists but is malformed or names an archetype the
+ * registry does not know. Falling back to sniffing there would quietly grade
+ * the project as something nobody chose.
  */
 export function detectArchetype(id: string, env?: Env): string {
+  const recorded = readStack(id, env);
+  if (recorded) return recorded.archetype;
+
   const dir = projectDir(id, env);
   if (fs.existsSync(path.join(dir, "pyproject.toml"))) return "cli-python";
   if (fs.existsSync(path.join(dir, "package.json"))) return "cli-node";
@@ -80,15 +94,27 @@ function testFilePattern(sliceId: string): RegExp {
 
 /**
  * Every test file belonging to this slice, relative to the project root. Empty
- * when nothing matches, and the caller then runs the whole suite: an unscoped
- * run can only be stricter than a scoped one, so the failure mode is a slice
- * that has to wait for its siblings, not one that passes unverified.
+ * means test-write named the suite something this cannot match, which is a
+ * broken contract rather than a slice to grind through — see
+ * `slicesWithoutTests`, which catches it before the build spends anything.
  */
 export function sliceTestFiles(id: string, slice: Slice, env?: Env): string[] {
   const pattern = testFilePattern(slice.id);
   return walk(path.join(projectDir(id, env), TEST_DIR))
     .filter((rel) => pattern.test(path.basename(rel).toLowerCase()))
     .map((rel) => `${TEST_DIR}/${rel}`);
+}
+
+/**
+ * Slices whose tests cannot be located, in plan order.
+ *
+ * Checked over the whole plan at once rather than slice by slice: the suite is
+ * hash-locked before the first slice runs, so this answer cannot change
+ * mid-build, and finding out at slice 7 costs six slices of real money to learn
+ * something knowable for free beforehand.
+ */
+export function slicesWithoutTests(id: string, slices: Slice[], env?: Env): string[] {
+  return slices.filter((s) => sliceTestFiles(id, s, env).length === 0).map((s) => s.id);
 }
 
 /**
@@ -171,5 +197,19 @@ export function runVerify(id: string, archetype: string, slice: Slice, env?: Env
     };
   }
 
-  return runRecipe(projectDir(id, env), recipe, sliceTestFiles(id, slice, env));
+  // Not "run the whole suite instead". An unscoped run makes early slices fail
+  // on later slices' unimplemented tests, so the slice fails twice and takes
+  // its dependents with it — expensive, and with nothing in the output naming
+  // the real cause. The direction was never unsafe; the silence was.
+  const testPaths = sliceTestFiles(id, slice, env);
+  if (testPaths.length === 0) {
+    return {
+      ok: false,
+      steps: [],
+      tamperedTests: [],
+      reason: `no test file matches ${slice.id} under ${TEST_DIR}/ — re-run \`sfo stage <id> test-write\` so each slice has a test file named for it`,
+    };
+  }
+
+  return runRecipe(projectDir(id, env), recipe, testPaths);
 }

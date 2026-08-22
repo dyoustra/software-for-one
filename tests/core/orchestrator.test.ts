@@ -11,6 +11,11 @@ import { readTestLock, verifyTestLock } from "../../src/core/testlock.js";
 import { readCostRecords } from "../../src/core/cost.js";
 import { writeBudget } from "../../src/core/budget.js";
 import { readDecisions } from "../../src/core/decisions.js";
+import { readVerifyRecords } from "../../src/core/verifyRecord.js";
+import { runRecipe } from "../../src/core/verify.js";
+import { projectDir } from "../../src/core/paths.js";
+import { ARCHETYPE_FILE } from "../../src/core/stack.js";
+import type { VerifyStep } from "../../src/core/archetype.js";
 import { listProjects, formatStatus } from "../../src/commands/status.js";
 import type { Runner, RunStageInput, StageResult, StageUsage } from "../../src/runner/types.js";
 
@@ -73,9 +78,19 @@ const SLICES: Slice[] = [
  * the build has to produce them the way the pipeline does, at the stage that
  * produces them.
  */
-function producesArtifacts(slices: Slice[] = SLICES): (stage: string) => void {
+function producesArtifacts(
+  slices: Slice[] = SLICES,
+  /** The stack the spec stage recorded, written as text the way it writes it. */
+  archetype?: string,
+): (stage: string) => void {
   return (stage) => {
     if (stage === "spec") writeCriteria("p", CRITERIA, env);
+    if (stage === "spec" && archetype !== undefined) {
+      fs.writeFileSync(
+        path.join(env.SFO_HOME, "p", ".sfo", ARCHETYPE_FILE),
+        `{"archetype":"${archetype}","why":"the idea is a CLI"}`,
+      );
+    }
     if (stage === "plan") writeSlices("p", slices, env);
     if (stage === "test-write") {
       const dir = path.join(env.SFO_HOME, "p", "tests");
@@ -89,9 +104,27 @@ function producesArtifacts(slices: Slice[] = SLICES): (stage: string) => void {
 }
 
 /** Runs the whole pipeline as far as it will go, artifacts and all. */
-function pipelineRunner(): FakeRunner {
-  return new FakeRunner(true, 0, undefined, producesArtifacts());
+function pipelineRunner(archetype?: string): FakeRunner {
+  return new FakeRunner(true, 0, undefined, producesArtifacts(SLICES, archetype));
 }
+
+/** A step that really runs, and exits how it is told to. */
+function exits(name: string, code: number): VerifyStep {
+  return {
+    name,
+    command: process.execPath,
+    args: ["-e", `process.exit(${code})`],
+    scopeable: false,
+  };
+}
+
+/**
+ * A gate that runs two real steps and fails on the second, through the same
+ * `runRecipe` production uses — so the verdict it produces is shaped by the
+ * step machinery rather than by hand.
+ */
+const STOPS_AT_TEST: VerifyFn = (id, _archetype, _slice, e) =>
+  runRecipe(projectDir(id, e), [exits("lint", 0), exits("test", 1)], []);
 
 const PASSES: VerifyFn = () => ({ ok: true, steps: [], tamperedTests: [] });
 const FAILS: VerifyFn = () => ({ ok: false, steps: [], tamperedTests: [], reason: "gate failed" });
@@ -100,6 +133,22 @@ const FAILS: VerifyFn = () => ({ ok: false, steps: [], tamperedTests: [], reason
 function failing(...ids: string[]): VerifyFn {
   return (id, archetype, slice, env) =>
     ids.includes(slice.id) ? FAILS(id, archetype, slice, env) : PASSES(id, archetype, slice, env);
+}
+
+/**
+ * Every stage succeeds except the build agent, which exits non-zero — the
+ * project reaches the slice loop and then fails inside it.
+ */
+class BuildFailsRunner implements Runner {
+  calls: RunStageInput[] = [];
+  constructor(private readonly archetype: string) {}
+  async runStage(input: RunStageInput): Promise<StageResult> {
+    this.calls.push(input);
+    const stage = stageOf(input);
+    producesArtifacts(SLICES, this.archetype)(stage);
+    const ok = !stage.startsWith("build-");
+    return { ok, exitCode: ok ? 0 : 1, logPath: input.logPath };
+  }
 }
 
 /** Dies mid-stage the way a dropped connection does: no state written, no result. */
@@ -683,5 +732,133 @@ describe("the ceiling during a build", () => {
 
     expect(sliceStages(resumed)).toEqual(["build-S-02", "build-S-03"]);
     expect(readState("p", env).status).toBe("done");
+  });
+});
+
+describe("what the build refuses to start on", () => {
+  it("stops before spending anything when a slice has no test file named for it", async () => {
+    // test-write named the suite something the slice ids cannot be found in.
+    // Without this check every slice runs against the WHOLE suite, fails on
+    // other slices' unimplemented tests, and is retried once — the entire
+    // build's cost, with nothing in the output naming the real cause.
+    const misnamed = new FakeRunner(true, 0, USAGE, (stage) => {
+      if (stage === "spec") writeCriteria("p", CRITERIA, env);
+      if (stage === "plan") writeSlices("p", SLICES, env);
+      if (stage === "test-write") {
+        const dir = path.join(env.SFO_HOME, "p", "tests");
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(path.join(dir, "test_everything.py"), "def test_all(): assert False\n");
+      }
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await runPipeline(misnamed, { verify: PASSES });
+
+    expect(sliceStages(misnamed)).toEqual([]);
+    expect(readCostRecords("p", env).map((r) => r.stage)).not.toContain("build-S-01");
+    const s = readState("p", env);
+    expect(s.status).toBe("failed");
+    expect(s.currentStage).toBe("build");
+    expect(error).toHaveBeenCalledWith(
+      expect.stringMatching(/no test file under tests\/ is named for S-01, S-02, S-03/),
+    );
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("test-write"));
+    error.mockRestore();
+  });
+
+  it("builds normally when every slice has a file named for it", async () => {
+    const runner = pipelineRunner("cli-python");
+    await runPipeline(runner, { verify: PASSES });
+
+    expect(sliceStages(runner)).toEqual(["build-S-01", "build-S-02", "build-S-03"]);
+  });
+
+  it("stops before spending anything on an archetype nobody registered", async () => {
+    // "cli-rust" has no recipe, so every slice would report "no gates
+    // available" and fail twice before anyone learned the stack was the problem.
+    const runner = pipelineRunner("cli-rust");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await runPipeline(runner, { verify: PASSES });
+
+    expect(sliceStages(runner)).toEqual([]);
+    expect(readState("p", env).status).toBe("failed");
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("ARCHETYPE.json"));
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("cli-python"));
+    error.mockRestore();
+  });
+});
+
+describe("VERIFY.jsonl", () => {
+  it("records every attempt at every slice, passed and failed", async () => {
+    await runPipeline(pipelineRunner("cli-python"), { verify: failing("S-01") });
+
+    // S-01 twice and abandoned, S-02 skipped as its dependent, S-03 built.
+    expect(readVerifyRecords("p", env).map((r) => [r.slice, r.attempt, r.ok])).toEqual([
+      ["S-01", 1, false],
+      ["S-01", 2, false],
+      ["S-03", 1, true],
+    ]);
+  });
+
+  it("records the archetype each slice was graded as", async () => {
+    await runPipeline(pipelineRunner("cli-python"), { verify: PASSES });
+
+    expect(readVerifyRecords("p", env).every((r) => r.archetype === "cli-python")).toBe(true);
+  });
+
+  it("records which step failed, so deliver can say what broke", async () => {
+    await runPipeline(pipelineRunner("cli-python"), { verify: STOPS_AT_TEST });
+
+    const first = readVerifyRecords("p", env)[0];
+    expect(first.ok).toBe(false);
+    expect(first.failedStep).toBe("test");
+    expect(first.reason).toBe("test failed");
+  });
+
+  it("leaves no failed step on a slice that passed", async () => {
+    await runPipeline(pipelineRunner("cli-python"), { verify: PASSES });
+
+    expect(readVerifyRecords("p", env)[0].failedStep).toBeUndefined();
+  });
+
+  it("records the test files a build tampered with", async () => {
+    // The real gate, and a build agent doing the cheapest thing that makes a
+    // failing test pass: editing the test.
+    const tamperer = new FakeRunner(true, 0, undefined, (stage) => {
+      producesArtifacts()(stage);
+      if (stage === "build-S-01") {
+        fs.writeFileSync(
+          path.join(env.SFO_HOME, "p", "tests", "test_s01.py"),
+          "def test_s01(): pass\n",
+        );
+      }
+    });
+
+    await runPipeline(tamperer, {});
+
+    const s01 = readVerifyRecords("p", env).filter((r) => r.slice === "S-01");
+    expect(s01).toHaveLength(2);
+    expect(s01[0].ok).toBe(false);
+    expect(s01[0].tamperedTests).toEqual(["tests/test_s01.py"]);
+  });
+
+  it("records a slice whose build agent never finished", async () => {
+    await runPipeline(new BuildFailsRunner("cli-python"), { verify: PASSES });
+
+    const records = readVerifyRecords("p", env);
+    expect(records[0].ok).toBe(false);
+    expect(records[0].reason).toMatch(/build agent exited 1/);
+    // Never graded, so nothing may claim a step failed.
+    expect(records[0].failedStep).toBeUndefined();
+  });
+
+  it("survives the round trip through its own schema", async () => {
+    await runPipeline(pipelineRunner("cli-python"), { verify: failing("S-01") });
+
+    // readVerifyRecords validates every line; a record the writer produced that
+    // the reader rejects would throw here.
+    expect(() => readVerifyRecords("p", env)).not.toThrow();
+    expect(readVerifyRecords("p", env).length).toBeGreaterThan(0);
   });
 });

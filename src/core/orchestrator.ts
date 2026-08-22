@@ -11,10 +11,17 @@ import { readDecisions, appendDecision } from "./decisions.js";
 import { commitStage } from "./repo.js";
 import { readPriorArt, blocksPipeline } from "./priorart.js";
 import { lockTests } from "./testlock.js";
-import { runVerify, detectArchetype, TEST_DIR, type VerifyResult } from "./verify.js";
+import {
+  runVerify,
+  detectArchetype,
+  slicesWithoutTests,
+  TEST_DIR,
+  type VerifyResult,
+} from "./verify.js";
+import { appendVerifyRecord } from "./verifyRecord.js";
 import { loadPrompt } from "../stages/prompts.js";
 import { projectDir, logPath, type Env } from "./paths.js";
-import type { Runner } from "../runner/types.js";
+import type { Runner, StageResult } from "../runner/types.js";
 
 /** The artifact a human must produce before a blocking stage can run. */
 const HUMAN_INPUT: Record<string, string> = { clarify: "ANSWERS.json" };
@@ -306,6 +313,74 @@ function writeVerifyLog(
   }
 }
 
+function failedVerdict(why: string): VerifyResult {
+  return { ok: false, steps: [], tamperedTests: [], reason: why };
+}
+
+/**
+ * One slice attempt's verdict, and the archetype it was graded as.
+ *
+ * The archetype is resolved per attempt rather than once for the run: on a
+ * project with no recorded archetype, the first slice can be the one that
+ * writes the manifest it is recognised by. `runSlices` has already rejected a
+ * malformed record before any slice ran, so a throw here means something
+ * rewrote it mid-build — that fails the slice, not the whole run.
+ */
+function gradeAttempt(
+  id: string,
+  slice: Slice,
+  result: StageResult,
+  verify: VerifyFn,
+  env: Env | undefined,
+): { archetype: string; verdict: VerifyResult } {
+  let archetype = "unknown";
+  try {
+    archetype = detectArchetype(id, env);
+  } catch (err) {
+    return { archetype, verdict: failedVerdict(reason(err)) };
+  }
+
+  if (!result.ok) {
+    return { archetype, verdict: failedVerdict(`the build agent exited ${result.exitCode}`) };
+  }
+  return { archetype, verdict: verify(id, archetype, slice, env) };
+}
+
+/**
+ * The structured account of the gate, which `.sfo/logs/*.verify.log` is not:
+ * that log is gitignored and unstructured, and the deliver stage has to lead
+ * with what does not work. Best-effort like the log — losing the record must
+ * not cost the build the result it describes — but it complains, because a
+ * missing record is indistinguishable from a slice that never ran.
+ */
+function recordVerdict(
+  id: string,
+  slice: Slice,
+  archetype: string,
+  attempt: number,
+  verdict: VerifyResult,
+  env: Env | undefined,
+): void {
+  try {
+    appendVerifyRecord(
+      id,
+      {
+        slice: slice.id,
+        attempt,
+        ok: verdict.ok,
+        archetype,
+        failedStep: verdict.steps.find((step) => !step.ok)?.name,
+        reason: verdict.reason,
+        tamperedTests: verdict.tamperedTests,
+        at: new Date().toISOString(),
+      },
+      env,
+    );
+  } catch (err) {
+    console.error(`sfo: could not record the verify result for ${slice.id} — ${reason(err)}`);
+  }
+}
+
 type BuildOutcome =
   | { outcome: "complete" }
   | { outcome: "parked"; park: Park }
@@ -341,6 +416,30 @@ async function runSlices(
     return { outcome: "failed", reason: `no slices to build — re-run \`sfo stage ${id} plan\`` };
   }
 
+  // An archetype nobody registered has no recipe, so every slice would report
+  // "no gates available" and fail twice before anyone learned that the one
+  // stage that picks the stack picked a stack this cannot grade.
+  try {
+    detectArchetype(id, env);
+  } catch (err) {
+    return { outcome: "failed", reason: `${reason(err)} — re-run \`sfo stage ${id} spec\`` };
+  }
+
+  // Checked over the whole plan, once, before any slice is paid for. The suite
+  // is hash-locked by now so this answer cannot change mid-build, and a slice
+  // whose tests cannot be found is a broken contract between test-write and
+  // the gate — one re-run of test-write fixes every one of them, which is only
+  // possible if they are all named here rather than discovered one at a time.
+  const untested = slicesWithoutTests(id, slices, env);
+  if (untested.length > 0) {
+    return {
+      outcome: "failed",
+      reason:
+        `no test file under ${TEST_DIR}/ is named for ${untested.join(", ")} — ` +
+        `re-run \`sfo stage ${id} test-write\` so every slice has a test file named for its id`,
+    };
+  }
+
   while (true) {
     let state = readState(id, env);
     const slice = nextRunnable(slices, {
@@ -371,20 +470,12 @@ async function runSlices(
     }
     recordCost(id, stageName, result.ok, result.usage, env);
 
-    // Detected per slice rather than once for the run: the first slice can be
-    // the one that writes the manifest the archetype is recognised by.
-    const verdict: VerifyResult = result.ok
-      ? verify(id, detectArchetype(id, env), slice, env)
-      : {
-          ok: false,
-          steps: [],
-          tamperedTests: [],
-          reason: `the build agent exited ${result.exitCode}`,
-        };
+    const { archetype, verdict } = gradeAttempt(id, slice, result, verify, env);
     writeVerifyLog(id, stageName, verdict, env);
 
     // The heartbeat rewrote state under us while the slice ran.
     state = readState(id, env);
+    recordVerdict(id, slice, archetype, (state.sliceAttempts[slice.id] ?? 0) + 1, verdict, env);
 
     if (verdict.ok) {
       writeState(

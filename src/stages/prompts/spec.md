@@ -1,6 +1,6 @@
 Read `.sfo/IDEA.md` and `.sfo/RESEARCH.md`. Produce a specification.
 
-**Write each file as you finish it, not all at the end.** Write `.sfo/SPEC.md` first and save it, then `.sfo/CRITERIA.jsonl`, then `.sfo/QUESTIONS.json`, then append to `.sfo/DECISIONS.jsonl`. Stages get killed mid-run; partial output that a re-run can build on beats losing twenty minutes of work to a dropped connection.
+**Write each file as you finish it, not all at the end.** Write `.sfo/SPEC.md` first and save it, then `.sfo/ARCHETYPE.json`, then `.sfo/CRITERIA.jsonl`, then `.sfo/QUESTIONS.json`, then append to `.sfo/DECISIONS.jsonl`. Stages get killed mid-run; partial output that a re-run can build on beats losing twenty minutes of work to a dropped connection.
 
 Write `.sfo/SPEC.md` containing:
 - **What this is** — one paragraph.
@@ -23,6 +23,28 @@ group heading.
 
 `.sfo/SPEC.md` keeps the prose and refers to criteria by id rather than
 restating them.
+
+Write `.sfo/ARCHETYPE.json` — the same stack choice, machine-readable:
+
+    {"archetype":"cli-python","why":"one line: why this stack for this idea"}
+
+`archetype` must be **exactly one** of these strings:
+
+- `cli-python` — a Python command-line tool. Verified by `uv sync`,
+  `uv run ruff check .`, `uv run mypy --strict .`, `uv run pytest -q`.
+- `cli-node` — a Node/TypeScript command-line tool. Verified by `npm ci`,
+  `npm run lint`, `npm run typecheck`, `npx vitest run`.
+
+Nothing else is accepted. `cli-rust`, `web-python`, `python`, or any other
+plausible-looking string is rejected and the build refuses to start — these two
+are the only stacks that have verification recipes, so an unregistered name
+means nothing about the build could ever be checked. If neither fits the idea,
+pick the closer of the two and say so in the **Stack** section of
+`.sfo/SPEC.md`; do not invent a third name.
+
+The **Stack** section of `.sfo/SPEC.md` must name the same archetype. This file
+is what every later stage reads to know what it is building and what will grade
+it — the prose is for the human.
 
 Questions for the human go in `.sfo/QUESTIONS.json`. Every question is either
 `blocking` or `preference`:
@@ -65,8 +87,8 @@ the next stage rather than being skipped, so emit strict JSON: double quotes,
 no trailing commas, no comments, and one complete object per line in the
 `.jsonl` files.
 
-Write only `.sfo/SPEC.md`, `.sfo/CRITERIA.jsonl`, `.sfo/QUESTIONS.json`, and
-`.sfo/DECISIONS.jsonl`.
+Write only `.sfo/SPEC.md`, `.sfo/ARCHETYPE.json`, `.sfo/CRITERIA.jsonl`,
+`.sfo/QUESTIONS.json`, and `.sfo/DECISIONS.jsonl`.
 
 Once you have chosen the stack, rewrite the project's root `.gitignore` for it —
 dependency directories, build output, caches, virtual environments, and anything
