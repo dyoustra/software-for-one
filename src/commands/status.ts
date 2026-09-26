@@ -37,16 +37,16 @@ function budgetNote(state: ProjectState, env: Env | undefined): string | undefin
       return `over budget ($${budget.spent.toFixed(2)} of $${budget.ceiling.toFixed(2)}) — \`sfo budget ${state.id} <usd>\``;
     }
 
-    // A build refused before it started has spent nothing extra, so `exceeded`
-    // is false and the ceiling alone cannot explain the halt. Without this the
-    // project reads as "needs you" with nothing saying what it needs.
-    if (state.currentStage === "build") {
+    // Refused before test-write on the plan's estimate: nothing extra has been
+    // spent, so `exceeded` is false and the ceiling alone cannot explain the
+    // halt. Without this the project reads as "needs you" with no reason.
+    if (state.currentStage === "plan") {
       const planned = readEstimate(state.id, env)
         .filter((e) => e.phase === "build")
         .at(-1);
       if (planned && planned.lowUsd > budget.remaining) {
         return (
-          `build needs $${planned.lowUsd.toFixed(2)}+ and $${budget.remaining.toFixed(2)} is left` +
+          `the rest needs $${planned.lowUsd.toFixed(2)}+ and $${budget.remaining.toFixed(2)} is left` +
           ` — \`sfo budget ${state.id} <usd>\``
         );
       }

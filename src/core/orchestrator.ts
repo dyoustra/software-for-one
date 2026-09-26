@@ -103,9 +103,28 @@ function pickStage(
     // stage every time, and a stage costs the same order as a small ceiling.
     const budget = budgetState(id, env);
     if (budget?.exceeded) return { park: "budget", stage: target, budget };
+    if (budget && target === FIRST_ESTIMATED_STAGE) {
+      const planned = readEstimate(id, env).filter((e) => e.phase === "build").at(-1);
+      if (planned && planned.lowUsd > budget.remaining) {
+        return { park: "estimate", budget, estimate: planned };
+      }
+    }
   }
   return target;
 }
+
+/**
+ * The plan's estimate covers everything after `plan`, so it is checked before
+ * the first of those stages. It used to be checked at the start of `build`,
+ * after test-write and test-repair had already run. On the first real project
+ * test-write alone cost $11.73, more than every stage before it, and none of
+ * it was in the estimate or seen by the check.
+ *
+ * Only the low end parks: low > remaining means the rest cannot finish at this
+ * ceiling. When the range straddles what is left, the per-stage and per-slice
+ * checks stop it at a boundary with the work so far kept.
+ */
+const FIRST_ESTIMATED_STAGE = "test-write";
 
 /**
  * Decides what to run next, and the parked case is the subtle one.
@@ -214,12 +233,12 @@ function recordEstimatePark(
     id,
     {
       id: decisionId,
-      decision: "Whether to start a build the ceiling cannot cover",
-      chose: "park before the first slice and hand the call back to the human",
+      decision: "Whether to start test-write and the build when the ceiling cannot cover them",
+      chose: "park after plan and hand the call back to the human",
       considered: "build until the ceiling stops it part-way; abandon the project",
       why:
         `${formatEstimate(estimate)}; ${formatBudget(budget)}. Even the low end exceeds ` +
-        `what is left, so the build would stop part-built. Raise it with ` +
+        `what is left, so the project would stop part-built. Raise it with ` +
         `\`sfo budget ${id} <usd>\`, or stop here having paid only for the plan.`,
       decided_by: "agent",
       blast_radius: "external",
@@ -498,20 +517,6 @@ async function runSlices(
   }
 
   if (blockers.length > 0) return { outcome: "failed", reason: blockers.join("; ") };
-
-  // The plan stage knows the stack and the slice count, so its estimate can be
-  // held to a standard the pre-research one could not. Parked on the LOW end
-  // only: low > remaining means the build cannot finish at this ceiling, which
-  // is a fact. When the range merely straddles what is left, the per-slice
-  // check below stops it at a slice boundary with the work so far kept — so
-  // parking here too would trade a graceful stop for an extra interruption.
-  const budget = budgetState(id, env);
-  if (budget) {
-    const planned = readEstimate(id, env).filter((e) => e.phase === "build").at(-1);
-    if (planned && planned.lowUsd > budget.remaining) {
-      return { outcome: "parked", park: { park: "estimate", budget, estimate: planned } };
-    }
-  }
 
   while (true) {
     let state = readState(id, env);

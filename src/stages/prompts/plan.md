@@ -33,10 +33,11 @@ slices are cut where they are. Nothing stops for a human to approve it — it is
 read after the fact, by someone working out why the build went the way it did,
 and by the deliver stage. Write it to be understood cold, months later.
 
-Finally, append one line to `.sfo/ESTIMATE.jsonl` estimating what the rest of
-this build will cost:
+Finally, append one line to `.sfo/ESTIMATE.jsonl` estimating what everything
+after this stage will cost — `test-write`, `test-repair`, every build slice,
+`review` and `deliver`:
 
-    {"phase":"build","lowUsd":12.0,"highUsd":30.0,"basis":"8 slices x 1 build invocation, cli-python","at":"<ISO 8601>"}
+    {"phase":"build","lowUsd":12.0,"highUsd":30.0,"basis":"test-write for 60 criteria, test-repair, 8 slices, review, deliver; cli-python","at":"<ISO 8601>"}
 
 `phase` is exactly `build`. `lowUsd` must not exceed `highUsd`. `at` must be a
 real ISO 8601 timestamp. `basis` is one line saying how you arrived at the
@@ -51,9 +52,16 @@ Calibrate against what this pipeline has actually cost, measured:
 - Long stages are dominated by cache reads, not output tokens, so cost tracks
   how much the agent must *read* far more than how much it writes.
 
-The build runs one invocation per slice, plus up to one retry for a slice that
-fails its gate, plus `review` and `deliver`. Estimate the range that follows
-from your slice count, and say in `basis` whether the high end assumes retries.
+- **`test-write` is the most expensive stage measured so far.** For 80 criteria
+  it cost **$11.73**: 134 turns, 32 minutes, a 4,400-line suite. It writes the
+  whole contract in one invocation, re-reading a growing suite every turn, so
+  scale it with criterion count — about $0.15 per criterion — not with slices.
+
+What follows this stage is `test-write`, then `test-repair`, then one build
+invocation per slice plus up to one retry for a slice that fails its gate, then
+`review` and `deliver`. Estimate the range that follows from your criterion and
+slice counts, and say in `basis` what each part contributes and whether the high
+end assumes retries.
 
 **Be honest rather than reassuring.** A low estimate does not make the build
 cheaper; it only removes the person's chance to stop before paying. If the

@@ -752,8 +752,15 @@ describe("projects finished under an older, shorter pipeline", () => {
 });
 
 describe("the plan's own estimate against the ceiling", () => {
-  /** Stages that run before the build, each costing USAGE.costUsd. */
-  const PRE_BUILD_STAGES = 6;
+  /** research, spec, clarify, plan: what has run when the gate is checked. */
+  const PRE_ESTIMATE_STAGES = 4;
+
+  /** Stages the estimate covers that ran — should be none when it refuses. */
+  function coveredStages(runner: FakeRunner): string[] {
+    return runner.calls
+      .map((c) => stageOf(c))
+      .filter((st) => st === "test-write" || st === "test-repair" || st.startsWith("build-"));
+  }
 
   /**
    * The plan stage writes this the way a model does — as a line of JSON into
@@ -788,13 +795,15 @@ describe("the plan's own estimate against the ceiling", () => {
     return runner;
   }
 
-  it("refuses to start a build the ceiling cannot cover, before the first slice", async () => {
+  it("refuses before test-write, not after it has been paid for", async () => {
+    // The gate used to sit at the start of the build, after test-write had
+    // run. On the first real project test-write cost $11.73, unestimated.
     const runner = await runWith(50, 90, 20);
 
-    expect(sliceStages(runner)).toEqual([]);
+    expect(coveredStages(runner)).toEqual([]);
     const s = readState("p", env);
     expect(s.status).toBe("awaiting_human");
-    expect(s.currentStage).toBe("build");
+    expect(s.currentStage).toBe("plan");
   });
 
   it("records the refusal with both numbers, as an external decision", async () => {
@@ -803,6 +812,7 @@ describe("the plan's own estimate against the ceiling", () => {
     const d = readDecisions("p", env);
     expect(d).toHaveLength(1);
     expect(d[0].decision).toMatch(/ceiling cannot cover/);
+    expect(d[0].decision).toMatch(/test-write/);
     expect(d[0].why).toMatch(/\$50/);
     expect(d[0].blast_radius).toBe("external");
     expect(d[0].decided_by).toBe("agent");
@@ -819,14 +829,14 @@ describe("the plan's own estimate against the ceiling", () => {
   });
 
   it("measures the estimate against what is LEFT, not the whole ceiling", async () => {
-    // The front half has spent $0.30 of a $0.80 ceiling, leaving $0.50. A $0.60
+    // The front half has spent $0.20 of a $0.70 ceiling, leaving $0.50. A $0.60
     // build fits the ceiling and does not fit the money. Chosen so the estimate
     // falls BETWEEN the two: compared against the ceiling this passes, and the
     // build starts with less than it needs.
-    const ceiling = USAGE.costUsd * PRE_BUILD_STAGES + 0.5;
+    const ceiling = USAGE.costUsd * PRE_ESTIMATE_STAGES + 0.5;
     const runner = await runWith(0.6, 0.9, ceiling);
 
-    expect(sliceStages(runner)).toEqual([]);
+    expect(coveredStages(runner)).toEqual([]);
     expect(readState("p", env).status).toBe("awaiting_human");
   });
 
@@ -847,6 +857,7 @@ describe("the plan's own estimate against the ceiling", () => {
     const resumed = new FakeRunner(true, 0, USAGE, producesArtifacts());
     await advance("p", resumed, env, { verify: PASSES });
 
+    expect(resumed.calls.map((c) => stageOf(c))[0]).toBe("test-write");
     expect(sliceStages(resumed)).toEqual(["build-S-01", "build-S-02", "build-S-03"]);
     expect(readState("p", env).status).toBe("done");
   });
