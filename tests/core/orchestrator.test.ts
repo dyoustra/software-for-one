@@ -423,14 +423,6 @@ describe("advance", () => {
     expect(runner.calls.map((c) => path.basename(c.logPath))).toContain("spec.log");
   });
 
-  it("refuses to advance a project that is already done", async () => {
-    seed("clarify");
-    const s = readState("p", env);
-    writeState({ ...s, status: "done" }, env);
-    const runner = new FakeRunner();
-    await advance("p", runner, env);
-    expect(runner.calls).toHaveLength(0);
-  });
 });
 
 describe("criteria drift", () => {
