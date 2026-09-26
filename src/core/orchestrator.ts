@@ -585,7 +585,12 @@ export async function advance(
 ): Promise<void> {
   const heartbeatMs = opts.heartbeatMs ?? HEARTBEAT_INTERVAL_MS;
   let state = readState(id, env);
-  if (state.status === "done") return;
+
+  // `done` was written against the pipeline as it was at the time. Every
+  // project that finished Phase 1 is `done` at `clarify`, which is no longer
+  // the last stage. Returning here would leave them all unable to continue,
+  // so `done` only counts when nothing follows the stage it was recorded at.
+  if (state.status === "done" && nextStage(state.currentStage) === null) return;
 
   // Refusing to advance a failed project closes two data-loss paths. Advancing
   // past a failed stage would silently skip the work it never finished, and a

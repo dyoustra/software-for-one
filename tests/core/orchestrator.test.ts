@@ -713,6 +713,52 @@ describe("the slice loop", () => {
   });
 });
 
+describe("projects finished under an older, shorter pipeline", () => {
+  it("continues a project Phase 1 marked done at clarify, starting at plan", async () => {
+    // Written as Phase 1 wrote it: raw JSON with no slice fields at all, done
+    // at the stage that used to be last. Every project from that era is in
+    // exactly this state on disk.
+    seed("capture");
+    writeCriteria("p", CRITERIA, env);
+    fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.json"), '{"answers":[]}');
+    fs.writeFileSync(
+      path.join(env.SFO_HOME, "p", ".sfo", "state.json"),
+      JSON.stringify({
+        id: "p",
+        title: "T",
+        currentStage: "clarify",
+        status: "done",
+        attempts: { research: 1 },
+        pid: null,
+        heartbeatAt: null,
+        createdAt: "2026-08-21T00:00:00.000Z",
+        updatedAt: "2026-08-21T00:00:00.000Z",
+      }),
+    );
+
+    const runner = pipelineRunner();
+    await advance("p", runner, env, { verify: PASSES });
+
+    const stages = runner.calls.map((c) => stageOf(c));
+    expect(stages[0]).toBe("plan");
+    expect(stages).not.toContain("clarify");
+    expect(stages).not.toContain("research");
+    expect(readState("p", env).status).toBe("done");
+    expect(readState("p", env).currentStage).toBe("deliver");
+  });
+
+  it("still does nothing for a project done at the last stage", async () => {
+    seed("capture");
+    const s = readState("p", env);
+    writeState({ ...s, currentStage: "deliver", status: "done" }, env);
+
+    const runner = pipelineRunner();
+    await advance("p", runner, env, { verify: PASSES });
+
+    expect(runner.calls).toHaveLength(0);
+  });
+});
+
 describe("the plan's own estimate against the ceiling", () => {
   /** Stages that run before the build, each costing USAGE.costUsd. */
   const PRE_BUILD_STAGES = 6;
