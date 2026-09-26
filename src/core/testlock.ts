@@ -26,14 +26,14 @@ const IGNORED_DIRS = new Set([
 ]);
 const IGNORED_FILE = /\.(pyc|pyo)$|^\.DS_Store$/;
 
-function walk(root: string, base = ""): string[] {
+export function walkTestTree(root: string, base = ""): string[] {
   if (!fs.existsSync(root)) return [];
   const out: string[] = [];
   for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
     const rel = base ? `${base}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
       if (IGNORED_DIRS.has(entry.name)) continue;
-      out.push(...walk(path.join(root, entry.name), rel));
+      out.push(...walkTestTree(path.join(root, entry.name), rel));
     } else {
       if (IGNORED_FILE.test(entry.name)) continue;
       out.push(rel);
@@ -45,7 +45,7 @@ function walk(root: string, base = ""): string[] {
 function hashTree(dir: string, testDir: string): TestLock {
   const root = path.join(dir, testDir);
   const lock: TestLock = {};
-  for (const rel of walk(root)) {
+  for (const rel of walkTestTree(root)) {
     const body = fs.readFileSync(path.join(root, rel));
     lock[`${testDir}/${rel}`] = createHash("sha256").update(body).digest("hex");
   }

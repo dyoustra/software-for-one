@@ -280,3 +280,20 @@ describe("verifiabilityProblem", () => {
     expect(verifiabilityProblem("p", "cli-node", env)).toMatch(/not valid JSON/);
   });
 });
+
+describe("sliceTestFiles ignores compiled files", () => {
+  it("does not return a __pycache__ .pyc whose name contains the slice id", () => {
+    // pytest writes tests/__pycache__/test_s01_*.pyc. Returned as a test path,
+    // pytest exits 4 and the slice attempt is lost to the gate's own bug.
+    const tests = path.join(dir, "tests");
+    fs.mkdirSync(path.join(tests, "__pycache__"), { recursive: true });
+    fs.writeFileSync(path.join(tests, "test_s01_enumeration.py"), "def test_x() -> None: ...\n");
+    fs.writeFileSync(
+      path.join(tests, "__pycache__", "test_s01_enumeration.cpython-313-pytest-9.1.1.pyc"),
+      "bytecode",
+    );
+    const slice: Slice = { id: "S-01", name: "E", criterionIds: ["AC-001"], prerequisites: [] };
+
+    expect(sliceTestFiles("p", slice, env)).toEqual(["tests/test_s01_enumeration.py"]);
+  });
+});

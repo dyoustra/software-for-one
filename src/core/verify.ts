@@ -3,7 +3,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { verifyRecipeFor, type VerifyStep } from "./archetype.js";
 import { readStack } from "./stack.js";
-import { verifyTestLock, readTestLock } from "./testlock.js";
+import { verifyTestLock, readTestLock, walkTestTree } from "./testlock.js";
 import { projectDir, type Env } from "./paths.js";
 import type { Slice } from "./slices.js";
 
@@ -66,16 +66,6 @@ export function detectArchetype(id: string, env?: Env): string {
   return "unknown";
 }
 
-function walk(root: string, base = ""): string[] {
-  if (!fs.existsSync(root)) return [];
-  const out: string[] = [];
-  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-    const rel = base ? `${base}/${entry.name}` : entry.name;
-    if (entry.isDirectory()) out.push(...walk(path.join(root, entry.name), rel));
-    else out.push(rel);
-  }
-  return out.sort();
-}
 
 /**
  * Matches a slice id against a test filename: `S-01` finds `test_s01_names.py`
@@ -157,7 +147,10 @@ export function verifiabilityProblem(id: string, archetype: string, env?: Env): 
 
 export function sliceTestFiles(id: string, slice: Slice, env?: Env): string[] {
   const pattern = testFilePattern(slice.id);
-  return walk(path.join(projectDir(id, env), TEST_DIR))
+  // The lock's walk, not a copy of it: an unfiltered copy matched
+  // tests/__pycache__/test_s01_*.pyc for S-01 and handed pytest a .pyc as a
+  // test path, which failed a whole build attempt with exit 4.
+  return walkTestTree(path.join(projectDir(id, env), TEST_DIR))
     .filter((rel) => pattern.test(path.basename(rel).toLowerCase()))
     .map((rel) => `${TEST_DIR}/${rel}`);
 }
