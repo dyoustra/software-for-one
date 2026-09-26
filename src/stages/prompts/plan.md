@@ -33,4 +33,30 @@ slices are cut where they are. Nothing stops for a human to approve it — it is
 read after the fact, by someone working out why the build went the way it did,
 and by the deliver stage. Write it to be understood cold, months later.
 
-Write only `.sfo/SLICES.jsonl` and `.sfo/PLAN.md`.
+Finally, append one line to `.sfo/ESTIMATE.jsonl` estimating what the rest of
+this build will cost:
+
+    {"phase":"build","lowUsd":12.0,"highUsd":30.0,"basis":"8 slices x 1 build invocation, cli-python","at":"<ISO 8601>"}
+
+`phase` is exactly `build`. `lowUsd` must not exceed `highUsd`. `at` must be a
+real ISO 8601 timestamp. `basis` is one line saying how you arrived at the
+figure — it is what a human checks your reasoning against.
+
+Calibrate against what this pipeline has actually cost, measured:
+
+- A multi-turn stage that reads a lot and writes a lot: **$1–$2**. `spec` cost
+  $0.99, `research` $1.81, `clarify` $0.79.
+- The floor for any invocation, however small, is about **$0.29** — that is the
+  cost of loading context before the work starts.
+- Long stages are dominated by cache reads, not output tokens, so cost tracks
+  how much the agent must *read* far more than how much it writes.
+
+The build runs one invocation per slice, plus up to one retry for a slice that
+fails its gate, plus `review` and `deliver`. Estimate the range that follows
+from your slice count, and say in `basis` whether the high end assumes retries.
+
+**Be honest rather than reassuring.** A low estimate does not make the build
+cheaper; it only removes the person's chance to stop before paying. If the
+number is uncomfortable, that is the number.
+
+Write only `.sfo/SLICES.jsonl`, `.sfo/PLAN.md`, and `.sfo/ESTIMATE.jsonl`.

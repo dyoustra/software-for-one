@@ -713,6 +713,107 @@ describe("the slice loop", () => {
   });
 });
 
+describe("the plan's own estimate against the ceiling", () => {
+  /** Stages that run before the build, each costing USAGE.costUsd. */
+  const PRE_BUILD_STAGES = 6;
+
+  /**
+   * The plan stage writes this the way a model does — as a line of JSON into
+   * ESTIMATE.jsonl, validated on read like every other artifact.
+   */
+  function estimating(lowUsd: number, highUsd: number): (stage: string) => void {
+    const base = producesArtifacts();
+    return (stage) => {
+      base(stage);
+      if (stage === "plan") {
+        fs.appendFileSync(
+          path.join(env.SFO_HOME, "p", ".sfo", "ESTIMATE.jsonl"),
+          `${JSON.stringify({
+            phase: "build",
+            lowUsd,
+            highUsd,
+            basis: "3 slices x 1 build invocation",
+            at: "2026-08-22T00:00:00.000Z",
+          })}\n`,
+        );
+      }
+    };
+  }
+
+  async function runWith(lowUsd: number, highUsd: number, ceiling: number): Promise<FakeRunner> {
+    const runner = new FakeRunner(true, 0, USAGE, estimating(lowUsd, highUsd));
+    seed("capture");
+    writeBudget("p", ceiling, env);
+    await advance("p", runner, env, { verify: PASSES });
+    fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.json"), '{"answers":[]}');
+    await advance("p", runner, env, { verify: PASSES });
+    return runner;
+  }
+
+  it("refuses to start a build the ceiling cannot cover, before the first slice", async () => {
+    const runner = await runWith(50, 90, 20);
+
+    expect(sliceStages(runner)).toEqual([]);
+    const s = readState("p", env);
+    expect(s.status).toBe("awaiting_human");
+    expect(s.currentStage).toBe("build");
+  });
+
+  it("records the refusal with both numbers, as an external decision", async () => {
+    await runWith(50, 90, 20);
+
+    const d = readDecisions("p", env);
+    expect(d).toHaveLength(1);
+    expect(d[0].decision).toMatch(/ceiling cannot cover/);
+    expect(d[0].why).toMatch(/\$50/);
+    expect(d[0].blast_radius).toBe("external");
+    expect(d[0].decided_by).toBe("agent");
+  });
+
+  it("builds when only the high end overruns, leaving the slice check to stop it", async () => {
+    // The decisive case for the design. A range straddling what is left means
+    // the build MIGHT fit, and the per-slice ceiling already stops it at a
+    // boundary with the work so far kept — so parking here would trade a
+    // graceful stop for an extra interruption on a maybe.
+    const runner = await runWith(0.01, 900, 100);
+
+    expect(sliceStages(runner).length).toBeGreaterThan(0);
+  });
+
+  it("measures the estimate against what is LEFT, not the whole ceiling", async () => {
+    // The front half has spent $0.30 of a $0.80 ceiling, leaving $0.50. A $0.60
+    // build fits the ceiling and does not fit the money. Chosen so the estimate
+    // falls BETWEEN the two: compared against the ceiling this passes, and the
+    // build starts with less than it needs.
+    const ceiling = USAGE.costUsd * PRE_BUILD_STAGES + 0.5;
+    const runner = await runWith(0.6, 0.9, ceiling);
+
+    expect(sliceStages(runner)).toEqual([]);
+    expect(readState("p", env).status).toBe("awaiting_human");
+  });
+
+  it("ignores the estimate when no ceiling is set", async () => {
+    const runner = new FakeRunner(true, 0, USAGE, estimating(500, 900));
+    seed("capture");
+    await advance("p", runner, env, { verify: PASSES });
+    fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.json"), '{"answers":[]}');
+    await advance("p", runner, env, { verify: PASSES });
+
+    expect(sliceStages(runner).length).toBeGreaterThan(0);
+  });
+
+  it("starts the build once the ceiling is raised to cover it", async () => {
+    await runWith(50, 90, 20);
+    writeBudget("p", 500, env);
+
+    const resumed = new FakeRunner(true, 0, USAGE, producesArtifacts());
+    await advance("p", resumed, env, { verify: PASSES });
+
+    expect(sliceStages(resumed)).toEqual(["build-S-01", "build-S-02", "build-S-03"]);
+    expect(readState("p", env).status).toBe("done");
+  });
+});
+
 describe("the ceiling during a build", () => {
   /**
    * Every stage costs the same, so the ceiling can be aimed at a slice

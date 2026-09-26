@@ -7,6 +7,7 @@ import { readCriteria, type Criterion } from "./criteria.js";
 import { readSlices, nextRunnable, type Slice } from "./slices.js";
 import { recordCost } from "./cost.js";
 import { budgetState, formatBudget, type BudgetState } from "./budget.js";
+import { readEstimate, formatEstimate, type Estimate } from "./estimate.js";
 import { readDecisions, appendDecision } from "./decisions.js";
 import { commitStage } from "./repo.js";
 import { readPriorArt, blocksPipeline } from "./priorart.js";
@@ -79,7 +80,9 @@ function startHeartbeat(id: string, env: Env | undefined, intervalMs: number): (
 type Park =
   | { park: "human" }
   /** `stage` is the one that was refused, not the one that last ran. */
-  | { park: "budget"; stage: string; budget: BudgetState };
+  | { park: "budget"; stage: string; budget: BudgetState }
+  /** The build has not started and, on the plan's own numbers, cannot finish. */
+  | { park: "estimate"; budget: BudgetState; estimate: Estimate };
 
 const HUMAN_PARK: Park = { park: "human" };
 
@@ -189,6 +192,44 @@ function recordBudgetPark(
 
 
 /**
+ * Records a build refused before it started. Kept distinct from a mid-build
+ * budget park: nothing has been spent on the build, so the choice on offer is
+ * different — raise the ceiling and get the whole thing, or stop now having
+ * paid only for the front half.
+ */
+function recordEstimatePark(
+  id: string,
+  estimate: Estimate,
+  budget: BudgetState,
+  env: Env | undefined,
+): void {
+  const decisionId = `D-estimate-${budget.ceiling}-${estimate.lowUsd}`;
+  try {
+    if (readDecisions(id, env).some((d) => d.id === decisionId)) return;
+  } catch {
+    return;
+  }
+
+  appendDecision(
+    id,
+    {
+      id: decisionId,
+      decision: "Whether to start a build the ceiling cannot cover",
+      chose: "park before the first slice and hand the call back to the human",
+      considered: "build until the ceiling stops it part-way; abandon the project",
+      why:
+        `${formatEstimate(estimate)}; ${formatBudget(budget)}. Even the low end exceeds ` +
+        `what is left, so the build would stop part-built. Raise it with ` +
+        `\`sfo budget ${id} <usd>\`, or stop here having paid only for the plan.`,
+      decided_by: "agent",
+      blast_radius: "external",
+      at: new Date().toISOString(),
+    },
+    env,
+  );
+}
+
+/**
  * Criterion ids currently on disk. Never throws: this feeds a drift *warning*,
  * and a check that can fail the pipeline is worse than the drift it detects.
  */
@@ -254,7 +295,9 @@ function failedState(state: ProjectState, stage: string): ProjectState {
  */
 function applyPark(id: string, state: ProjectState, park: Park, env: Env | undefined): void {
   const target =
-    park.park === "budget" ? state.currentStage : (nextStage(state.currentStage) ?? state.currentStage);
+    park.park === "human"
+      ? (nextStage(state.currentStage) ?? state.currentStage)
+      : state.currentStage;
   writeState(
     {
       ...state,
@@ -266,6 +309,7 @@ function applyPark(id: string, state: ProjectState, park: Park, env: Env | undef
     env,
   );
   if (park.park === "budget") recordBudgetPark(id, park.stage, park.budget, env);
+  if (park.park === "estimate") recordEstimatePark(id, park.estimate, park.budget, env);
 }
 
 /**
@@ -454,6 +498,20 @@ async function runSlices(
   }
 
   if (blockers.length > 0) return { outcome: "failed", reason: blockers.join("; ") };
+
+  // The plan stage knows the stack and the slice count, so its estimate can be
+  // held to a standard the pre-research one could not. Parked on the LOW end
+  // only: low > remaining means the build cannot finish at this ceiling, which
+  // is a fact. When the range merely straddles what is left, the per-slice
+  // check below stops it at a slice boundary with the work so far kept — so
+  // parking here too would trade a graceful stop for an extra interruption.
+  const budget = budgetState(id, env);
+  if (budget) {
+    const planned = readEstimate(id, env).filter((e) => e.phase === "build").at(-1);
+    if (planned && planned.lowUsd > budget.remaining) {
+      return { outcome: "parked", park: { park: "estimate", budget, estimate: planned } };
+    }
+  }
 
   while (true) {
     let state = readState(id, env);

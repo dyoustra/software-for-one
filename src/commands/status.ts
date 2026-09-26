@@ -3,6 +3,7 @@ import { projectsRoot, type Env } from "../core/paths.js";
 import { readState, isStale, type ProjectState } from "../core/state.js";
 import { blockingPriorArt, type PriorArt } from "../core/priorart.js";
 import { budgetState } from "../core/budget.js";
+import { readEstimate } from "../core/estimate.js";
 
 /** A project plus whatever short explanation the listing owes the reader. */
 export type ProjectSummary = ProjectState & { note?: string };
@@ -31,8 +32,26 @@ function budgetNote(state: ProjectState, env: Env | undefined): string | undefin
   if (state.status !== "awaiting_human") return undefined;
   try {
     const budget = budgetState(state.id, env);
-    if (!budget?.exceeded) return undefined;
-    return `over budget ($${budget.spent.toFixed(2)} of $${budget.ceiling.toFixed(2)}) — \`sfo budget ${state.id} <usd>\``;
+    if (!budget) return undefined;
+    if (budget.exceeded) {
+      return `over budget ($${budget.spent.toFixed(2)} of $${budget.ceiling.toFixed(2)}) — \`sfo budget ${state.id} <usd>\``;
+    }
+
+    // A build refused before it started has spent nothing extra, so `exceeded`
+    // is false and the ceiling alone cannot explain the halt. Without this the
+    // project reads as "needs you" with nothing saying what it needs.
+    if (state.currentStage === "build") {
+      const planned = readEstimate(state.id, env)
+        .filter((e) => e.phase === "build")
+        .at(-1);
+      if (planned && planned.lowUsd > budget.remaining) {
+        return (
+          `build needs $${planned.lowUsd.toFixed(2)}+ and $${budget.remaining.toFixed(2)} is left` +
+          ` — \`sfo budget ${state.id} <usd>\``
+        );
+      }
+    }
+    return undefined;
   } catch {
     return undefined;
   }
