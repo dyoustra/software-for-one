@@ -3,11 +3,11 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { advance, type VerifyFn } from "../../src/core/orchestrator.js";
+import { advance, type VerifyFn, type SuiteCheckFn } from "../../src/core/orchestrator.js";
 import { writeState, readState, type ProjectState } from "../../src/core/state.js";
 import { writeCriteria } from "../../src/core/criteria.js";
 import { writeSlices, type Slice } from "../../src/core/slices.js";
-import { readTestLock, verifyTestLock } from "../../src/core/testlock.js";
+import { readTestLock, verifyTestLock, TEST_LOCK_FILE } from "../../src/core/testlock.js";
 import { readCostRecords } from "../../src/core/cost.js";
 import { writeBudget } from "../../src/core/budget.js";
 import { readDecisions } from "../../src/core/decisions.js";
@@ -18,6 +18,20 @@ import { ARCHETYPE_FILE } from "../../src/core/stack.js";
 import type { VerifyStep } from "../../src/core/archetype.js";
 import { listProjects, formatStatus } from "../../src/commands/status.js";
 import type { Runner, RunStageInput, StageResult, StageUsage } from "../../src/runner/types.js";
+
+
+/**
+ * The pre-lock check shells out to the project's real toolchain (uv, ruff,
+ * mypy), which these fixtures only fake a manifest for. It passes by default
+ * here; the tests of the check itself inject a verdict through `suiteCheck`.
+ */
+vi.mock("../../src/core/verify.js", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../../src/core/verify.js")>();
+  return {
+    ...real,
+    checkSuiteBeforeLock: () => ({ ok: true, steps: [], tamperedTests: [] }),
+  };
+});
 
 let env: Record<string, string>;
 
@@ -702,6 +716,67 @@ describe("the slice loop", () => {
     const s = readState("p", env);
     expect(s.slicesPassed).toEqual([]);
     expect(s.slicesFailed).toEqual(["S-01", "S-03"]);
+  });
+});
+
+describe("what a build agent is told", () => {
+  function promptsFor(runner: FakeRunner, slice: string): string[] {
+    return runner.calls.filter((c) => stageOf(c) === `build-${slice}`).map((c) => c.prompt);
+  }
+
+  it("gives each slice the exact commands its gate will run, scoped to its tests", async () => {
+    const runner = pipelineRunner("cli-python");
+    await runPipeline(runner, { verify: PASSES });
+
+    const [prompt] = promptsFor(runner, "S-01");
+    expect(prompt).toContain("uv run ruff check .");
+    expect(prompt).toContain("uv run mypy --strict .");
+    expect(prompt).toContain("uv run pytest -q tests/test_s01.py");
+    expect(prompt).not.toContain("previous attempt");
+  });
+
+  it("shows a retry what the failed attempt's gate reported", async () => {
+    // Without it a retry starts from the same prompt as the attempt that
+    // failed, and can only find out what went wrong by failing again.
+    const runner = pipelineRunner("cli-python");
+    await runPipeline(runner, { verify: STOPS_AT_TEST });
+
+    const [first, second] = promptsFor(runner, "S-01");
+    expect(first).not.toContain("previous attempt");
+    expect(second).toContain("Your previous attempt at this slice failed the gate");
+    expect(second).toContain("[exit 1] test");
+  });
+});
+
+describe("the suite is checked before it is locked", () => {
+  const LINT_FAILS: SuiteCheckFn = (id, e) =>
+    runRecipe(projectDir(id, e), [exits("install", 0), exits("lint", 1)], []);
+
+  it("fails test-repair and leaves the suite unlocked when lint fails", async () => {
+    // A lint error in a locked test file is one no slice can fix, so every
+    // slice would fail its gate. On the first real project four such errors
+    // were locked in and the whole build was lost to them.
+    const runner = pipelineRunner();
+    seed("capture");
+    await advance("p", runner, env, { verify: PASSES, suiteCheck: LINT_FAILS });
+    fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.json"), '{"answers":[]}');
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    await advance("p", runner, env, { verify: PASSES, suiteCheck: LINT_FAILS });
+
+    const s = readState("p", env);
+    expect(s.status).toBe("failed");
+    expect(s.currentStage).toBe("test-repair");
+    expect(fs.existsSync(path.join(env.SFO_HOME, "p", ".sfo", TEST_LOCK_FILE))).toBe(false);
+    expect(sliceStages(runner)).toEqual([]);
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/does not pass lint/));
+    error.mockRestore();
+  });
+
+  it("locks the suite when the check passes", async () => {
+    const runner = pipelineRunner();
+    await runPipeline(runner, { verify: PASSES });
+
+    expect(fs.existsSync(path.join(env.SFO_HOME, "p", ".sfo", TEST_LOCK_FILE))).toBe(true);
   });
 });
 

@@ -224,6 +224,25 @@ export function runRecipe(cwd: string, recipe: VerifyStep[], testPaths: string[]
  * to make a failing test pass is to change what it asserts — so there is no
  * point spending minutes of test time to find out how the edited version does.
  */
+/**
+ * Runs everything in the recipe except the tests themselves, against the suite
+ * test-repair just produced, before it is locked.
+ *
+ * Once locked, a test file cannot be changed by anyone, and lint and typecheck
+ * run over the whole tree on every slice. A lint error in a test file is then
+ * one no slice can fix: every slice fails the gate twice and the build is lost.
+ * On the first real project test-repair was told these steps must exit 0, did
+ * not check, and locked four such errors. This is the check.
+ */
+export function checkSuiteBeforeLock(id: string, env?: Env): VerifyResult {
+  const archetype = detectArchetype(id, env);
+  const problem = verifiabilityProblem(id, archetype, env);
+  if (problem) return { ok: false, steps: [], tamperedTests: [], reason: problem };
+
+  const steps = verifyRecipeFor(archetype).filter((step) => step.name !== "test");
+  return runRecipe(projectDir(id, env), steps, []);
+}
+
 export function runVerify(id: string, archetype: string, slice: Slice, env?: Env): VerifyResult {
   if (Object.keys(readTestLock(id, env)).length === 0) {
     return {

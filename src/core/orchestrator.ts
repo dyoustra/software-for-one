@@ -12,11 +12,14 @@ import { readDecisions, appendDecision } from "./decisions.js";
 import { commitStage } from "./repo.js";
 import { readPriorArt, blocksPipeline } from "./priorart.js";
 import { lockTests } from "./testlock.js";
+import { verifyRecipeFor } from "./archetype.js";
 import {
   runVerify,
+  checkSuiteBeforeLock,
   detectArchetype,
   verifiabilityProblem,
   slicesWithoutTests,
+  sliceTestFiles,
   TEST_DIR,
   type VerifyResult,
 } from "./verify.js";
@@ -38,6 +41,7 @@ export const HEARTBEAT_INTERVAL_MS = 30_000;
 export const MAX_SLICE_ATTEMPTS = 2;
 
 export type VerifyFn = (id: string, archetype: string, slice: Slice, env?: Env) => VerifyResult;
+export type SuiteCheckFn = (id: string, env?: Env) => VerifyResult;
 
 export interface AdvanceOptions {
   /** Overridable so tests can exercise ticking without waiting 30s. */
@@ -48,6 +52,8 @@ export interface AdvanceOptions {
    * installing. Production never passes it.
    */
   verify?: VerifyFn;
+  /** The pre-lock check on test-repair's output. Injected for the same reason. */
+  suiteCheck?: SuiteCheckFn;
 }
 
 /**
@@ -336,7 +342,12 @@ function applyPark(id: string, state: ProjectState, park: Park, env: Env | undef
  * to be told which slice is its own. The criteria are appended rather than
  * left to be looked up, so "make exactly these pass" is unambiguous.
  */
-function buildPromptFor(slice: Slice, criteria: Criterion[]): string {
+function buildPromptFor(
+  slice: Slice,
+  criteria: Criterion[],
+  gate: string[],
+  previousFailure: string | null,
+): string {
   const mine = criteria.filter((c) => slice.criterionIds.includes(c.id));
   return [
     loadPrompt("build"),
@@ -346,7 +357,59 @@ function buildPromptFor(slice: Slice, criteria: Criterion[]): string {
     "Make exactly these criteria pass:",
     "",
     ...mine.map((c) => `- ${c.id}: ${c.text}`),
+    "",
+    // Told only to format, the first real slice formatted and then failed lint
+    // on six errors `ruff --fix` would have cleared. The agent can run the gate
+    // itself, so it is given the gate rather than a description of it.
+    "## The gate",
+    "",
+    "Your work is accepted only if every one of these exits 0, in this order.",
+    "Run them yourself before you finish:",
+    "",
+    ...gate.map((command) => `    ${command}`),
+    ...(previousFailure
+      ? [
+          "",
+          // Without this a retry starts from the same prompt as the attempt that
+          // failed, and can only rediscover the failure by failing again.
+          "## Your previous attempt at this slice failed the gate",
+          "",
+          "Fix what this reports. The code from that attempt is still in the tree.",
+          "",
+          "```",
+          previousFailure,
+          "```",
+        ]
+      : []),
   ].join("\n");
+}
+
+/** The commands the gate will run for this slice, as a person would type them. */
+function gateCommands(id: string, archetype: string, slice: Slice, env: Env | undefined): string[] {
+  const scoped = sliceTestFiles(id, slice, env);
+  return verifyRecipeFor(archetype).map((step) =>
+    [step.command, ...step.args, ...(step.scopeable ? scoped : [])].join(" "),
+  );
+}
+
+/** Lines of the last failed gate run given to a retry: enough to act on. */
+const FAILURE_EXCERPT_LINES = 80;
+
+/**
+ * The last gate run for this slice, if it failed. The verify log is appended
+ * one block per attempt, each starting with a `--- <time> pass|fail` line.
+ */
+function previousFailureFor(id: string, stageName: string, env: Env | undefined): string | null {
+  try {
+    const text = fs.readFileSync(logPath(id, `${stageName}.verify`, env), "utf8");
+    const start = text.lastIndexOf("--- ");
+    if (start === -1) return null;
+    const block = text.slice(start).split("\n");
+    if (!block[0]?.endsWith(" fail")) return null;
+    return block.slice(1, 1 + FAILURE_EXCERPT_LINES).join("\n").trim();
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -540,7 +603,12 @@ async function runSlices(
     try {
       result = await runner.runStage({
         workdir: projectDir(id, env),
-        prompt: buildPromptFor(slice, criteria),
+        prompt: buildPromptFor(
+          slice,
+          criteria,
+          gateCommands(id, archetype, slice, env),
+          previousFailureFor(id, stageName, env),
+        ),
         logPath: logPath(id, stageName, env),
       });
     } finally {
@@ -548,12 +616,12 @@ async function runSlices(
     }
     recordCost(id, stageName, result.ok, result.usage, env);
 
-    const { archetype, verdict } = gradeAttempt(id, slice, result, verify, env);
+    const { archetype: gradedAs, verdict } = gradeAttempt(id, slice, result, verify, env);
     writeVerifyLog(id, stageName, verdict, env);
 
     // The heartbeat rewrote state under us while the slice ran.
     state = readState(id, env);
-    recordVerdict(id, slice, archetype, (state.sliceAttempts[slice.id] ?? 0) + 1, verdict, env);
+    recordVerdict(id, slice, gradedAs, (state.sliceAttempts[slice.id] ?? 0) + 1, verdict, env);
 
     if (verdict.ok) {
       writeState(
@@ -721,6 +789,20 @@ export async function advance(
     // whole build and deliver a summary claiming verification that never
     // happened. Failing here costs one stage; failing silently costs the run.
     if (upcoming === "test-repair") {
+      const checked = (opts.suiteCheck ?? checkSuiteBeforeLock)(id, env);
+      if (!checked.ok) {
+        const failed = checked.steps.find((st) => !st.ok);
+        const detail = failed?.output.trim().split("\n").slice(-15).join("\n") ?? "";
+        console.error(
+          `sfo: test-repair left a suite that does not pass ${failed?.name ?? "the gate"} — ` +
+            `${checked.reason ?? "check failed"}. It is not locked, because no build ` +
+            `slice could fix it afterwards. Re-run \`sfo stage ${id} test-repair\`.` +
+            (detail ? `\n${detail}` : ""),
+        );
+        state = failedState(state, upcoming);
+        writeState(state, env);
+        return;
+      }
       try {
         lockTests(id, TEST_DIR, env);
       } catch (err) {

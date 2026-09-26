@@ -17,9 +17,11 @@ You are building **one slice**, named in your instructions. Make its tests pass.
 holding everything until the end — a stage killed midway must leave usable work
 behind.
 
-Format your own output before you finish, using the project's formatter. The
-verification gate checks whether the code is correct, not whether it is tidy —
-so tidiness is your job, and nothing downstream will fix it for you.
+Before you finish, run the gate commands listed at the end of these
+instructions and make every one exit 0. The gate includes the linter and the
+type checker as well as the tests, so code that passes its tests can still be
+rejected — run the linter's fixer and the formatter, then check again. Nothing
+downstream will fix it for you.
 
 When you make a choice the spec did not settle, append it to
 `.sfo/DECISIONS.jsonl` with `"decided_by":"agent"` and an honest
