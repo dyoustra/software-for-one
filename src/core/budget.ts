@@ -32,6 +32,14 @@ export function writeBudget(id: string, ceilingUsd: number, env?: Env): void {
   );
 }
 
+/** Removes the ceiling. Returns whether there was one to remove. */
+export function clearBudget(id: string, env?: Env): boolean {
+  const file = artifactPath(id, BUDGET_FILE, env);
+  if (!fs.existsSync(file)) return false;
+  fs.rmSync(file);
+  return true;
+}
+
 /**
  * Spend counts every recorded run, including failed ones. A failed stage spent
  * real money; excluding it would let a project with repeated failures run past

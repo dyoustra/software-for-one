@@ -57,6 +57,28 @@ describe("setBudget", () => {
     log.mockRestore();
   });
 
+  it("removes the ceiling with `none`, so the project runs unbounded", async () => {
+    const id = await newProject();
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    setBudget(id, "40", env);
+    setBudget(id, "none", env);
+
+    expect(readBudget(id, env)).toBeNull();
+    expect(log).toHaveBeenLastCalledWith(`ceiling removed for ${id}`);
+    log.mockRestore();
+  });
+
+  it("says so when there was no ceiling to remove", async () => {
+    const id = await newProject();
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+
+    setBudget(id, "none", env);
+
+    expect(log).toHaveBeenLastCalledWith(`${id} had no ceiling`);
+    log.mockRestore();
+  });
+
   it("reports an unknown project instead of creating a stray ceiling", () => {
     expect(() => setBudget("nope", "40", env)).toThrow(/no such project/);
     expect(fs.existsSync(path.join(env.SFO_HOME, "nope"))).toBe(false);

@@ -88,7 +88,7 @@ export function buildProgram(): Command {
     .command("budget")
     .description("Show or set a project's spending ceiling")
     .argument("<id>", "project id")
-    .argument("[usd]", "new ceiling in dollars; omit to show the current one")
+    .argument("[usd]", "new ceiling in dollars, or `none` to remove it; omit to show the current one")
     .action(guarded(async (id: string, usd?: string) => {
       const { showBudget, setBudget } = await import("./commands/budget.js");
       if (usd === undefined) showBudget(id);

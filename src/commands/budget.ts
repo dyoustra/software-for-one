@@ -1,5 +1,5 @@
 import { readState } from "../core/state.js";
-import { budgetState, writeBudget, formatBudget } from "../core/budget.js";
+import { budgetState, writeBudget, clearBudget, formatBudget } from "../core/budget.js";
 import type { Env } from "../core/paths.js";
 
 /**
@@ -33,6 +33,10 @@ export function showBudget(id: string, env?: Env): void {
  */
 export function setBudget(id: string, raw: string, env?: Env): void {
   readState(id, env);
+  if (raw === "none") {
+    console.log(clearBudget(id, env) ? `ceiling removed for ${id}` : `${id} had no ceiling`);
+    return;
+  }
   writeBudget(id, parseBudget(raw), env);
   const state = budgetState(id, env);
   if (state) console.log(formatBudget(state));
