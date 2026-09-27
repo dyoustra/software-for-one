@@ -295,7 +295,8 @@ const FIRST_CODE_STAGE = "test-write";
  */
 export function agentToolsForStage(id: string, stage: string, env?: Env): string[] {
   const order = PIPELINE_STAGES as readonly string[];
-  const base = stage.startsWith("build-") ? "build" : stage;
+  // The adjudicator rules on a test by running it, so it gets the build's tools.
+  const base = stage.startsWith("build-") || stage.startsWith("adjudicate-") ? "build" : stage;
   const runsCode = order.indexOf(base) >= order.indexOf(FIRST_CODE_STAGE);
   let archetype = "unknown";
   if (runsCode) {

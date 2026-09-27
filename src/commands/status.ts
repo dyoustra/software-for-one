@@ -5,6 +5,7 @@ import { blockingPriorArt, type PriorArt } from "../core/priorart.js";
 import { budgetState } from "../core/budget.js";
 import { readEstimate } from "../core/estimate.js";
 import { readLimit, formatLimit } from "../core/limit.js";
+import { readContests } from "../core/contest.js";
 
 /** A project plus whatever short explanation the listing owes the reader. */
 export type ProjectSummary = ProjectState & { note?: string };
@@ -58,6 +59,18 @@ function budgetNote(state: ProjectState, env: Env | undefined): string | undefin
   }
 }
 
+/** A criterion the adjudicator could not rule on without the person. Never throws. */
+function criterionNote(state: ProjectState, env: Env | undefined): string | undefined {
+  if (state.status !== "awaiting_human") return undefined;
+  try {
+    const pending = readContests(state.id, env).find((r) => r.status === "awaiting_answer");
+    if (!pending) return undefined;
+    return `${pending.criterionId} may be wrong (${pending.sliceId}) — \`sfo answer ${state.id}\``;
+  } catch {
+    return undefined;
+  }
+}
+
 export function listProjects(env?: Env): ProjectSummary[] {
   const root = projectsRoot(env);
   if (!fs.existsSync(root)) return [];
@@ -75,7 +88,7 @@ export function listProjects(env?: Env): ProjectSummary[] {
         ? noteFor(state, art)
         : limit
           ? formatLimit(state.id, limit)
-          : budgetNote(state, env);
+          : (criterionNote(state, env) ?? budgetNote(state, env));
       out.push(note !== undefined ? { ...state, note } : state);
     } catch {
       // A directory with no readable state is not a project. Skip it silently —

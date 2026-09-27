@@ -1,6 +1,6 @@
 # Contesting a Locked Test — Spec
 
-**Status:** Design approved, pre-implementation
+**Status:** Implemented, 2026-09-27. See §11 for where it differs from the design
 **Date:** 2026-09-27
 **Depends on:** `PHASE_2_SPEC.md` §3–4 (tests written blind, then locked), `docs/RUNBOOK.md` B11
 **Precedes:** `PARALLEL_SLICES_SPEC.md` (built second; it generalizes the loop this changes)
@@ -263,3 +263,41 @@ would also have caught S-04, which no amount of spend caught.
 - In patch mode, a change to a second criterion is rejected by the bounds
   check.
 - `decided_by: "adjudicator"` parses. `SUMMARY` input includes the contests.
+
+## 11. As built
+
+- **Independence is structural, not a tool rule.** Before the adjudicator runs,
+  the slice's uncommitted work is stashed (everything except `.sfo/`, which
+  holds live pipeline state). The adjudicator then sees only committed code
+  from slices that already passed, so it can't take the contested code as its
+  reference, whatever it reads. That replaces the planned
+  `--disallowedTools 'Read(src/**)'`, whose rule syntax was never confirmed.
+  An amendment is committed while the work is still stashed, so only the test
+  and the lock go into that commit. After that the work is restored. If it no
+  longer applies, it's discarded with a warning, and the slice's next attempt
+  starts from the committed tree.
+- **The adjudicator gets the build's tools**, network included. §4.1 said no
+  network. It shares the build's allow-list instead of having one of its own.
+- **Bounds check:** `git status` outside `.sfo/`, with any path not under
+  `tests/` and not a `conftest.py` counting as out of bounds. Changes the
+  adjudicator makes to `.sfo/` aren't policed, apart from the criteria file in
+  patch mode. That file is compared line by line: same ids in the same order,
+  and only the named criterion's `text` may differ.
+- **Patch mode accepts a reworded criterion that needs no test change.** If
+  the lock is unchanged but the criterion was reworded, that's a complete
+  amendment. Only the criteria file is committed, and the slice's attempts are
+  reset.
+- **A usage limit during adjudication spends nothing.** No record is written,
+  CONTEST.json is consumed, and the slice can contest again on its next
+  attempt.
+- **A question is identified as `CQ-<slice>`,** and it counts as answered only
+  when the answer's recorded question text matches (the `openQuestions` rule).
+  A stale answer under the same id is not applied.
+- **`sfo slices` shows no contest marker.** That command shows the plan, not
+  build progress. Contests appear in `sfo status` (while parked), in
+  `DECISIONS.jsonl`, and in `SUMMARY.md`'s "Tests changed after the lock".
+- **Mutation-checked guards:** the stash, the bounds check, one contest per
+  slice (without it the build loops forever), re-verifying passed slices after
+  a relock, waiting for a matching answer, the pre-lock check on an amendment,
+  and the attempt reset.
+

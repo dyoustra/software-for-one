@@ -29,5 +29,6 @@ When you make a choice the spec did not settle, append it to
 most of the project; `external` means a side effect outside this repo that
 cannot be undone.
 
-Do not write to `.sfo/` other than appending decisions. Do not modify the test
-tree.
+Do not write to `.sfo/` other than appending decisions, or writing
+`.sfo/CONTEST.json` as described at the end of these instructions. Do not modify
+the test tree.

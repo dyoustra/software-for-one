@@ -1,5 +1,6 @@
 Read `.sfo/SPEC.md`, `.sfo/CRITERIA.jsonl`, `.sfo/SLICES.jsonl`,
-`.sfo/REVIEW.md`, `.sfo/DECISIONS.jsonl`, and `.sfo/VERIFY.jsonl`.
+`.sfo/REVIEW.md`, `.sfo/DECISIONS.jsonl`, `.sfo/VERIFY.jsonl`, and
+`.sfo/CONTESTS.jsonl` if it exists.
 
 `.sfo/VERIFY.jsonl` is what the gate actually did — one JSON object per slice
 attempt, appended in the order they ran:
@@ -41,10 +42,18 @@ Then, in order:
    never reached a step, any archetype with no recipe, and anything the recipe
    for this archetype does not cover. State it plainly rather than omitting it.
    "Verified" here means exactly the steps that ran and exited 0.
-3. **Decisions worth reviewing** — pull from `.sfo/DECISIONS.jsonl`, `external`
+3. **Tests changed after the lock** — from `.sfo/CONTESTS.jsonl`, one entry per
+   contest: the slice, the test, what the build agent claimed, and the ruling.
+   Name every `amend_test` and every criterion rewritten from the person's
+   answer, with the files changed. The suite was locked so that it could not
+   quietly change; these are the times it did, and a reviewer should read each
+   one. Records in `.sfo/VERIFY.jsonl` with `"trigger":"relock"` are slices
+   re-graded after an amendment — say which of them failed and were rebuilt.
+   Omit this section only if the file does not exist.
+4. **Decisions worth reviewing** — pull from `.sfo/DECISIONS.jsonl`, `external`
    and `structural` first. These are the calls that are expensive to reverse and
    the ones most worth a human's attention.
-4. **Coverage gaps** from `.sfo/REVIEW.md`.
+5. **Coverage gaps** from `.sfo/REVIEW.md`.
 
 Be accurate rather than reassuring. Someone reads this to decide whether to
 trust the thing you built.

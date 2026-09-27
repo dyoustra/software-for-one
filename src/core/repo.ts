@@ -141,3 +141,84 @@ export function commitStage(
     log(`sfo: could not commit ${stage} artifacts: ${reason(err)}`);
   }
 }
+
+/**
+ * `.sfo/` is left out of everything below. The orchestrator writes state, cost
+ * and verify records there while these run, and a stash or checkout that took
+ * them along would roll back the pipeline's own bookkeeping.
+ */
+const OUTSIDE_SFO = ["--", ".", ":(exclude).sfo"];
+
+function git(cwd: string, args: string[]): string {
+  return execFileSync("git", [...IDENTITY, ...NO_INTERFERENCE, ...args], {
+    cwd,
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+}
+
+/** Paths changed against HEAD, untracked included, `.sfo/` excluded. */
+export function changedPaths(cwd: string): string[] {
+  const out = git(cwd, ["status", "--porcelain", "-z", "--untracked-files=all", ...OUTSIDE_SFO]);
+  const paths: string[] = [];
+  const entries = out.split("\0");
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    if (entry.length < 4) continue;
+    paths.push(entry.slice(3));
+    // A rename is followed by its source path as a separate entry.
+    if (entry[0] === "R" || entry[0] === "C") i++;
+  }
+  return paths.sort();
+}
+
+/**
+ * Sets the working tree's uncommitted work aside. Returns whether anything
+ * was stashed, since `stash pop` on an empty stash would pop someone else's.
+ */
+export function stashWork(cwd: string): boolean {
+  if (changedPaths(cwd).length === 0) return false;
+  git(cwd, ["stash", "push", "--include-untracked", "-m", "sfo: set aside", ...OUTSIDE_SFO]);
+  return true;
+}
+
+/**
+ * Brings stashed work back. If it no longer applies, because what was
+ * committed meanwhile touched the same files, the work is discarded rather
+ * than left as conflict markers for the next agent to build on. Returns
+ * whether it came back.
+ */
+export function restoreWork(cwd: string, stashed: boolean): boolean {
+  if (!stashed) return true;
+  try {
+    git(cwd, ["stash", "pop"]);
+    return true;
+  } catch {
+    git(cwd, ["checkout", "HEAD", ...OUTSIDE_SFO]);
+    git(cwd, ["clean", "-fd", ...OUTSIDE_SFO]);
+    git(cwd, ["stash", "drop"]);
+    return false;
+  }
+}
+
+/** Puts the named paths back as HEAD has them; a path HEAD lacks is deleted. */
+export function discardPaths(cwd: string, paths: string[]): void {
+  for (const p of paths) {
+    try {
+      git(cwd, ["cat-file", "-e", `HEAD:${p}`]);
+      git(cwd, ["checkout", "HEAD", "--", p]);
+    } catch {
+      fs.rmSync(path.join(cwd, p), { force: true });
+    }
+  }
+}
+
+/**
+ * Commits exactly the named paths. For changes sfo can enumerate, unlike an
+ * agent's output, which is why `commitStage` still has to stage everything.
+ */
+export function commitPaths(cwd: string, message: string, paths: string[]): void {
+  if (paths.length === 0) return;
+  git(cwd, ["add", "--", ...paths]);
+  git(cwd, ["commit", "--no-verify", "-m", message, "--", ...paths]);
+}

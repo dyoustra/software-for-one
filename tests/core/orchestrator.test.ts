@@ -1218,3 +1218,333 @@ describe("a subscription's usage limit", () => {
     expect(readState("p", env).slicesPassed).toEqual(["S-01", "S-02", "S-03"]);
   });
 });
+
+/**
+ * The pipeline, with a build agent that contests one slice's test on its first
+ * attempt and an adjudicator whose behaviour each test supplies.
+ */
+class ContestRunner implements Runner {
+  calls: RunStageInput[] = [];
+  /** Whether the slice's own unfinished file was visible to the adjudicator. */
+  adjudicatorSawWork: boolean[] = [];
+  private contested = false;
+  constructor(
+    private readonly sliceId: string,
+    private readonly adjudicator: (dir: string, stage: string) => void,
+    private readonly contest: string | null = null,
+    /** Contest again on the attempt after the ruling. */
+    private readonly again = false,
+    /** Which build call of this slice contests, counting from 1. */
+    private readonly onCall = 1,
+  ) {}
+  private buildCalls = 0;
+  async runStage(input: RunStageInput): Promise<StageResult> {
+    this.calls.push(input);
+    const stage = stageOf(input);
+    const dir = path.join(env.SFO_HOME, "p");
+    producesArtifacts()(stage);
+    if (stage === `build-${this.sliceId}`) this.buildCalls++;
+    if (
+      stage === `build-${this.sliceId}` &&
+      this.buildCalls >= this.onCall &&
+      (!this.contested || this.again)
+    ) {
+      const first = !this.contested;
+      this.contested = true;
+      fs.mkdirSync(path.join(dir, "src"), { recursive: true });
+      fs.writeFileSync(path.join(dir, "src", "unfinished.py"), "x = 1\n");
+      const body =
+        this.contest ??
+        JSON.stringify({
+          sliceId: this.sliceId,
+          criterionId: "AC-001",
+          testFile: "tests/test_s01.py",
+          testName: "test_s01",
+          claim: "unsatisfiable",
+          why: first ? "asserts False" : "still wrong",
+          proposedFix: "assert the real thing",
+        });
+      fs.writeFileSync(path.join(dir, ".sfo", "CONTEST.json"), body);
+    }
+    if (stage.startsWith("adjudicate-")) {
+      this.adjudicatorSawWork.push(fs.existsSync(path.join(dir, "src", "unfinished.py")));
+      this.adjudicator(dir, stage);
+    }
+    return { ok: true, exitCode: 0, logPath: input.logPath, usage: USAGE };
+  }
+}
+
+function ruling(dir: string, body: object): void {
+  fs.writeFileSync(path.join(dir, ".sfo", "RULING.json"), JSON.stringify(body));
+}
+
+const UPHOLD = (dir: string) => ruling(dir, { ruling: "uphold", why: "the test is right", changedFiles: [], question: null });
+
+const AMEND = (dir: string) => {
+  fs.writeFileSync(path.join(dir, "tests", "test_s01.py"), "def test_s01(): assert True\n");
+  ruling(dir, { ruling: "amend_test", why: "it asserted False", changedFiles: ["tests/test_s01.py"], question: null });
+};
+
+function buildPrompts(runner: ContestRunner, sliceId: string): string[] {
+  return runner.calls.filter((c) => stageOf(c) === `build-${sliceId}`).map((c) => c.prompt);
+}
+
+describe("contesting a locked test", () => {
+  it("offers the contest in the build prompt until it is spent", async () => {
+    const runner = new ContestRunner("S-01", UPHOLD);
+    await runPipeline(runner, { verify: PASSES });
+
+    const [first, second] = buildPrompts(runner, "S-01");
+    expect(first).toContain(".sfo/CONTEST.json");
+    expect(second).not.toContain("Write `.sfo/CONTEST.json`");
+    expect(second).toContain("Your contest was ruled against");
+    expect(second).toContain("the test is right");
+  });
+
+  it("skips the gate on a contest and does not count it as an attempt", async () => {
+    const graded: string[] = [];
+    const verify: VerifyFn = (_id, _a, slice) => {
+      graded.push(slice.id);
+      return { ok: true, steps: [], tamperedTests: [] };
+    };
+    const runner = new ContestRunner("S-01", UPHOLD);
+    await runPipeline(runner, { verify });
+
+    expect(graded.filter((s) => s === "S-01")).toHaveLength(1);
+    expect(readState("p", env).slicesPassed).toContain("S-01");
+    const records = readVerifyRecords("p", env).filter((r) => r.slice === "S-01");
+    expect(records.map((r) => r.attempt)).toEqual([1]);
+  });
+
+  it("sets the slice's unfinished work aside while the adjudicator rules, and restores it", async () => {
+    const runner = new ContestRunner("S-01", UPHOLD);
+    let restored = false;
+    const verify: VerifyFn = (_id, _a, slice) => {
+      if (slice.id === "S-01") restored = fs.existsSync(path.join(env.SFO_HOME, "p", "src", "unfinished.py"));
+      return { ok: true, steps: [], tamperedTests: [] };
+    };
+    await runPipeline(runner, { verify });
+
+    expect(runner.adjudicatorSawWork).toEqual([false]);
+    expect(restored).toBe(true);
+  });
+
+  it("records the ruling as the adjudicator's decision", async () => {
+    await runPipeline(new ContestRunner("S-01", UPHOLD), { verify: PASSES });
+
+    const { readContests } = await import("../../src/core/contest.js");
+    expect(readContests("p", env)).toMatchObject([{ sliceId: "S-01", ruling: "uphold", status: "ruled" }]);
+    const decision = readDecisions("p", env).find((d) => d.id === "D-contest-S-01");
+    expect(decision?.decided_by).toBe("adjudicator");
+    expect(readCostRecords("p", env).some((r) => r.stage === "adjudicate-S-01")).toBe(true);
+  });
+
+  it("amends, relocks, and commits the test without the slice's unfinished work", async () => {
+    const lockBefore: Record<string, string> = {};
+    const runner = new ContestRunner("S-01", (dir) => {
+      Object.assign(lockBefore, readTestLock("p", env));
+      AMEND(dir);
+    });
+    await runPipeline(runner, { verify: PASSES });
+
+    const lock = readTestLock("p", env);
+    expect(lock["tests/test_s01.py"]).not.toBe(lockBefore["tests/test_s01.py"]);
+    expect(verifyTestLock("p", "tests", env)).toEqual([]);
+    const amendCommit = subjects().find((s) => s.startsWith("adjudicate(S-01)"));
+    expect(amendCommit).toBeDefined();
+    const shown = execFileSync(
+      "git",
+      ["log", "--name-only", "--format=%s", "--grep=^adjudicate(S-01)"],
+      { cwd: path.join(env.SFO_HOME, "p"), encoding: "utf8" },
+    );
+    expect(shown).toContain("tests/test_s01.py");
+    expect(shown).not.toContain("unfinished.py");
+    expect(buildPrompts(runner, "S-01")[1]).toContain("Your contest was upheld");
+  });
+
+  it("reopens a passed slice the amended suite no longer passes", async () => {
+    let amended = false;
+    let regraded = 0;
+    const runner = new ContestRunner("S-03", (dir) => {
+      amended = true;
+      fs.writeFileSync(path.join(dir, "tests", "test_s03.py"), "def test_s03(): assert True\n");
+      ruling(dir, { ruling: "amend_test", why: "fixture undid itself", changedFiles: [], question: null });
+    });
+    const verify: VerifyFn = (_id, _a, slice) => {
+      if (slice.id === "S-01" && amended && regraded++ === 0) {
+        return { ok: false, steps: [], tamperedTests: [], reason: "broken by the amendment" };
+      }
+      return { ok: true, steps: [], tamperedTests: [] };
+    };
+    await runPipeline(runner, { verify });
+
+    expect(readVerifyRecords("p", env).some((r) => r.slice === "S-01" && r.trigger === "relock" && !r.ok)).toBe(true);
+    // Built a second time after being reopened, and passing again.
+    expect(runner.calls.map(stageOf).filter((s) => s === "build-S-01")).toHaveLength(2);
+    expect(readState("p", env).slicesPassed).toEqual(expect.arrayContaining(["S-01", "S-02", "S-03"]));
+  });
+
+  it("discards a ruling that changed files outside the test tree, and upholds the test", async () => {
+    const runner = new ContestRunner("S-01", (dir) => {
+      fs.writeFileSync(path.join(dir, "tests", "test_s01.py"), "def test_s01(): assert True\n");
+      fs.writeFileSync(path.join(dir, "cheat.py"), "x = 2\n");
+      ruling(dir, { ruling: "amend_test", why: "trust me", changedFiles: [], question: null });
+    });
+    await runPipeline(runner, { verify: PASSES });
+
+    const { readContests } = await import("../../src/core/contest.js");
+    const [record] = readContests("p", env);
+    expect(record.ruling).toBe("uphold");
+    expect(record.rulingWhy).toMatch(/outside the test tree/);
+    expect(fs.existsSync(path.join(env.SFO_HOME, "p", "cheat.py"))).toBe(false);
+    expect(fs.readFileSync(path.join(env.SFO_HOME, "p", "tests", "test_s01.py"), "utf8")).toContain("assert False");
+  });
+
+  it("upholds an amendment whose suite fails the pre-lock check", async () => {
+    const runner = new ContestRunner("S-01", AMEND);
+    const suiteCheck: SuiteCheckFn = () => ({
+      ok: false,
+      steps: [{ name: "lint", ok: false, exitCode: 1, output: "E501 line too long" }],
+      tamperedTests: [],
+    });
+    seed("capture");
+    await advance("p", runner, env, { verify: PASSES });
+    fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.json"), '{"answers":[]}');
+    // The pre-lock check at test-repair must pass for the build to start at all.
+    let calls = 0;
+    await advance("p", runner, env, {
+      verify: PASSES,
+      suiteCheck: (id, e) => (calls++ === 0 ? { ok: true, steps: [], tamperedTests: [] } : suiteCheck(id, e)),
+    });
+
+    const { readContests } = await import("../../src/core/contest.js");
+    expect(readContests("p", env)[0].rulingWhy).toMatch(/does not pass lint[\s\S]*E501/);
+  });
+
+  it("ignores a second contest on the same slice and grades it", async () => {
+    const graded: string[] = [];
+    const verify: VerifyFn = (_id, _a, slice) => {
+      graded.push(slice.id);
+      return { ok: true, steps: [], tamperedTests: [] };
+    };
+    const runner = new ContestRunner("S-01", UPHOLD, null, true);
+    await runPipeline(runner, { verify });
+
+    expect(runner.calls.map(stageOf).filter((s) => s.startsWith("adjudicate-"))).toHaveLength(1);
+    expect(graded).toContain("S-01");
+    expect(fs.existsSync(path.join(env.SFO_HOME, "p", ".sfo", "CONTEST.json"))).toBe(false);
+  });
+
+  it("counts an unreadable contest as a failed attempt that says why", async () => {
+    const runner = new ContestRunner("S-01", UPHOLD, "{not json");
+    await runPipeline(runner, { verify: PASSES });
+
+    const first = readVerifyRecords("p", env).find((r) => r.slice === "S-01");
+    expect(first?.ok).toBe(false);
+    expect(first?.reason).toMatch(/contest could not be read/);
+    expect(runner.calls.some((c) => stageOf(c).startsWith("adjudicate-"))).toBe(false);
+  });
+});
+
+describe("a criterion the adjudicator finds at fault", () => {
+  const DEFECT = (dir: string, stage: string) => {
+    if (stage.endsWith("-answer")) {
+      const file = path.join(dir, ".sfo", "CRITERIA.jsonl");
+      const lines = fs.readFileSync(file, "utf8").trim().split("\n").map((l) => JSON.parse(l));
+      lines[0].text = "one, as the person meant it";
+      fs.writeFileSync(file, `${lines.map((l) => JSON.stringify(l)).join("\n")}\n`);
+      fs.writeFileSync(path.join(dir, "tests", "test_s01.py"), "def test_s01(): assert 1\n");
+      ruling(dir, { ruling: "amend_test", why: "rewritten", changedFiles: [], question: null });
+      return;
+    }
+    ruling(dir, {
+      ruling: "criterion_defect",
+      why: "AC-001 contradicts AC-002",
+      changedFiles: [],
+      question: {
+        text: "Which did you mean?",
+        context: "They cannot both hold.",
+        options: [
+          { key: "A", label: "one", tradeoff: "x" },
+          { key: "B", label: "two", tradeoff: "y" },
+        ],
+      },
+    });
+  };
+
+  it("parks with the question asked, and says so in status", async () => {
+    const runner = new ContestRunner("S-01", DEFECT);
+    await runPipeline(runner, { verify: PASSES });
+
+    const s = readState("p", env);
+    expect(s.status).toBe("awaiting_human");
+    expect(s.currentStage).toBe("build");
+    const { readQuestions } = await import("../../src/core/questions.js");
+    expect(readQuestions("p", env)?.questions.find((q) => q.id === "CQ-S-01")?.section).toBe("blocking");
+    expect(formatStatus(listProjects(env))).toMatch(/AC-001 may be wrong \(S-01\)/);
+  });
+
+  it("stays parked until answered, then rewrites exactly that criterion and carries on", async () => {
+    const runner = new ContestRunner("S-01", DEFECT);
+    await runPipeline(runner, { verify: PASSES });
+    await advance("p", runner, env, { verify: PASSES });
+    expect(runner.calls.filter((c) => stageOf(c).endsWith("-answer"))).toHaveLength(0);
+
+    fs.writeFileSync(
+      path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.json"),
+      JSON.stringify({ answers: [{ questionId: "CQ-S-01", answer: "A, the first one", questionText: "Which did you mean?" }] }),
+    );
+    await advance("p", runner, env, { verify: PASSES });
+
+    const { readCriteria } = await import("../../src/core/criteria.js");
+    const criteria = readCriteria("p", env);
+    expect(criteria.map((c) => c.text)).toEqual(["one, as the person meant it", "two", "three"]);
+    expect(verifyTestLock("p", "tests", env)).toEqual([]);
+    const decision = readDecisions("p", env).find((d) => d.id === "D-contest-S-01-answer");
+    expect(decision?.decided_by).toBe("human");
+    expect(readState("p", env).slicesPassed).toEqual(expect.arrayContaining(["S-01", "S-02", "S-03"]));
+  });
+
+  it("does not apply an answer written against different wording of the same question id", async () => {
+    // CQ ids are derived from the slice, so an earlier answer to an earlier
+    // CQ-S-01 is the case to fear: applying it would rewrite a criterion from
+    // a reply to a question the person never saw.
+    const runner = new ContestRunner("S-01", DEFECT);
+    await runPipeline(runner, { verify: PASSES });
+    fs.writeFileSync(
+      path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.json"),
+      JSON.stringify({ answers: [{ questionId: "CQ-S-01", answer: "B", questionText: "An older question" }] }),
+    );
+    await advance("p", runner, env, { verify: PASSES });
+
+    expect(runner.calls.filter((c) => stageOf(c).endsWith("-answer"))).toHaveLength(0);
+    expect(readState("p", env).status).toBe("awaiting_human");
+  });
+});
+
+describe("an amended test and the contested slice's history", () => {
+  it("forgets the failures graded against the broken test", async () => {
+    // Attempt 1 fails the gate; attempt 2 contests and wins. Without the reset
+    // the slice would be one failure from abandonment, charged for the test's defect.
+    let s01 = 0;
+    const verify: VerifyFn = (_id, _a, slice) =>
+      slice.id === "S-01" && s01++ === 0
+        ? { ok: false, steps: [], tamperedTests: [], reason: "broken test" }
+        : { ok: true, steps: [], tamperedTests: [] };
+    const runner = new ContestRunner("S-01", AMEND, null, false, 2);
+    let attemptsAtAmend: number | undefined = -1;
+    const wrapped: Runner = {
+      runStage: async (input) => {
+        if (stageOf(input) === "build-S-01" && runner.calls.some((c) => stageOf(c).startsWith("adjudicate-"))) {
+          attemptsAtAmend = readState("p", env).sliceAttempts["S-01"];
+        }
+        return runner.runStage(input);
+      },
+    };
+    await runPipeline(wrapped, { verify });
+
+    expect(attemptsAtAmend).toBeUndefined();
+    expect(readState("p", env).slicesPassed).toContain("S-01");
+  });
+});
+

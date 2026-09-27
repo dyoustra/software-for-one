@@ -24,6 +24,11 @@ export const VerifyRecordSchema = z
     reason: z.string().min(1).optional(),
     /** Test paths that no longer matched the lock. Non-empty means no step ran. */
     tamperedTests: z.array(z.string()),
+    /**
+     * Why the gate ran, when it was not an attempt at building the slice: a
+     * test amended after the lock re-grades every slice that had passed.
+     */
+    trigger: z.enum(["relock"]).optional(),
     at: z.string().refine((v) => !Number.isNaN(Date.parse(v)), {
       message: "at must be a parseable timestamp",
     }),

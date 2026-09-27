@@ -4,6 +4,7 @@ import { ARCHETYPE_NAMES } from "../../src/core/archetype.js";
 import { ARCHETYPE_FILE } from "../../src/core/stack.js";
 import { VERIFY_FILE } from "../../src/core/verifyRecord.js";
 import { ACCESS_FILE } from "../../src/core/access.js";
+import { CONTESTS_FILE, CONTEST_FILE, RULING_FILE } from "../../src/core/contest.js";
 
 describe("loadPrompt", () => {
   it("loads each phase 1 agentic stage prompt", () => {
@@ -50,5 +51,11 @@ describe("prompts and the artifacts they are graded on", () => {
     // a tool its owner had no credential to run.
     expect(loadPrompt("spec")).toContain(`.sfo/${ACCESS_FILE}`);
     expect(loadPrompt("clarify")).toContain(`.sfo/${ACCESS_FILE}`);
+  });
+
+  it("names the contest artifacts where the stages that use them will look", () => {
+    expect(loadPrompt("deliver")).toContain(`.sfo/${CONTESTS_FILE}`);
+    expect(loadPrompt("adjudicate")).toContain(`.sfo/${RULING_FILE}`);
+    expect(loadPrompt("build")).toContain(`.sfo/${CONTEST_FILE}`);
   });
 });

@@ -12,7 +12,7 @@ export const DecisionSchema = z.object({
    * Required. Writing it only for human overrides makes absence load-bearing,
    * and absence cannot be distinguished from a bug or a prompt-version skew.
    */
-  decided_by: z.enum(["agent", "human"]),
+  decided_by: z.enum(["agent", "human", "adjudicator"]),
   blast_radius: z.enum(["local", "structural", "external"]),
   /**
    * Validated as a real timestamp, not just a string. The review UI sorts and

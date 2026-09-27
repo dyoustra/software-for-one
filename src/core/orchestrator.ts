@@ -29,6 +29,8 @@ import { loadPrompt } from "../stages/prompts.js";
 import { projectDir, logPath, type Env } from "./paths.js";
 import type { Runner, StageResult, UsageLimit } from "../runner/types.js";
 import { writeLimit, clearLimit } from "./limit.js";
+import { takeContest, contestFor, type ContestRecord } from "./contest.js";
+import { adjudicate, resumeCriterion, type AdjudicationContext, type AdjudicationOutcome } from "./adjudicate.js";
 
 /** The artifact a human must produce before a blocking stage can run. */
 const HUMAN_INPUT: Record<string, string> = { clarify: "ANSWERS.json" };
@@ -95,7 +97,9 @@ type Park =
    * A subscription's usage window ran out mid-stage. Not a failure: the stage
    * did nothing wrong, and counting it would fail a project for the time of day.
    */
-  | { park: "limit"; stage: string; limit: UsageLimit };
+  | { park: "limit"; stage: string; limit: UsageLimit }
+  /** The adjudicator found a criterion at fault, and only the person can say what it meant. */
+  | { park: "criterion"; sliceId: string; criterionId: string; questionId: string };
 
 const HUMAN_PARK: Park = { park: "human" };
 
@@ -357,6 +361,7 @@ function buildPromptFor(
   criteria: Criterion[],
   gate: string[],
   previousFailure: string | null,
+  contest: ContestRecord | undefined,
 ): string {
   const mine = criteria.filter((c) => slice.criterionIds.includes(c.id));
   return [
@@ -377,6 +382,8 @@ function buildPromptFor(
     "Run them yourself before you finish:",
     "",
     ...gate.map((command) => `    ${command}`),
+    "",
+    ...contestSection(slice, contest),
     ...(previousFailure
       ? [
           "",
@@ -392,6 +399,53 @@ function buildPromptFor(
         ]
       : []),
   ].join("\n");
+}
+
+/**
+ * The way out of a wrong test, offered once. Without it an agent facing a
+ * test no correct code can pass has two moves: fail, or bend the code until
+ * the test is satisfied — which in the first real build is what it did.
+ */
+function contestSection(slice: Slice, contest: ContestRecord | undefined): string[] {
+  if (!contest) {
+    return [
+      "## If a test is wrong",
+      "",
+      "If you are confident a test for your slice is wrong — it contradicts its",
+      "criterion, no correct implementation could satisfy it, or only code that",
+      "would be wrong in real use can pass it — do not work around it, and do not",
+      "change production code to fit it. Write `.sfo/CONTEST.json` and stop:",
+      "",
+      `    {"sliceId":"${slice.id}","criterionId":"AC-...","testFile":"tests/...","testName":"test_...",`,
+      '     "claim":"unsatisfiable | contradicts_criterion | forces_wrong_code",',
+      '     "why":"<what is wrong, with the evidence>","proposedFix":"<how the test should change>"}',
+      "",
+      "An independent adjudicator rules on it. You get one contest for this slice.",
+      "A contest ruled against you costs nothing but time; working around a wrong",
+      "test is a defect in what you deliver.",
+    ];
+  }
+  const test = `${contest.testFile} ${contest.testName}`.trim();
+  if (contest.ruling === "uphold") {
+    return [
+      "## Your contest was ruled against",
+      "",
+      `You contested ${test}. The adjudicator upheld it:`,
+      "",
+      contest.rulingWhy,
+      "",
+      "The test stands. Make it pass without changing any test.",
+    ];
+  }
+  return [
+    "## Your contest was upheld",
+    "",
+    `You contested ${test}, and the test was amended (${contest.changedFiles.join(", ") || "criterion reworded"}):`,
+    "",
+    contest.rulingWhy,
+    "",
+    "The suite is locked again as amended. Your contest is spent.",
+  ];
 }
 
 /** The commands the gate will run for this slice, as a person would type them. */
@@ -518,6 +572,16 @@ function recordVerdict(
   }
 }
 
+/** The park an adjudication ends in, if it ends in one. */
+function parkFor(outcome: AdjudicationOutcome): Park | null {
+  if (outcome.kind === "limit") return { park: "limit", stage: outcome.stage, limit: outcome.limit };
+  if (outcome.kind === "criterion") {
+    const { sliceId, criterionId, questionId } = outcome;
+    return { park: "criterion", sliceId, criterionId, questionId };
+  }
+  return null;
+}
+
 type BuildOutcome =
   | { outcome: "complete" }
   | { outcome: "parked"; park: Park }
@@ -536,6 +600,7 @@ async function runSlices(
   env: Env | undefined,
   heartbeatMs: number,
   verify: VerifyFn,
+  suiteCheck: SuiteCheckFn,
 ): Promise<BuildOutcome> {
   let slices: Slice[];
   let criteria: Criterion[];
@@ -591,6 +656,30 @@ async function runSlices(
 
   if (blockers.length > 0) return { outcome: "failed", reason: blockers.join("; ") };
 
+  const ctx: AdjudicationContext = {
+    id,
+    env,
+    runner,
+    archetype,
+    slices,
+    verify,
+    suiteCheck,
+    withHeartbeat: async (fn) => {
+      const stop = startHeartbeat(id, env, heartbeatMs);
+      try {
+        return await fn();
+      } finally {
+        stop();
+      }
+    },
+  };
+
+  // A criterion parked for the person is settled before any slice runs: the
+  // answer can change the suite every slice is graded against.
+  const resumed = await resumeCriterion(ctx);
+  const resumedPark = resumed && parkFor(resumed);
+  if (resumedPark) return { outcome: "parked", park: resumedPark };
+
   while (true) {
     let state = readState(id, env);
     const slice = nextRunnable(slices, {
@@ -618,6 +707,7 @@ async function runSlices(
           criteria,
           gateCommands(id, archetype, slice, env),
           previousFailureFor(id, stageName, env),
+          contestFor(id, slice.id, env),
         ),
         logPath: logPath(id, stageName, env),
         allowedTools: agentToolsForStage(id, stageName, env),
@@ -633,7 +723,20 @@ async function runSlices(
       return { outcome: "parked", park: { park: "limit", stage: stageName, limit: result.limited } };
     }
 
-    const { archetype: gradedAs, verdict } = gradeAttempt(id, slice, result, verify, env);
+    // A contest is read before the gate: the agent stopped on purpose, and
+    // grading its unfinished tree would record a failure that is not one. A
+    // slice gets one; a second is ignored and the gate is the answer.
+    const taken = takeContest(id, slice.id, env);
+    if (taken.kind === "contest" && !contestFor(id, slice.id, env)) {
+      const park = parkFor(await adjudicate(ctx, slice, taken.contest));
+      if (park) return { outcome: "parked", park };
+      continue;
+    }
+
+    const { archetype: gradedAs, verdict } =
+      taken.kind === "invalid"
+        ? { archetype, verdict: failedVerdict(`the contest could not be read: ${taken.reason}`) }
+        : gradeAttempt(id, slice, result, verify, env);
     writeVerifyLog(id, stageName, verdict, env);
 
     // The heartbeat rewrote state under us while the slice ran.
@@ -728,7 +831,14 @@ export async function advance(
     // that builds and fails its gate must not be able to reach a later stage
     // that reports otherwise.
     if (upcoming === "build") {
-      const built = await runSlices(id, runner, env, heartbeatMs, opts.verify ?? runVerify);
+      const built = await runSlices(
+        id,
+        runner,
+        env,
+        heartbeatMs,
+        opts.verify ?? runVerify,
+        opts.suiteCheck ?? checkSuiteBeforeLock,
+      );
       state = readState(id, env);
 
       if (built.outcome === "parked") {
