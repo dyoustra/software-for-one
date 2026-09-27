@@ -13,6 +13,8 @@ export interface ClaudeCodeRunnerOptions {
   maxBudgetUsd?: number;
   /** Which credential the child runs on. Absent means whatever the shell has. */
   access?: ResolvedAccess;
+  /** Confine Bash to the project. On unless false, or `SFO_SANDBOX=0`. */
+  sandbox?: boolean;
 }
 
 function num(value: unknown): number {
@@ -128,18 +130,56 @@ function readTail(logPath: string): string {
   }
 }
 
+/**
+ * Claude Code's own Bash sandbox, so stages can run any command, chained or
+ * piped, and still not change anything outside the project.
+ *
+ * The allowlist this replaces was the wrong guard: it refused `cd /tmp &&
+ * curl …` (twelve times in one research stage) while already permitting
+ * `uv run python -c …`, which can delete anything. The sandbox bounds what a
+ * command can *do*, whatever it is called. Writes: the project, the temp
+ * directories, and the package managers' caches. Network: open, since
+ * research and installs need it and reading the web is not destructive.
+ * No unsandboxed retries, and no running at all where the sandbox is
+ * unavailable: a stage that cannot be confined fails instead.
+ */
+export const SANDBOX_SETTINGS = {
+  sandbox: {
+    enabled: true,
+    failIfUnavailable: true,
+    autoAllowBashIfSandboxed: true,
+    allowUnsandboxedCommands: false,
+    filesystem: {
+      allowWrite: [
+        "/tmp",
+        "/private/tmp",
+        "~/.cache/uv",
+        "~/.local/share/uv",
+        "~/.cache/pip",
+        "~/Library/Caches/pip",
+        "~/.npm",
+      ],
+    },
+    // Mach lookups reach system services, not files. uv reads the system
+    // proxy through one at startup and panics without it, on every command.
+    network: { allowedDomains: ["*"], allowMachLookup: true },
+  },
+};
+
 export class ClaudeCodeRunner implements Runner {
   private readonly bin: string;
   private readonly extraEnv: Record<string, string>;
   private readonly maxBudgetUsd?: number;
   private readonly access: ResolvedAccess;
   private readonly billing: Billing | undefined;
+  private readonly sandbox: boolean;
 
   constructor(opts: ClaudeCodeRunnerOptions = {}) {
     this.bin = opts.bin ?? "claude";
     this.extraEnv = opts.env ?? {};
     this.access = opts.access ?? { method: "inherit" };
     this.billing = billingFor(this.access, process.env);
+    this.sandbox = opts.sandbox ?? process.env.SFO_SANDBOX !== "0";
     // Env var so every call site (sfo run, sfo stage, the detached child)
     // inherits the same ceiling without threading an option through each one.
     const fromEnv = Number(process.env.SFO_MAX_BUDGET_USD);
@@ -162,6 +202,7 @@ export class ClaudeCodeRunner implements Runner {
       "project,local",
       "--permission-mode",
       "acceptEdits",
+      ...(this.sandbox ? ["--settings", JSON.stringify(SANDBOX_SETTINGS)] : []),
       // Variadic, so it must be followed by another flag: placed last, it
       // would swallow the prompt as one more tool name.
       ...(input.allowedTools?.length ? ["--allowedTools", ...input.allowedTools] : []),

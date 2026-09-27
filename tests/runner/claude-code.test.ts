@@ -375,3 +375,18 @@ describe("ClaudeCodeRunner usage limits", () => {
     });
   });
 });
+
+describe("ClaudeCodeRunner sandbox", () => {
+  it("confines Bash with the sandbox by default, and can be turned off", async () => {
+    const on = path.join(dir, "on.log");
+    await new ClaudeCodeRunner({ bin: FAKE }).runStage({ workdir: dir, prompt: "x", logPath: on });
+    const args = fs.readFileSync(on, "utf8");
+    expect(args).toContain("--settings");
+    expect(args).toContain('"autoAllowBashIfSandboxed":true');
+    expect(args).toContain('"allowUnsandboxedCommands":false');
+
+    const off = path.join(dir, "off.log");
+    await new ClaudeCodeRunner({ bin: FAKE, sandbox: false }).runStage({ workdir: dir, prompt: "x", logPath: off });
+    expect(fs.readFileSync(off, "utf8")).not.toContain("--settings");
+  });
+});
