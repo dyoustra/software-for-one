@@ -22,6 +22,12 @@ export const ProjectStateSchema = z.object({
   sliceAttempts: z.record(z.string(), z.number()).default({}),
   slicesPassed: z.array(z.string()).default([]),
   slicesFailed: z.array(z.string()).default([]),
+  /**
+   * The last stage that finished. `currentStage` names a stage as soon as it
+   * starts, so after a crash or kill the two differ, and that difference is
+   * the only record that the current stage never finished and must run again.
+   */
+  completedStage: z.string().nullable().default(null),
   pid: z.number().nullable(),
   heartbeatAt: z.string().nullable(),
   createdAt: z.string(),

@@ -9,8 +9,12 @@ export const PriorArtSchema = z
     existing: z.array(
       z.object({ name: z.string(), url: z.string(), gap: z.string() }),
     ),
-    /** Required when the verdict is `no_gap`. */
-    recommendation: z.string().optional(),
+    /**
+     * Required when the verdict is `no_gap`. Null accepted as absent: for a
+     * clear gap there is nothing to recommend, and a model saying so with
+     * `null` crashed the first run that did.
+     */
+    recommendation: z.string().nullish(),
   })
   .refine((v) => v.verdict !== "no_gap" || (v.recommendation?.length ?? 0) > 0, {
     message: "no_gap requires a recommendation — stopping without naming what to use instead is a dead end",

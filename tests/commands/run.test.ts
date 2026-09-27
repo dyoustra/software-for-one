@@ -277,3 +277,16 @@ describe("runnerFor", () => {
     error.mockRestore();
   });
 });
+
+describe("recordCrash", () => {
+  it("leaves the project resumable and says why it stopped", async () => {
+    const { recordCrash } = await import("../../src/commands/run.js");
+    const { listProjects, formatStatus } = await import("../../src/commands/status.js");
+    seed("running", new Date().toISOString(), "research");
+    recordCrash("p", new Error("invalid PRIOR_ART.json: recommendation expected string"), env);
+
+    const { readState } = await import("../../src/core/state.js");
+    expect(readState("p", env)).toMatchObject({ status: "awaiting_human", pid: null });
+    expect(formatStatus(listProjects(env))).toMatch(/crashed in research: Error: invalid PRIOR_ART.json/);
+  });
+});

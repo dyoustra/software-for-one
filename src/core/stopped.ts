@@ -16,3 +16,33 @@ export function isStopped(id: string, env?: Env): boolean {
 export function clearStopped(id: string, env?: Env): void {
   fs.rmSync(artifactPath(id, STOPPED_FILE, env), { force: true });
 }
+
+export const CRASH_FILE = "CRASH.json";
+
+export interface Crash {
+  stage: string;
+  error: string;
+  at: string;
+}
+
+/**
+ * Why a run died. A detached run's output goes nowhere, so without this a
+ * crash reads only as a heartbeat that stopped.
+ */
+export function writeCrash(id: string, crash: Crash, env?: Env): void {
+  fs.mkdirSync(sfoDir(id, env), { recursive: true });
+  fs.writeFileSync(artifactPath(id, CRASH_FILE, env), `${JSON.stringify(crash, null, 2)}\n`);
+}
+
+export function readCrash(id: string, env?: Env): Crash | null {
+  try {
+    return JSON.parse(fs.readFileSync(artifactPath(id, CRASH_FILE, env), "utf8")) as Crash;
+  } catch {
+    return null;
+  }
+}
+
+export function clearCrash(id: string, env?: Env): void {
+  fs.rmSync(artifactPath(id, CRASH_FILE, env), { force: true });
+}
+

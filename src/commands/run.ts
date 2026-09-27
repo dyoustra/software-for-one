@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { advance } from "../core/orchestrator.js";
 import { ClaudeCodeRunner } from "../runner/claude-code.js";
-import { readState, isStale } from "../core/state.js";
+import { readState, writeState, isStale } from "../core/state.js";
 import { blockingPriorArt, readPriorArt } from "../core/priorart.js";
 import { budgetState, formatBudget } from "../core/budget.js";
 import { recoveryHint } from "../core/stages.js";
@@ -12,6 +12,7 @@ import { readProfile, resolveAccess, resolveProjectAccess, type ResolvedAccess }
 import { recordCost } from "../core/cost.js";
 import { FallbackRunner } from "../runner/fallback.js";
 import { desktopNotifier, type Notifier } from "../core/notify.js";
+import { writeCrash } from "../core/stopped.js";
 import { listProjects } from "./status.js";
 import type { Runner } from "../runner/types.js";
 
@@ -30,10 +31,27 @@ export async function runAttached(id: string, opts: GuardOptions = {}): Promise<
     const access = resolveProjectAccess(id, { useApiKey: opts.useApiKey });
     await advance(id, runnerFor(id, access));
   } catch (err) {
-    desktopNotifier(`sfo: ${id}`, `stopped with an error — ${err instanceof Error ? err.message : String(err)}`);
+    recordCrash(id, err);
+    desktopNotifier(`sfo: ${id}`, `crashed — ${err instanceof Error ? err.message : String(err)}`);
     throw err;
   }
   notifyOutcome(id);
+}
+
+/**
+ * Leaves the project resumable and says why it stopped. Left alone it stays
+ * `running` with a dead pid, which reads only as "stale", and the error itself
+ * went to a detached process's discarded output.
+ */
+export function recordCrash(id: string, err: unknown, env?: Env): void {
+  try {
+    const state = readState(id, env);
+    const error = err instanceof Error ? (err.stack ?? err.message) : String(err);
+    writeCrash(id, { stage: state.currentStage, error, at: new Date().toISOString() }, env);
+    writeState({ ...state, status: "awaiting_human", pid: null, updatedAt: new Date().toISOString() }, env);
+  } catch {
+    // Reporting the crash must not replace it with a different one.
+  }
 }
 
 /**

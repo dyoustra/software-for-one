@@ -31,7 +31,7 @@ import { loadPrompt } from "../stages/prompts.js";
 import { projectDir, logPath, type Env } from "./paths.js";
 import type { Runner, StageResult, UsageLimit } from "../runner/types.js";
 import { writeLimit, clearLimit } from "./limit.js";
-import { clearStopped } from "./stopped.js";
+import { clearStopped, clearCrash } from "./stopped.js";
 import { takeContest, contestFor, contestInstructions, type ContestRecord } from "./contest.js";
 import { adjudicate, resumeCriterion, type AdjudicationContext, type AdjudicationOutcome } from "./adjudicate.js";
 import { runSmoke, type SmokeDeps, type SmokeContext } from "./smoke.js";
@@ -180,6 +180,12 @@ function pickTarget(
   env: Env | undefined,
 ): string | null | Park {
   const current = state.currentStage;
+
+  // A run that died mid-stage: it is still marked running, and the stage it
+  // was on never finished. Stepping to the next stage would skip it.
+  if (state.status === "running" && state.completedStage !== current && current !== "capture") {
+    return current;
+  }
 
   if (
     blocksOnHuman(current) &&
@@ -772,6 +778,7 @@ export async function advance(
   // the human switched credentials. If it is hit again it is written again.
   clearLimit(id, env);
   clearStopped(id, env);
+  clearCrash(id, env);
 
   while (true) {
     const upcoming = pickStage(id, state, env);
@@ -827,6 +834,7 @@ export async function advance(
       // Each passing slice committed itself; this catches the state left by any
       // that failed, so what was abandoned is in the history too.
       commitStage(id, upcoming, env);
+      state = markCompleted(id, upcoming, env);
       continue;
     }
 
@@ -894,6 +902,7 @@ export async function advance(
         return;
       }
       commitStage(id, upcoming, env);
+      state = markCompleted(id, upcoming, env);
       continue;
     }
 
@@ -953,6 +962,7 @@ export async function advance(
           ...state,
           status: "awaiting_human",
           pid: null,
+          completedStage: upcoming,
           updatedAt: new Date().toISOString(),
         };
         writeState(state, env);
@@ -999,5 +1009,13 @@ export async function advance(
     // Only on success. A failed stage's partial output stays uncommitted so the
     // retry diffs against the last state that was actually good.
     commitStage(id, upcoming, env);
+    state = markCompleted(id, upcoming, env);
   }
+}
+
+/** Records that `stage` finished, re-reading first because the heartbeat writes too. */
+function markCompleted(id: string, stage: string, env: Env | undefined): ProjectState {
+  const state = { ...readState(id, env), completedStage: stage, updatedAt: new Date().toISOString() };
+  writeState(state, env);
+  return state;
 }

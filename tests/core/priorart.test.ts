@@ -45,3 +45,11 @@ describe("priorArt", () => {
     expect(blocksPipeline("clear_gap")).toBe(false);
   });
 });
+
+describe("a clear gap with nothing to recommend", () => {
+  it("accepts recommendation: null, which crashed the second real run", () => {
+    expect(PriorArtSchema.safeParse({ verdict: "clear_gap", summary: "s", existing: [], recommendation: null }).success).toBe(true);
+    expect(PriorArtSchema.safeParse({ verdict: "no_gap", summary: "s", existing: [], recommendation: null }).success).toBe(false);
+  });
+});
+

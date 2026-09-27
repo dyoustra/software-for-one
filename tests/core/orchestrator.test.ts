@@ -214,6 +214,7 @@ function seed(stage: string, id = "p"): ProjectState {
     sliceAttempts: {},
     slicesPassed: [],
     slicesFailed: [],
+    completedStage: null,
     pid: null,
     heartbeatAt: null,
     createdAt: "2026-08-21T00:00:00.000Z",
@@ -1596,5 +1597,32 @@ describe("the smoke stage in the pipeline", () => {
     expect(stages.indexOf("review")).toBeGreaterThan(stages.lastIndexOf("build-S-03"));
     expect(subjects().some((s) => s.startsWith("stage(smoke)"))).toBe(true);
     expect(readState("p", env).status).toBe("done");
+  });
+});
+
+describe("a run that dies mid-stage", () => {
+  it("repeats the interrupted stage on resume instead of stepping past it", async () => {
+    // currentStage names a stage as soon as it starts, so resuming by
+    // "the stage after current" skipped whatever the crash interrupted.
+    const killed = new KilledRunner("research", producesArtifacts());
+    seed("capture");
+    await expect(advance("p", killed, env, { verify: PASSES })).rejects.toThrow(/connection/);
+    expect(readState("p", env)).toMatchObject({ currentStage: "research", status: "running", completedStage: null });
+
+    const resumed = pipelineRunner();
+    await advance("p", resumed, env, { verify: PASSES });
+    expect(resumed.calls.map(stageOf).slice(0, 2)).toEqual(["research", "spec"]);
+  });
+
+  it("does not repeat a stage that finished before the run stopped", async () => {
+    const runner = pipelineRunner();
+    seed("capture");
+    await advance("p", runner, env, { verify: PASSES });
+    // Parked at clarify: spec finished, and resuming must not run it again.
+    expect(readState("p", env).completedStage).toBe("spec");
+    fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.json"), '{"answers":[]}');
+    const resumed = pipelineRunner();
+    await advance("p", resumed, env, { verify: PASSES });
+    expect(resumed.calls.map(stageOf)[0]).toBe("clarify");
   });
 });
