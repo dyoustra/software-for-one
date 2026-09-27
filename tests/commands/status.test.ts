@@ -199,3 +199,16 @@ describe("a delivered project whose seams failed", () => {
     expect(formatStatus(listProjects(env))).toMatch(/done, but failed against the real thing: anthropic-batch$/m);
   });
 });
+
+describe("a delivered project with unrepaired review findings", () => {
+  it("counts the high ones that are still true", () => {
+    seed("p", "deliver", "done");
+    const f = (id: string, severity: string, status: string) =>
+      JSON.stringify({ id, round: 1, severity, kind: "code", summary: "s", evidence: "e", status });
+    fs.writeFileSync(
+      path.join(env.SFO_HOME, "p", ".sfo", "FINDINGS.jsonl"),
+      [f("R-001", "high", "unrepaired"), f("R-002", "high", "repaired"), f("R-003", "medium", "unrepaired")].join("\n") + "\n",
+    );
+    expect(formatStatus(listProjects(env))).toMatch(/done, 1 high review finding unrepaired$/m);
+  });
+});

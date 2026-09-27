@@ -1,7 +1,14 @@
 Read `.sfo/SPEC.md`, `.sfo/CRITERIA.jsonl`, `.sfo/SLICES.jsonl`,
 `.sfo/REVIEW.md`, `.sfo/DECISIONS.jsonl`, `.sfo/VERIFY.jsonl`,
-`.sfo/SERVICES.jsonl` and `.sfo/SMOKE.jsonl` if they exist, and
-`.sfo/CONTESTS.jsonl` if it exists.
+`.sfo/SERVICES.jsonl`, `.sfo/SMOKE.jsonl` and `.sfo/FINDINGS.jsonl` if they
+exist, and `.sfo/CONTESTS.jsonl` if it exists.
+
+`.sfo/FINDINGS.jsonl` is the adversarial review's findings, each with the
+`status` the pipeline gave it: `repaired` (its reproduction test now passes),
+`unrepaired` (still true after the repair round; `statusWhy` says why),
+`not_reproduced` (the reviewer's test passed against the code, so the claim was
+wrong), `report_only` (not a repairable kind, or found in round 2), or
+`dropped` (it contradicted a decision the person made).
 
 `.sfo/SMOKE.jsonl` is what happened when each real seam was exercised after
 the build, one line per check per attempt:
@@ -38,7 +45,9 @@ attempt 1 and passed on attempt 2 passed.
 Write `.sfo/SUMMARY.md`.
 
 **Lead with what does not work.** A seam whose result is `failed` goes first of
-all — the tool was run against the real thing and it did not work. Then any
+all — the tool was run against the real thing and it did not work. Next, every
+`high` finding that is not `repaired`: an independent review showed the
+behaviour is wrong, and it still is. Then any
 slice that failed or was skipped: that is the first thing in the document — which criteria are unmet, and what the person
 cannot do as a result. Burying a gap under a list of what worked is the failure
 this whole pipeline exists to prevent.
@@ -59,7 +68,10 @@ Then, in order:
    never reached a step, any archetype with no recipe, and anything the recipe
    for this archetype does not cover. State it plainly rather than omitting it.
    "Verified" here means exactly the steps that ran and exited 0.
-4. **Tests changed after the lock** — from `.sfo/CONTESTS.jsonl`, one entry per
+4. **Review findings** — the rest of `.sfo/FINDINGS.jsonl`: what was repaired
+   and the test that now guards it, what was reported but not repaired, and
+   the `not_reproduced` claims, briefly, as the reviewer being wrong.
+5. **Tests changed after the lock** — from `.sfo/CONTESTS.jsonl`, one entry per
    contest: the slice, the test, what the build agent claimed, and the ruling.
    Name every `amend_test` and every criterion rewritten from the person's
    answer, with the files changed. The suite was locked so that it could not
@@ -67,10 +79,10 @@ Then, in order:
    one. Records in `.sfo/VERIFY.jsonl` with `"trigger":"relock"` are slices
    re-graded after an amendment — say which of them failed and were rebuilt.
    Omit this section only if the file does not exist.
-5. **Decisions worth reviewing** — pull from `.sfo/DECISIONS.jsonl`, `external`
+6. **Decisions worth reviewing** — pull from `.sfo/DECISIONS.jsonl`, `external`
    and `structural` first. These are the calls that are expensive to reverse and
    the ones most worth a human's attention.
-6. **Coverage gaps** from `.sfo/REVIEW.md`.
+7. **Coverage gaps** from `.sfo/REVIEW.md`.
 
 Be accurate rather than reassuring. Someone reads this to decide whether to
 trust the thing you built.

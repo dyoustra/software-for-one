@@ -290,7 +290,14 @@ export function runVerify(id: string, archetype: string, slice: Slice, env?: Env
  * would also run the tests of slices that failed and were never expected to
  * pass.
  */
-export function runPassedGate(id: string, archetype: string, passed: Slice[], env?: Env): VerifyResult {
+export function runPassedGate(
+  id: string,
+  archetype: string,
+  passed: Slice[],
+  env?: Env,
+  /** Tests outside any slice that the change must also keep passing. */
+  extraTests: string[] = [],
+): VerifyResult {
   const tamperedTests = verifyTestLock(id, TEST_DIR, env);
   if (tamperedTests.length > 0) {
     return {
@@ -304,10 +311,23 @@ export function runPassedGate(id: string, archetype: string, passed: Slice[], en
   if (recipe.length === 0) {
     return { ok: false, steps: [], tamperedTests: [], reason: `no gates available for archetype "${archetype}"` };
   }
-  const testPaths = [...new Set(passed.flatMap((s) => sliceTestFiles(id, s, env)))];
+  const testPaths = [...new Set([...passed.flatMap((s) => sliceTestFiles(id, s, env)), ...extraTests])];
   // A scoped step given no paths runs unscoped, which is the suite this avoids.
   const steps = testPaths.length > 0 ? recipe : recipe.filter((step) => !step.scopeable);
   return runRecipe(projectDir(id, env), steps, testPaths);
+}
+
+/**
+ * Only the test step, only these files. For asking one question of the code
+ * — does this test pass right now? — where install, lint and typecheck would
+ * answer different ones.
+ */
+export function runTestFiles(id: string, archetype: string, files: string[], env?: Env): VerifyResult {
+  const step = verifyRecipeFor(archetype).find((s) => s.name === "test");
+  if (!step || files.length === 0) {
+    return { ok: false, steps: [], tamperedTests: [], reason: `no test step for "${archetype}"` };
+  }
+  return runRecipe(projectDir(id, env), [step], files);
 }
 
 /** Stages from here on write or check code, and need to be able to run it. */
@@ -324,7 +344,10 @@ export function agentToolsForStage(id: string, stage: string, env?: Env): string
   // The adjudicator rules on a test by running it, and smoke repair is a build
   // agent by another name, so both get the build's tools.
   const base =
-    stage.startsWith("build-") || stage.startsWith("adjudicate-") || stage === "smoke-repair"
+    stage.startsWith("build-") ||
+    stage.startsWith("adjudicate-") ||
+    stage === "smoke-repair" ||
+    stage.startsWith("review-")
       ? "build"
       : stage;
   const runsCode = order.indexOf(base) >= order.indexOf(FIRST_CODE_STAGE);

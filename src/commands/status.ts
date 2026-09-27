@@ -7,6 +7,7 @@ import { readEstimate } from "../core/estimate.js";
 import { readLimit, formatLimit } from "../core/limit.js";
 import { readContests } from "../core/contest.js";
 import { readSmokeRecords, latestSmoke } from "../core/smoke.js";
+import { readFindings } from "../core/findings.js";
 
 /** A project plus whatever short explanation the listing owes the reader. */
 export type ProjectSummary = ProjectState & { note?: string };
@@ -72,12 +73,16 @@ function criterionNote(state: ProjectState, env: Env | undefined): string | unde
   }
 }
 
-/** A delivered project whose real seams did not all work. Never throws. */
+/** A delivered project whose real seams or review findings say it is not all right. Never throws. */
 function smokeNote(state: ProjectState, env: Env | undefined): string | undefined {
   if (state.status !== "done") return undefined;
   try {
     const failed = [...new Set(latestSmoke(readSmokeRecords(state.id, env)).filter((r) => r.level === "failed").map((r) => r.seam))];
-    return failed.length > 0 ? `done, but failed against the real thing: ${failed.join(", ")}` : undefined;
+    if (failed.length > 0) return `done, but failed against the real thing: ${failed.join(", ")}`;
+    const unrepaired = readFindings(state.id, env).filter((f) => f.severity === "high" && f.status === "unrepaired");
+    return unrepaired.length > 0
+      ? `done, ${unrepaired.length} high review finding${unrepaired.length === 1 ? "" : "s"} unrepaired`
+      : undefined;
   } catch {
     return undefined;
   }

@@ -7,6 +7,7 @@ import { ACCESS_FILE } from "../../src/core/access.js";
 import { CONTESTS_FILE, CONTEST_FILE, RULING_FILE } from "../../src/core/contest.js";
 import { SERVICES_FILE, CREDENTIALS_FILE, smokeTestFile } from "../../src/core/services.js";
 import { SMOKE_FILE } from "../../src/core/smoke.js";
+import { FINDINGS_FILE, REVIEW_TEST_DIR } from "../../src/core/findings.js";
 import { SMOKE_DIR } from "../../src/core/archetype.js";
 
 describe("loadPrompt", () => {
@@ -82,5 +83,13 @@ describe("prompts and the artifacts they are graded on", () => {
     expect(tw).toContain("SFO_SMOKE_RESULTS");
     expect(tw).toContain("SFO_SMOKE_ASYNC_WAIT_SECONDS");
     for (const level of ["completed", "accepted", "failed", "skipped"]) expect(tw).toContain(`\`${level}\``);
+  });
+
+  it("tells review where its findings and reproduction tests go, and deliver where to read them", () => {
+    const review = loadPrompt("review");
+    expect(review).toContain(`.sfo/${FINDINGS_FILE}`);
+    expect(review).toContain(`${REVIEW_TEST_DIR}/test_r001_`);
+    expect(loadPrompt("deliver")).toContain(`.sfo/${FINDINGS_FILE}`);
+    expect(loadPrompt("review-repair").length).toBeGreaterThan(100);
   });
 });

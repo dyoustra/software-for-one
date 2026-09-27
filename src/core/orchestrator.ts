@@ -16,6 +16,7 @@ import { verifyRecipeFor } from "./archetype.js";
 import {
   runVerify,
   runPassedGate,
+  runTestFiles,
   agentToolsForStage,
   checkSuiteBeforeLock,
   detectArchetype,
@@ -32,7 +33,8 @@ import type { Runner, StageResult, UsageLimit } from "../runner/types.js";
 import { writeLimit, clearLimit } from "./limit.js";
 import { takeContest, contestFor, contestInstructions, type ContestRecord } from "./contest.js";
 import { adjudicate, resumeCriterion, type AdjudicationContext, type AdjudicationOutcome } from "./adjudicate.js";
-import { runSmoke, type SmokeDeps } from "./smoke.js";
+import { runSmoke, type SmokeDeps, type SmokeContext } from "./smoke.js";
+import { runReview, type ReviewContext } from "./review.js";
 
 /** The artifact a human must produce before a blocking stage can run. */
 const HUMAN_INPUT: Record<string, string> = { clarify: "ANSWERS.json" };
@@ -48,7 +50,13 @@ export const MAX_SLICE_ATTEMPTS = 2;
 
 export type VerifyFn = (id: string, archetype: string, slice: Slice, env?: Env) => VerifyResult;
 export type SuiteCheckFn = (id: string, env?: Env) => VerifyResult;
-export type PassedGateFn = (id: string, archetype: string, passed: Slice[], env?: Env) => VerifyResult;
+export type PassedGateFn = (
+  id: string,
+  archetype: string,
+  passed: Slice[],
+  env?: Env,
+  extraTests?: string[],
+) => VerifyResult;
 
 export interface AdvanceOptions {
   /** Overridable so tests can exercise ticking without waiting 30s. */
@@ -61,8 +69,10 @@ export interface AdvanceOptions {
   verify?: VerifyFn;
   /** The real-seam runs and credential reads of the smoke stage. Injected so tests make no real call. */
   smoke?: SmokeDeps;
-  /** The gate a smoke repair must pass. Injected for the same reason as `verify`. */
+  /** The gate a smoke or review repair must pass. Injected for the same reason as `verify`. */
   passedGate?: PassedGateFn;
+  /** Runs chosen test files alone: review's reproductions. Injected for the same reason. */
+  runTests?: ReviewContext["runTests"];
   /** The pre-lock check on test-repair's output. Injected for the same reason. */
   suiteCheck?: SuiteCheckFn;
 }
@@ -818,19 +828,20 @@ export async function advance(
       continue;
     }
 
-    // Real seams, after the build and before anything reports on it. Mostly
-    // mechanical: an agent runs only to repair a seam that failed.
-    if (upcoming === "smoke") {
+    // Smoke exercises the real seams and review hunts for hollow behaviour,
+    // and each can repair what it proves broken. Both are loops with their own
+    // bounds rather than one agent call, so they are dispatched here.
+    if (upcoming === "smoke" || upcoming === "review") {
       let archetype: string;
       try {
         archetype = detectArchetype(id, env);
       } catch (err) {
-        console.error(`sfo: smoke cannot run — ${reason(err)}`);
+        console.error(`sfo: ${upcoming} cannot run — ${reason(err)}`);
         state = failedState(readState(id, env), upcoming);
         writeState(state, env);
         return;
       }
-      const smoked = await runSmoke({
+      const smokeCtx: SmokeContext = {
         id,
         env,
         runner,
@@ -848,23 +859,33 @@ export async function advance(
           }
         },
         deps: opts.smoke,
-      });
+      };
+      const ran =
+        upcoming === "smoke"
+          ? await runSmoke(smokeCtx)
+          : await runReview({
+              ...smokeCtx,
+              runTests: opts.runTests ?? runTestFiles,
+              resmoke: async () => {
+                await runSmoke({ ...smokeCtx, noRepair: true });
+              },
+            });
       state = readState(id, env);
 
-      if (smoked.outcome === "failed") {
-        console.error(`sfo: smoke cannot run — ${smoked.reason}`);
+      if (ran.outcome === "failed") {
+        console.error(`sfo: ${upcoming} cannot run — ${ran.reason}`);
         state = failedState(state, upcoming);
         writeState(state, env);
         return;
       }
-      // Both parks leave smoke to run again from the start: it is cheap, and
-      // a half-finished repair has already been kept or discarded.
+      // Parked from the stage before, so the next run repeats this one whole.
+      // What a half-finished repair produced has already been kept or discarded.
       const budget = budgetState(id, env);
       const park: Park | null =
-        smoked.outcome === "limit"
-          ? { park: "limit", stage: smoked.stage, limit: smoked.limit }
-          : smoked.outcome === "budget" && budget
-            ? { park: "budget", stage: smoked.stage, budget }
+        ran.outcome === "limit"
+          ? { park: "limit", stage: ran.stage, limit: ran.limit }
+          : ran.outcome === "budget" && budget
+            ? { park: "budget", stage: ran.stage, budget }
             : null;
       if (park) {
         applyPark(id, { ...state, currentStage: previousStage }, park, env);

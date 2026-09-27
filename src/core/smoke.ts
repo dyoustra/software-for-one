@@ -281,7 +281,9 @@ export interface SmokeContext {
   verify: AdjudicationContext["verify"];
   suiteCheck: AdjudicationContext["suiteCheck"];
   /** The gate for a repair: every passed slice's tests at once. */
-  passedGate: (id: string, archetype: string, passed: Slice[], env?: Env) => VerifyResult;
+  passedGate: (id: string, archetype: string, passed: Slice[], env?: Env, extraTests?: string[]) => VerifyResult;
+  /** Run the seams and record them, but attempt no repair: the re-check after review repairs. */
+  noRepair?: boolean;
   budgetExceeded: () => boolean;
   withHeartbeat: <T>(fn: () => Promise<T>) => Promise<T>;
   deps?: SmokeDeps;
@@ -385,7 +387,7 @@ export async function runSmoke(ctx: SmokeContext): Promise<SmokeOutcome> {
     const ids = new Set(readState(id, env).slicesPassed);
     return readSlices(id, env).filter((s) => ids.has(s.id));
   };
-  if (failing.length === 0 || passed().length === 0) return { outcome: "complete" };
+  if (failing.length === 0 || passed().length === 0 || ctx.noRepair) return { outcome: "complete" };
 
   let repairs = 0;
   let previous: string | null = null;
