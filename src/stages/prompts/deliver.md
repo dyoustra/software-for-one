@@ -33,6 +33,10 @@ this whole pipeline exists to prevent.
 Then, in order:
 
 1. **What this is and how to run it** — the actual commands, assuming nothing.
+   If it calls a model, say which credential it needs and where it reads it
+   from, and whether that call was ever made against the real service or only
+   against a test double. A backend nobody has run is not verified, however
+   many tests pass around it.
 2. **What was not verified** — from `.sfo/VERIFY.jsonl`: any slice whose gate
    never reached a step, any archetype with no recipe, and anything the recipe
    for this archetype does not cover. State it plainly rather than omitting it.

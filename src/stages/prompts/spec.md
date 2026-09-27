@@ -1,4 +1,4 @@
-Read `.sfo/IDEA.md` and `.sfo/RESEARCH.md`. Produce a specification.
+Read `.sfo/IDEA.md`, `.sfo/RESEARCH.md`, and `.sfo/ACCESS.json`. Produce a specification.
 
 **Write each file as you finish it, not all at the end.** Write `.sfo/SPEC.md` first and save it, then `.sfo/ARCHETYPE.json`, then `.sfo/CRITERIA.jsonl`, then `.sfo/QUESTIONS.json`, then append to `.sfo/DECISIONS.jsonl`. Stages get killed mid-run; partial output that a re-run can build on beats losing twenty minutes of work to a dropped connection.
 
@@ -45,6 +45,31 @@ pick the closer of the two and say so in the **Stack** section of
 The **Stack** section of `.sfo/SPEC.md` must name the same archetype. This file
 is what every later stage reads to know what it is building and what will grade
 it — the prose is for the human.
+
+**Model access is already decided.** Read `.sfo/ACCESS.json`:
+
+    {"modelAccess":["claude_subscription","anthropic_api_key"],"sfoPrefers":"claude_subscription"}
+
+`modelAccess` is how the person can pay for model calls — asked once, when they
+set sfo up, and never asked again. Do not put a question about it in
+`.sfo/QUESTIONS.json`. If what you are specifying calls a language model when it
+runs:
+
+- It authenticates with `anthropic_api_key` (the Anthropic SDK, reading
+  `ANTHROPIC_API_KEY`; the Batch API wherever the work does not need an answer
+  immediately). That is the only backend this pipeline can build today; do not
+  specify one for any other method, even when it is listed.
+- Give it a criterion like any other: with no key available, the tool exits
+  before reading or changing anything, and says what it looked for.
+- Name the backend in the **Stack** section of `.sfo/SPEC.md`.
+- If `anthropic_api_key` is **not** in `modelAccess`, the person cannot run what
+  you are about to specify. That is a `blocking` question — say so plainly, and
+  offer the real alternatives (get a key; drop or defer the part that needs a
+  model; anything else that fits the idea).
+
+If `.sfo/ACCESS.json` does not exist, the project predates it: ask one
+`blocking` question about how the tool will authenticate to a model, and only
+if it calls one.
 
 Questions for the human go in `.sfo/QUESTIONS.json`. Every question is either
 `blocking` or `preference`:

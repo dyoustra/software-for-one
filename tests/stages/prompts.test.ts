@@ -3,6 +3,7 @@ import { loadPrompt } from "../../src/stages/prompts.js";
 import { ARCHETYPE_NAMES } from "../../src/core/archetype.js";
 import { ARCHETYPE_FILE } from "../../src/core/stack.js";
 import { VERIFY_FILE } from "../../src/core/verifyRecord.js";
+import { ACCESS_FILE } from "../../src/core/access.js";
 
 describe("loadPrompt", () => {
   it("loads each phase 1 agentic stage prompt", () => {
@@ -42,5 +43,12 @@ describe("prompts and the artifacts they are graded on", () => {
     // It is told to lead with what does not work; a nonexistent input means it
     // invents the section or omits it.
     expect(loadPrompt("deliver")).toContain(VERIFY_FILE);
+  });
+
+  it("hands spec the access snapshot, and tells clarify not to re-ask it", () => {
+    // Left to a spec that might or might not raise it, the first project built
+    // a tool its owner had no credential to run.
+    expect(loadPrompt("spec")).toContain(`.sfo/${ACCESS_FILE}`);
+    expect(loadPrompt("clarify")).toContain(`.sfo/${ACCESS_FILE}`);
   });
 });
