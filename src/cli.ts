@@ -183,10 +183,11 @@ export function buildProgram(): Command {
     .command("logs")
     .description("Show the current stage's log")
     .argument("<id>", "project id")
-    .option("-f, --follow", "tail the log")
-    .action(guarded(async (id: string, opts: { follow?: boolean }) => {
+    .option("-f, --follow", "keep following, switching to each new stage or slice as it starts")
+    .option("--raw", "the stream-json log as written, not rendered")
+    .action(guarded(async (id: string, opts: { follow?: boolean; raw?: boolean }) => {
       const { showLogs } = await import("./commands/logs.js");
-      showLogs(id, opts.follow ?? false);
+      showLogs(id, opts.follow ?? false, undefined, { raw: opts.raw });
     }));
 
   program
