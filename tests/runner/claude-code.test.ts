@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { ClaudeCodeRunner, parseUsageFromLog, readLogTail } from "../../src/runner/claude-code.js";
+import {
+  ClaudeCodeRunner,
+  parseUsageFromLog,
+  parseUsageLimitFromLog,
+  readLogTail,
+} from "../../src/runner/claude-code.js";
 
 const FAKE = path.resolve("tests/fixtures/fake-claude.sh");
 let dir: string;
@@ -306,6 +311,67 @@ describe("ClaudeCodeRunner credentials", () => {
       const res = await new ClaudeCodeRunner({ bin: FAKE }).runStage({ workdir: dir, prompt: "x", logPath: log });
       expect(fs.readFileSync(log, "utf8")).toContain("KEY: set");
       expect(res.billing).toBe("api");
+    });
+  });
+});
+
+describe("parseUsageLimitFromLog", () => {
+  const event = (status: string) =>
+    JSON.stringify({
+      type: "rate_limit_event",
+      rate_limit_info: { status, resetsAt: 1790451000, rateLimitType: "seven_day" },
+    });
+
+  it("reads the window and reset time from a rejected rate_limit_event", () => {
+    expect(parseUsageLimitFromLog([event("allowed"), event("rejected")].join("\n"))).toEqual({
+      resetsAt: new Date(1790451000 * 1000).toISOString(),
+      window: "seven_day",
+    });
+  });
+
+  it("ignores events the run was still allowed under", () => {
+    expect(parseUsageLimitFromLog(event("allowed_warning"))).toBeUndefined();
+  });
+
+  it("falls back to the result text when no event said so", () => {
+    const result = JSON.stringify({ type: "result", is_error: true, result: "Claude AI usage limit reached" });
+    expect(parseUsageLimitFromLog(result)).toEqual({});
+  });
+});
+
+describe("ClaudeCodeRunner usage limits", () => {
+  const withEnv = async (vars: Record<string, string>, fn: () => Promise<void>): Promise<void> => {
+    const before = Object.fromEntries(Object.keys(vars).map((k) => [k, process.env[k]]));
+    Object.assign(process.env, vars);
+    try {
+      await fn();
+    } finally {
+      for (const [k, v] of Object.entries(before)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  };
+
+  it("reports the limit on a failed run", async () => {
+    await withEnv({ FAKE_LIMIT: "1", FAKE_EXIT: "1" }, async () => {
+      const res = await new ClaudeCodeRunner({ bin: FAKE }).runStage({
+        workdir: dir,
+        prompt: "x",
+        logPath: path.join(dir, "out.log"),
+      });
+      expect(res.limited?.window).toBe("five_hour");
+    });
+  });
+
+  it("does not report a limit on a run that succeeded anyway", async () => {
+    await withEnv({ FAKE_LIMIT: "1" }, async () => {
+      const res = await new ClaudeCodeRunner({ bin: FAKE }).runStage({
+        workdir: dir,
+        prompt: "x",
+        logPath: path.join(dir, "out.log"),
+      });
+      expect(res.limited).toBeUndefined();
     });
   });
 });

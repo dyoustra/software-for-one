@@ -1153,3 +1153,68 @@ describe("VERIFY.jsonl", () => {
     expect(readVerifyRecords("p", env).length).toBeGreaterThan(0);
   });
 });
+
+/** Hits the plan's usage limit at one stage, the first time only; everything else succeeds. */
+class LimitedOnceRunner implements Runner {
+  calls: RunStageInput[] = [];
+  private hit = false;
+  constructor(private readonly at: string) {}
+  async runStage(input: RunStageInput): Promise<StageResult> {
+    this.calls.push(input);
+    const stage = stageOf(input);
+    producesArtifacts()(stage);
+    if (stage === this.at && !this.hit) {
+      this.hit = true;
+      return {
+        ok: false,
+        exitCode: 1,
+        logPath: input.logPath,
+        usage: USAGE,
+        billing: "plan",
+        limited: { resetsAt: "2026-09-27T20:00:00.000Z", window: "five_hour" },
+      };
+    }
+    return { ok: true, exitCode: 0, logPath: input.logPath };
+  }
+}
+
+describe("a subscription's usage limit", () => {
+  it("parks at the stage it stopped, without failing it, and says when it resets", async () => {
+    seed("capture");
+    const runner = new LimitedOnceRunner("research");
+    await advance("p", runner, env);
+
+    const s = readState("p", env);
+    expect(s.status).toBe("awaiting_human");
+    // The last stage finished, so the next run repeats research rather than skipping it.
+    expect(s.currentStage).toBe("capture");
+    expect(s.attempts.research).toBeUndefined();
+    // Spent before the limit, so still on the bill.
+    expect(readCostRecords("p", env).find((r) => r.stage === "research")?.billing).toBe("plan");
+    expect(formatStatus(listProjects(env))).toMatch(/plan limit reached at research/);
+  });
+
+  it("resumes at the stopped stage and clears the note", async () => {
+    seed("capture");
+    const runner = new LimitedOnceRunner("research");
+    await advance("p", runner, env);
+    await advance("p", runner, env);
+
+    expect(runner.calls.map(stageOf).filter((st) => st === "research")).toHaveLength(2);
+    expect(formatStatus(listProjects(env))).not.toMatch(/plan limit/);
+  });
+
+  it("parks mid-build without counting the slice's attempt", async () => {
+    const runner = new LimitedOnceRunner("build-S-02");
+    await runPipeline(runner, { verify: PASSES });
+
+    const s = readState("p", env);
+    expect(s.status).toBe("awaiting_human");
+    expect(s.currentStage).toBe("build");
+    expect(s.sliceAttempts["S-02"]).toBeUndefined();
+    expect(s.slicesFailed).toEqual([]);
+
+    await advance("p", runner, env, { verify: PASSES });
+    expect(readState("p", env).slicesPassed).toEqual(["S-01", "S-02", "S-03"]);
+  });
+});

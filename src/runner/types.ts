@@ -26,6 +26,15 @@ export interface StageResult {
   usage?: StageUsage;
   /** Whether the spend was billed or came out of plan limits; absent when unknown. */
   billing?: "api" | "plan";
+  /** Set when the run stopped because a subscription's usage limit was hit. */
+  limited?: UsageLimit;
+}
+
+export interface UsageLimit {
+  /** ISO time the limit lifts, when the CLI said. */
+  resetsAt?: string;
+  /** Which window ran out, e.g. `five_hour` or `seven_day`. */
+  window?: string;
 }
 
 export interface Runner {

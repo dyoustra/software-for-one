@@ -27,7 +27,8 @@ import {
 import { appendVerifyRecord } from "./verifyRecord.js";
 import { loadPrompt } from "../stages/prompts.js";
 import { projectDir, logPath, type Env } from "./paths.js";
-import type { Runner, StageResult } from "../runner/types.js";
+import type { Runner, StageResult, UsageLimit } from "../runner/types.js";
+import { writeLimit, clearLimit } from "./limit.js";
 
 /** The artifact a human must produce before a blocking stage can run. */
 const HUMAN_INPUT: Record<string, string> = { clarify: "ANSWERS.json" };
@@ -89,7 +90,12 @@ type Park =
   /** `stage` is the one that was refused, not the one that last ran. */
   | { park: "budget"; stage: string; budget: BudgetState }
   /** The build has not started and, on the plan's own numbers, cannot finish. */
-  | { park: "estimate"; budget: BudgetState; estimate: Estimate };
+  | { park: "estimate"; budget: BudgetState; estimate: Estimate }
+  /**
+   * A subscription's usage window ran out mid-stage. Not a failure: the stage
+   * did nothing wrong, and counting it would fail a project for the time of day.
+   */
+  | { park: "limit"; stage: string; limit: UsageLimit };
 
 const HUMAN_PARK: Park = { park: "human" };
 
@@ -336,6 +342,9 @@ function applyPark(id: string, state: ProjectState, park: Park, env: Env | undef
   );
   if (park.park === "budget") recordBudgetPark(id, park.stage, park.budget, env);
   if (park.park === "estimate") recordEstimatePark(id, park.estimate, park.budget, env);
+  if (park.park === "limit") {
+    writeLimit(id, { stage: park.stage, ...park.limit, at: new Date().toISOString() }, env);
+  }
 }
 
 /**
@@ -618,6 +627,12 @@ async function runSlices(
     }
     recordCost(id, stageName, result.ok, result.usage, env, "cli", result.billing);
 
+    // Before grading: the slice's half-written code stays in the tree for the
+    // resumed attempt, which is exactly what a retry would get.
+    if (result.limited) {
+      return { outcome: "parked", park: { park: "limit", stage: stageName, limit: result.limited } };
+    }
+
     const { archetype: gradedAs, verdict } = gradeAttempt(id, slice, result, verify, env);
     writeVerifyLog(id, stageName, verdict, env);
 
@@ -679,6 +694,10 @@ export async function advance(
     );
   }
 
+  // A run starting is the answer to a limit park, whether the window reset or
+  // the human switched credentials. If it is hit again it is written again.
+  clearLimit(id, env);
+
   while (true) {
     const upcoming = pickStage(id, state, env);
 
@@ -693,6 +712,7 @@ export async function advance(
       return;
     }
 
+    const previousStage = state.currentStage;
     state = {
       ...state,
       currentStage: upcoming,
@@ -751,6 +771,15 @@ export async function advance(
     // The heartbeat rewrote state under us, so re-read before mutating rather
     // than writing back a stale in-memory copy.
     state = readState(id, env);
+
+    // Parked from the stage before, as a budget park is: `currentStage` is the
+    // last one finished, and left at the interrupted one, the next run would
+    // pick the stage after it and never repeat the work the limit cut short.
+    if (result.limited) {
+      const limit: Park = { park: "limit", stage: upcoming, limit: result.limited };
+      applyPark(id, { ...state, currentStage: previousStage }, limit, env);
+      return;
+    }
 
     if (!result.ok) {
       state = {

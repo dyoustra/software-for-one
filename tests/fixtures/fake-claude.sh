@@ -11,5 +11,8 @@ echo '{"type":"system","subtype":"init","session_id":"fake"}'
 # must skip them rather than give up on the run's cost data.
 echo "Warning: no stdin data received in 3s..."
 echo '{"type":"assistant","message":{"role":"assistant"}}'
+if [ -n "$FAKE_LIMIT" ]; then
+  echo '{"type":"rate_limit_event","rate_limit_info":{"status":"rejected","resetsAt":1790451000,"rateLimitType":"five_hour"},"uuid":"u","session_id":"fake"}'
+fi
 echo '{"type":"result","subtype":"success","is_error":false,"total_cost_usd":0.111,"num_turns":1,"duration_ms":3321,"usage":{"input_tokens":2,"output_tokens":4,"cache_creation_input_tokens":10106,"cache_read_input_tokens":19703}}'
 exit "${FAKE_EXIT:-0}"

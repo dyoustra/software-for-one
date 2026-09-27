@@ -8,7 +8,10 @@ import { blockingPriorArt, readPriorArt } from "../core/priorart.js";
 import { budgetState, formatBudget } from "../core/budget.js";
 import { recoveryHint } from "../core/stages.js";
 import type { Env } from "../core/paths.js";
-import { resolveProjectAccess } from "../core/access.js";
+import { readProfile, resolveAccess, resolveProjectAccess, type ResolvedAccess } from "../core/access.js";
+import { recordCost } from "../core/cost.js";
+import { FallbackRunner } from "../runner/fallback.js";
+import type { Runner } from "../runner/types.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
@@ -22,7 +25,29 @@ export interface GuardOptions {
 /** Runs the pipeline in this process. Called by the detached child. */
 export async function runAttached(id: string, opts: GuardOptions = {}): Promise<void> {
   const access = resolveProjectAccess(id, { useApiKey: opts.useApiKey });
-  await advance(id, new ClaudeCodeRunner({ access }));
+  await advance(id, runnerFor(id, access));
+}
+
+/**
+ * The plan runner, wrapped in the fallback when the person opted in. A key
+ * that cannot be found only loses the fallback, not the run: the plan works,
+ * and the limit park still says what to do.
+ */
+export function runnerFor(id: string, access: ResolvedAccess, env?: Env): Runner {
+  const plan = new ClaudeCodeRunner({ access });
+  const profile = readProfile(env);
+  if (access.method !== "claude_subscription" || !profile?.fallbackToApiKey) return plan;
+
+  let keyAccess: ResolvedAccess;
+  try {
+    keyAccess = resolveAccess(null, profile, { env, useApiKey: true });
+  } catch (err) {
+    console.error(`sfo: fallback to the API key is on, but ${err instanceof Error ? err.message : String(err)}`);
+    return plan;
+  }
+  return new FallbackRunner(plan, new ClaudeCodeRunner({ access: keyAccess }), (input, result) =>
+    recordCost(id, path.basename(input.logPath, ".log"), false, result.usage, env, "cli", result.billing),
+  );
 }
 
 /**

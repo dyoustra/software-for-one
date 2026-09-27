@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { guardRunnable, detachedArgs } from "../../src/commands/run.js";
+import { guardRunnable, detachedArgs, runnerFor } from "../../src/commands/run.js";
+import { FallbackRunner } from "../../src/runner/fallback.js";
 import { writeState, type ProjectState } from "../../src/core/state.js";
 import { writePriorArt, type PriorArt } from "../../src/core/priorart.js";
 import { writeBudget } from "../../src/core/budget.js";
@@ -239,5 +240,40 @@ describe("model access in run", () => {
   it("refuses --use-api-key with no key anywhere", () => {
     seed("awaiting_human", null, "spec");
     expect(() => guardRunnable("p", env, { useApiKey: true })).toThrow(/no API key found/);
+  });
+});
+
+describe("runnerFor", () => {
+  const withFallback = (fallbackToApiKey: boolean, key: string | null) =>
+    writeProfile(
+      {
+        modelAccess: ["claude_subscription", "anthropic_api_key"],
+        apiKey: { source: "env", var: "SFO_TEST_FALLBACK_KEY" },
+        sfoPrefers: "claude_subscription",
+        fallbackToApiKey,
+        updatedAt: "2026-09-27T00:00:00.000Z",
+      },
+      { ...env, ...(key ? { SFO_TEST_FALLBACK_KEY: key } : {}) },
+    );
+
+  it("wraps the plan in the fallback only when the person opted in", () => {
+    const keyed = { ...env, SFO_TEST_FALLBACK_KEY: "sk" };
+
+    withFallback(false, "sk");
+    expect(runnerFor("p", { method: "claude_subscription" }, keyed)).not.toBeInstanceOf(FallbackRunner);
+
+    withFallback(true, "sk");
+    expect(runnerFor("p", { method: "claude_subscription" }, keyed)).toBeInstanceOf(FallbackRunner);
+    expect(runnerFor("p", { method: "anthropic_api_key", apiKey: "sk" }, keyed)).not.toBeInstanceOf(
+      FallbackRunner,
+    );
+  });
+
+  it("runs on the plan alone, and says why, when the fallback's key is missing", () => {
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    withFallback(true, null);
+    expect(runnerFor("p", { method: "claude_subscription" }, env)).not.toBeInstanceOf(FallbackRunner);
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/fallback to the API key is on, but no API key found/));
+    error.mockRestore();
   });
 });

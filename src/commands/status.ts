@@ -4,6 +4,7 @@ import { readState, isStale, type ProjectState } from "../core/state.js";
 import { blockingPriorArt, type PriorArt } from "../core/priorart.js";
 import { budgetState } from "../core/budget.js";
 import { readEstimate } from "../core/estimate.js";
+import { readLimit, formatLimit } from "../core/limit.js";
 
 /** A project plus whatever short explanation the listing owes the reader. */
 export type ProjectSummary = ProjectState & { note?: string };
@@ -69,7 +70,12 @@ export function listProjects(env?: Env): ProjectSummary[] {
       // Prior art leads: it is the only verdict that can end a project rather
       // than pause it, and a budget park is fixable by raising the ceiling.
       const art = blockingPriorArt(state, env);
-      const note = art ? noteFor(state, art) : budgetNote(state, env);
+      const limit = state.status === "awaiting_human" ? readLimit(state.id, env) : null;
+      const note = art
+        ? noteFor(state, art)
+        : limit
+          ? formatLimit(state.id, limit)
+          : budgetNote(state, env);
       out.push(note !== undefined ? { ...state, note } : state);
     } catch {
       // A directory with no readable state is not a project. Skip it silently —

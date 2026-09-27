@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import type { Runner, RunStageInput, StageResult, StageUsage } from "./types.js";
+import type { Runner, RunStageInput, StageResult, StageUsage, UsageLimit } from "./types.js";
 import { billingFor, childEnv, type Billing, type ResolvedAccess } from "../core/access.js";
 
 export const DEFAULT_MODEL = "claude-opus-5";
@@ -55,6 +55,41 @@ export function parseUsageFromLog(text: string): StageUsage | undefined {
   };
 }
 
+const LIMIT_TEXT = /usage limit reached|hit your limit/i;
+
+/**
+ * Whether a failed run was stopped by a subscription limit. The stream carries
+ * `rate_limit_event` messages whose `status` turns `rejected` when a window is
+ * exhausted; the text match is for a run that died before one was emitted.
+ * Checked only on a failed run: a warning mid-run that the run survived is not
+ * a reason to stop.
+ */
+export function parseUsageLimitFromLog(text: string): UsageLimit | undefined {
+  let info: Record<string, unknown> | undefined;
+  let resultText = "";
+
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "" || trimmed[0] !== "{") continue;
+    try {
+      const obj = JSON.parse(trimmed) as Record<string, unknown>;
+      if (obj?.type === "rate_limit_event") info = obj.rate_limit_info as Record<string, unknown>;
+      if (obj?.type === "result" && typeof obj.result === "string") resultText = obj.result;
+    } catch {
+      // Not JSON.
+    }
+  }
+
+  const rejected = info?.status === "rejected";
+  if (!rejected && !LIMIT_TEXT.test(resultText)) return undefined;
+  const resetsAt = rejected && typeof info?.resetsAt === "number" ? info.resetsAt : undefined;
+  const window = rejected && typeof info?.rateLimitType === "string" ? info.rateLimitType : undefined;
+  return {
+    ...(resetsAt !== undefined ? { resetsAt: new Date(resetsAt * 1000).toISOString() } : {}),
+    ...(window !== undefined ? { window } : {}),
+  };
+}
+
 /**
  * Only the tail is needed — the result event is always the last line — and
  * reading the whole file is a trap. stream-json is far more verbose than the
@@ -84,12 +119,12 @@ export function readLogTail(logPath: string, maxBytes = LOG_TAIL_BYTES): string 
   }
 }
 
-function readUsage(logPath: string): StageUsage | undefined {
+function readTail(logPath: string): string {
   try {
-    return parseUsageFromLog(readLogTail(logPath));
+    return readLogTail(logPath);
   } catch {
     // No log, or it vanished. Missing cost data must never fail a stage.
-    return undefined;
+    return "";
   }
 }
 
@@ -162,15 +197,19 @@ export class ClaudeCodeRunner implements Runner {
       child.on("close", (code) => {
         fs.closeSync(log);
         const exitCode = code ?? 1;
+        // The log is the transport: stream-json is still piped straight to
+        // the file so `sfo logs -f` shows live progress, and we read the
+        // spend back out once the process has closed it.
+        const tail = readTail(input.logPath);
+        const usage = parseUsageFromLog(tail);
+        const limited = exitCode !== 0 ? parseUsageLimitFromLog(tail) : undefined;
         resolve({
           ok: exitCode === 0,
           exitCode,
           logPath: input.logPath,
-          // The log is the transport: stream-json is still piped straight to
-          // the file so `sfo logs -f` shows live progress, and we read the
-          // spend back out once the process has closed it.
-          usage: readUsage(input.logPath),
+          ...(usage ? { usage } : {}),
           billing: this.billing,
+          ...(limited ? { limited } : {}),
         });
       });
 
