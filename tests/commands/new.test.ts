@@ -8,6 +8,7 @@ import { readState } from "../../src/core/state.js";
 import { readArtifact } from "../../src/core/artifacts.js";
 import { readCostRecords } from "../../src/core/cost.js";
 import { readEstimate } from "../../src/core/estimate.js";
+import { readAccess } from "../../src/core/access.js";
 
 let env: Record<string, string>;
 
@@ -195,5 +196,29 @@ describe("createProject", () => {
     const id = await createProject("make an llm", t, "bbb222", env);
     expect(readState(id, env).status).toBe("awaiting_human");
     expect(readArtifact(id, "TRIAGE.md", env)).toContain("inference playground");
+  });
+});
+
+describe("createProject and model access", () => {
+  it("snapshots the access it was given, so a later profile change cannot redesign it", async () => {
+    const access = { modelAccess: ["anthropic_api_key" as const], sfoPrefers: "anthropic_api_key" as const };
+    const id = await createProject("x", triageOk, "eee555", env, access);
+    expect(readAccess(id, env)).toEqual(access);
+  });
+
+  it("writes no snapshot when none is given", async () => {
+    const id = await createProject("x", triageOk, "fff666", env);
+    expect(readAccess(id, env)).toBeNull();
+  });
+
+  it("records how triage was billed", async () => {
+    const t = vi.fn().mockResolvedValue({
+      result: { verdict: "ready", title: "Billed", reason: "r", counterOffer: null, ...ESTIMATE },
+      usage: USAGE,
+      via: "cli",
+      billing: "plan",
+    });
+    const id = await createProject("x", t, "ggg777", env);
+    expect(readCostRecords(id, env)[0].billing).toBe("plan");
   });
 });

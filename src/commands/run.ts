@@ -8,17 +8,21 @@ import { blockingPriorArt, readPriorArt } from "../core/priorart.js";
 import { budgetState, formatBudget } from "../core/budget.js";
 import { recoveryHint } from "../core/stages.js";
 import type { Env } from "../core/paths.js";
+import { resolveProjectAccess } from "../core/access.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 export interface GuardOptions {
   /** Build despite a blocking prior-art verdict. Scoped to that check alone. */
   anyway?: boolean;
+  /** Run on the API key this time, whatever the profile prefers. */
+  useApiKey?: boolean;
 }
 
 /** Runs the pipeline in this process. Called by the detached child. */
-export async function runAttached(id: string): Promise<void> {
-  await advance(id, new ClaudeCodeRunner());
+export async function runAttached(id: string, opts: GuardOptions = {}): Promise<void> {
+  const access = resolveProjectAccess(id, { useApiKey: opts.useApiKey });
+  await advance(id, new ClaudeCodeRunner({ access }));
 }
 
 /**
@@ -27,7 +31,13 @@ export async function runAttached(id: string): Promise<void> {
  * with stdio: "ignore" and the failure is invisible.
  */
 export function detachedArgs(id: string, opts: GuardOptions = {}): string[] {
-  return ["run", id, "--attach", ...(opts.anyway ? ["--anyway"] : [])];
+  return [
+    "run",
+    id,
+    "--attach",
+    ...(opts.anyway ? ["--anyway"] : []),
+    ...(opts.useApiKey ? ["--use-api-key"] : []),
+  ];
 }
 
 /** Forks a detached child and returns immediately. */
@@ -67,6 +77,10 @@ export function guardRunnable(id: string, env?: Env, opts: GuardOptions = {}): v
       `${id} is at its budget ceiling — ${formatBudget(budget)}. Raise it with \`sfo budget ${id} <usd>\`, or keep what is already built`,
     );
   }
+
+  // Resolved here as well as in the child, for the reason this guard exists: a
+  // missing key would otherwise kill the detached child after "started".
+  resolveProjectAccess(id, { env, useApiKey: opts.useApiKey });
 
   if (opts.anyway) return;
 

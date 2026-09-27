@@ -1,7 +1,7 @@
 import { Command } from "commander";
 import { randomBytes } from "node:crypto";
 import { createProject, warnSlowTriagePath } from "./commands/new.js";
-import { triage, selectTriagePath } from "./stages/triage.js";
+import { triage, triagePathFor } from "./stages/triage.js";
 
 /**
  * Commander does not catch throws from async actions, so without this every
@@ -28,20 +28,30 @@ export function buildProgram(): Command {
     .description("Capture an idea and start a run")
     .argument("<idea>", "the idea, in your own words")
     .option("--budget <usd>", "park the project when spend reaches this many dollars")
-    .action(guarded(async (idea: string, opts: { budget?: string }) => {
+    .option("--access <methods>", "how this project may pay for model calls, overriding your profile")
+    .action(guarded(async (idea: string, opts: { budget?: string; access?: string }) => {
       // Parsed before triage, so a malformed ceiling costs nothing.
       const { parseBudget } = await import("./commands/budget.js");
       const ceiling = opts.budget === undefined ? null : parseBudget(opts.budget);
 
+      const { ensureProfile } = await import("./commands/profile.js");
+      const { accessFromProfile, parseAccessFlag, resolveAccess } = await import("./core/access.js");
+      const profile = await ensureProfile();
+      const access = opts.access ? parseAccessFlag(opts.access) : accessFromProfile(profile);
+      const resolved = resolveAccess(access, profile);
+
       // Selected here, and warned about here, so the message lands before the
-      // call rather than after ten seconds of unexplained silence.
-      const path = selectTriagePath();
-      warnSlowTriagePath(path);
+      // call rather than after ten seconds of unexplained silence. A chosen
+      // subscription is not a degradation, so only a guessed route warns.
+      const path = triagePathFor(resolved);
+      if (resolved.method === "inherit") warnSlowTriagePath(path);
 
       const id = await createProject(
         idea,
-        (i) => triage(i, { path }),
+        (i) => triage(i, { path, access: resolved }),
         randomBytes(3).toString("hex"),
+        undefined,
+        access,
       );
       console.log(`captured: ${id}`);
 
@@ -64,11 +74,12 @@ export function buildProgram(): Command {
     .argument("<id>", "project id")
     .option("--attach", "run in this process and stream progress")
     .option("--anyway", "build it even though research found prior art")
-    .action(guarded(async (id: string, opts: { attach?: boolean; anyway?: boolean }) => {
+    .option("--use-api-key", "run on your API key this time, whatever your profile prefers")
+    .action(guarded(async (id: string, opts: { attach?: boolean; anyway?: boolean; useApiKey?: boolean }) => {
       const { runAttached, runDetached, guardRunnable } = await import("./commands/run.js");
-      guardRunnable(id, undefined, { anyway: opts.anyway });
+      guardRunnable(id, undefined, opts);
       if (opts.attach) {
-        await runAttached(id);
+        await runAttached(id, opts);
 
         // Reported here rather than left for the human to find on their next
         // `sfo status`: a follow-up asked while they are still at the keyboard
@@ -80,7 +91,7 @@ export function buildProgram(): Command {
           console.log(`\nsfo: ${open.length} question(s) still open — run \`sfo answer ${id}\``);
         }
       } else {
-        console.log(`started (pid ${runDetached(id, { anyway: opts.anyway })})`);
+        console.log(`started (pid ${runDetached(id, opts)})`);
       }
     }));
 
@@ -94,6 +105,26 @@ export function buildProgram(): Command {
       const { showBudget, setBudget } = await import("./commands/budget.js");
       if (usd === undefined) showBudget(id);
       else setBudget(id, usd, undefined, opts.billedOnly ?? false);
+    }));
+
+  program
+    .command("profile")
+    .description("Show or change how you pay for model calls")
+    .argument("[action]", "`setup` to answer the first-run questions again, or `set`")
+    .argument("[setting]", "access, key, prefers or fallback")
+    .argument("[value]", "the new value")
+    .action(guarded(async (action?: string, setting?: string, value?: string) => {
+      const { formatProfile, setupProfileInteractively, setProfile } = await import("./commands/profile.js");
+      const { readProfile } = await import("./core/access.js");
+      if (action === undefined) {
+        console.log(formatProfile(readProfile()));
+      } else if (action === "setup") {
+        await setupProfileInteractively();
+      } else if (action === "set" && setting !== undefined && value !== undefined) {
+        console.log(formatProfile(setProfile(setting, value)));
+      } else {
+        throw new Error("usage: sfo profile [setup | set <access|key|prefers|fallback> <value>]");
+      }
     }));
 
   program

@@ -8,6 +8,7 @@ import { recordCost } from "../core/cost.js";
 import { writeEstimate } from "../core/estimate.js";
 import { commitStage } from "../core/repo.js";
 import { gitignoreFor } from "../core/archetype.js";
+import { writeAccess, type Access } from "../core/access.js";
 import type { TriageOutcome, TriagePath } from "../stages/triage.js";
 
 export type TriageFn = (idea: string) => Promise<TriageOutcome>;
@@ -56,8 +57,9 @@ export async function createProject(
   runTriage: TriageFn,
   suffix: string,
   env?: Env,
+  access?: Access,
 ): Promise<string> {
-  const { result: verdict, usage, via } = await runTriage(idea);
+  const { result: verdict, usage, via, billing } = await runTriage(idea);
   const id = `${slugify(verdict.title)}-${suffix}`;
 
   const dir = projectDir(id, env);
@@ -74,6 +76,7 @@ export async function createProject(
   fs.writeFileSync(path.join(dir, ".gitignore"), gitignoreFor("unknown"));
 
   appendArtifact(id, "IDEA.md", idea, env);
+  if (access) writeAccess(id, access, env);
   writeArtifact(
     id,
     "TRIAGE.md",
@@ -122,7 +125,7 @@ export async function createProject(
   // Only recordable once triage has returned, since the id derives from the
   // title it produced. Triage spends real money and is otherwise invisible
   // to `sfo cost`.
-  recordCost(id, "triage", true, usage, env, via);
+  recordCost(id, "triage", true, usage, env, via, billing);
 
   // The repo's initial commit. Placed after recordCost so the capture snapshot
   // includes what triage spent, not just what it decided.

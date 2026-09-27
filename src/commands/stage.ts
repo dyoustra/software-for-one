@@ -7,6 +7,7 @@ import { recordCost } from "../core/cost.js";
 import { commitStage } from "../core/repo.js";
 import { agentToolsForStage } from "../core/verify.js";
 import type { Runner } from "../runner/types.js";
+import { resolveProjectAccess } from "../core/access.js";
 
 /**
  * Re-runs one stage in isolation against the artifacts already on disk.
@@ -19,7 +20,7 @@ export async function runSingleStage(
   id: string,
   stage: string,
   env?: Env,
-  runner: Runner = new ClaudeCodeRunner(),
+  injected?: Runner,
 ): Promise<void> {
   const state = readState(id, env);
 
@@ -45,6 +46,9 @@ export async function runSingleStage(
     );
   }
 
+  // Resolved after the id is known to exist, so a typo reports "no such
+  // project" rather than a missing key.
+  const runner = injected ?? new ClaudeCodeRunner({ access: resolveProjectAccess(id, { env }) });
   const result = await runner.runStage({
     workdir: projectDir(id, env),
     prompt: loadPrompt(stage),

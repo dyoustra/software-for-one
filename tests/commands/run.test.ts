@@ -7,6 +7,7 @@ import { writeState, type ProjectState } from "../../src/core/state.js";
 import { writePriorArt, type PriorArt } from "../../src/core/priorart.js";
 import { writeBudget } from "../../src/core/budget.js";
 import { recordCost } from "../../src/core/cost.js";
+import { writeProfile, writeAccess } from "../../src/core/access.js";
 
 let env: Record<string, string>;
 
@@ -212,5 +213,31 @@ describe("guardRunnable and the budget ceiling", () => {
     seed("awaiting_human");
     spend(500);
     expect(() => guardRunnable("p", env)).not.toThrow();
+  });
+});
+
+describe("model access in run", () => {
+  it("carries --use-api-key through to the child", () => {
+    expect(detachedArgs("p", { useApiKey: true })).toEqual(["run", "p", "--attach", "--use-api-key"]);
+  });
+
+  it("refuses before detaching when the chosen key cannot be found", () => {
+    seed("awaiting_human", null, "spec");
+    writeProfile(
+      {
+        modelAccess: ["anthropic_api_key"],
+        apiKey: { source: "env", var: "SFO_TEST_NO_SUCH_KEY" },
+        sfoPrefers: "anthropic_api_key",
+        updatedAt: "2026-09-27T00:00:00.000Z",
+      },
+      env,
+    );
+    writeAccess("p", { modelAccess: ["anthropic_api_key"], sfoPrefers: "anthropic_api_key" }, env);
+    expect(() => guardRunnable("p", env)).toThrow(/no API key found at env:SFO_TEST_NO_SUCH_KEY/);
+  });
+
+  it("refuses --use-api-key with no key anywhere", () => {
+    seed("awaiting_human", null, "spec");
+    expect(() => guardRunnable("p", env, { useApiKey: true })).toThrow(/no API key found/);
   });
 });

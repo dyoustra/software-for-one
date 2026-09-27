@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { runStructured } from "../runner/structured.js";
 import type { StageUsage } from "../runner/types.js";
+import { billingFor, childEnv, type Billing, type ResolvedAccess } from "../core/access.js";
 
 const TriageFieldsSchema = z.object({
   verdict: z.enum(["ready", "underspecified", "out_of_scope"]),
@@ -85,6 +86,20 @@ export function selectTriagePath(env: NodeJS.ProcessEnv = process.env): TriagePa
   return env.ANTHROPIC_API_KEY ? "sdk" : "cli";
 }
 
+/**
+ * A chosen credential decides the route outright: the key goes through the
+ * SDK, the subscription through the CLI. Only an unchosen one falls back to
+ * guessing from the shell.
+ */
+export function triagePathFor(
+  access: ResolvedAccess,
+  env: NodeJS.ProcessEnv = process.env,
+): TriagePath {
+  if (access.method === "anthropic_api_key") return "sdk";
+  if (access.method === "claude_subscription") return "cli";
+  return selectTriagePath(env);
+}
+
 // Claude Opus 5 list pricing, USD per million tokens. Hardcoded and will drift
 // when pricing changes; the CLI path reports its own total_cost_usd instead.
 const OPUS_5_INPUT_PER_MTOK = 5;
@@ -124,6 +139,8 @@ export interface TriageSdkInput {
   system: string;
   prompt: string;
   schema: Record<string, unknown>;
+  /** Absent means the SDK finds its own, from the environment. */
+  apiKey?: string;
 }
 
 export type TriageSdkImpl = (input: TriageSdkInput) => Promise<TriageCallResult>;
@@ -137,7 +154,7 @@ export type TriageCliImpl = typeof runStructured;
  */
 export const runTriageSdk: TriageSdkImpl = async (input) => {
   const { default: Anthropic } = await import("@anthropic-ai/sdk");
-  const client = new Anthropic();
+  const client = new Anthropic(input.apiKey ? { apiKey: input.apiKey } : {});
 
   const startedAt = Date.now();
   const response = await client.messages.create({
@@ -177,11 +194,14 @@ export interface TriageOutcome {
   usage?: StageUsage;
   /** Which route ran, so the bill can distinguish the cheap one. */
   via: TriagePath;
+  billing?: Billing;
 }
 
 export interface TriageOptions {
   /** Chosen by the command layer so it can warn before the slow call starts. */
   path?: TriagePath;
+  /** The credential to run on. Absent means whatever the shell has. */
+  access?: ResolvedAccess;
   sdk?: TriageSdkImpl;
   cli?: TriageCliImpl;
 }
@@ -195,18 +215,33 @@ export interface TriageOptions {
  * converge on the same parse, so validation is identical regardless of route.
  */
 export async function triage(idea: string, opts: TriageOptions = {}): Promise<TriageOutcome> {
-  const via = opts.path ?? selectTriagePath();
+  const access = opts.access ?? { method: "inherit" };
+  const via = opts.path ?? triagePathFor(access);
   const schema = triageOutputSchema();
 
   const { text, usage } =
     via === "sdk"
-      ? await (opts.sdk ?? runTriageSdk)({ system: SYSTEM, prompt: idea, schema })
+      ? await (opts.sdk ?? runTriageSdk)({
+          system: SYSTEM,
+          prompt: idea,
+          schema,
+          ...(access.method === "anthropic_api_key" ? { apiKey: access.apiKey } : {}),
+        })
       : await (opts.cli ?? runStructured)({
           prompt: `${SYSTEM}\n\nIdea:\n${idea}`,
           schema,
+          env: childEnv(process.env, access),
         });
+
+  // The SDK route is billed whatever was chosen: it has no other way to pay.
+  const billing = via === "sdk" ? "api" : billingFor(access, process.env);
 
   // Two parses on the CLI path: its envelope's `result` is itself a string of
   // JSON. The SDK returns the text block directly.
-  return { result: TriageResultSchema.parse(JSON.parse(text)), usage, via };
+  return {
+    result: TriageResultSchema.parse(JSON.parse(text)),
+    usage,
+    via,
+    ...(billing ? { billing } : {}),
+  };
 }

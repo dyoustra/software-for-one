@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import {
   triage,
   selectTriagePath,
+  triagePathFor,
   sdkCostUsd,
   TriageResultSchema,
   triageOutputSchema,
@@ -249,5 +250,34 @@ describe("triage routing", () => {
   it("accepts only the three known verdicts", () => {
     const bad = { verdict: "maybe", title: "t", reason: "r", counterOffer: null, ...ESTIMATE };
     expect(TriageResultSchema.safeParse(bad).success).toBe(false);
+  });
+});
+
+describe("triage with a chosen credential", () => {
+  it("takes the route the credential dictates, ignoring the shell", () => {
+    expect(triagePathFor({ method: "claude_subscription" }, { ANTHROPIC_API_KEY: "k" })).toBe("cli");
+    expect(triagePathFor({ method: "anthropic_api_key", apiKey: "k" }, {})).toBe("sdk");
+    expect(triagePathFor({ method: "inherit" }, { ANTHROPIC_API_KEY: "k" })).toBe("sdk");
+  });
+
+  it("hands the chosen key to the SDK and labels the spend billed", async () => {
+    const sdk = fakeSdk(READY);
+    const out = await triage("idea", { access: { method: "anthropic_api_key", apiKey: "sk-chosen" }, sdk });
+    expect(sdk.mock.calls[0][0].apiKey).toBe("sk-chosen");
+    expect(out.billing).toBe("api");
+  });
+
+  it("strips the shell's key from a subscription CLI call and labels it plan", async () => {
+    const before = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "sk-shell";
+    try {
+      const cli = fakeCli(READY);
+      const out = await triage("idea", { access: { method: "claude_subscription" }, cli });
+      expect(cli.mock.calls[0][0].env.ANTHROPIC_API_KEY).toBeUndefined();
+      expect(out.billing).toBe("plan");
+    } finally {
+      if (before === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = before;
+    }
   });
 });

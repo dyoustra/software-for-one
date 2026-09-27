@@ -19,4 +19,14 @@ describe("buildProgram", () => {
     const run = buildProgram().commands.find((c) => c.name() === "run");
     expect(run?.options.map((o) => o.long)).toContain("--anyway");
   });
+
+  it("registers profile, and the access flags on new and run", () => {
+    const program = buildProgram();
+    expect(program.commands.map((c) => c.name())).toContain("profile");
+    const flags = (name: string) =>
+      program.commands.find((c) => c.name() === name)?.options.map((o) => o.long);
+    expect(flags("new")).toContain("--access");
+    expect(flags("run")).toContain("--use-api-key");
+    expect(flags("budget")).toContain("--billed-only");
+  });
 });
