@@ -47,4 +47,14 @@ if (notCopied.length > 0 || noPrompt.length > 0) {
   process.exit(1);
 }
 
+// `npm link` points `sfo` straight at this file. Without the shebang the shell
+// runs the JavaScript as a script: backticked help text like `sfo run` became
+// command substitution, and each copy started another, until killed by hand.
+const SHEBANG = "#!/usr/bin/env node\n";
+if (!fs.readFileSync("dist/cli.js", "utf8").startsWith(SHEBANG)) {
+  console.error("copy-assets: dist/cli.js does not start with a node shebang; the installed `sfo` would run as a shell script");
+  process.exit(1);
+}
+fs.chmodSync("dist/cli.js", 0o755);
+
 console.log(`copy-assets: ${sources.length} prompts -> ${DEST}`);

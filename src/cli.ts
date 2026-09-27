@@ -1,3 +1,6 @@
+#!/usr/bin/env node
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { randomBytes } from "node:crypto";
 import { createProject, warnSlowTriagePath } from "./commands/new.js";
@@ -263,5 +266,18 @@ export function buildProgram(): Command {
   return program;
 }
 
-const isEntry = process.argv[1]?.endsWith("cli.ts") || process.argv[1]?.endsWith("cli.js");
-if (isEntry) buildProgram().parse();
+/**
+ * Whether this module is the program being run, not one being imported. By
+ * resolved path: the installed `sfo` is a symlink, so `argv[1]` names the
+ * link, and a check on its name ran nothing and exited 0.
+ */
+export function isEntryPoint(argv1: string | undefined, moduleUrl: string): boolean {
+  if (!argv1) return false;
+  try {
+    return fs.realpathSync(argv1) === fs.realpathSync(fileURLToPath(moduleUrl));
+  } catch {
+    return false;
+  }
+}
+
+if (isEntryPoint(process.argv[1], import.meta.url)) buildProgram().parse();

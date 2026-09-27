@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { buildProgram } from "../src/cli.js";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { pathToFileURL } from "node:url";
+import { buildProgram, isEntryPoint } from "../src/cli.js";
 
 describe("buildProgram", () => {
   it("registers the expected commands", () => {
@@ -38,3 +42,17 @@ describe("buildProgram", () => {
   });
 });
 
+
+describe("isEntryPoint", () => {
+  it("recognises the program through a symlink, as the installed sfo is", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sfo-entry-"));
+    const real = path.join(dir, "cli.js");
+    fs.writeFileSync(real, "");
+    const link = path.join(dir, "sfo");
+    fs.symlinkSync(real, link);
+
+    expect(isEntryPoint(link, pathToFileURL(real).href)).toBe(true);
+    expect(isEntryPoint(path.join(dir, "other.js"), pathToFileURL(real).href)).toBe(false);
+    expect(isEntryPoint(undefined, pathToFileURL(real).href)).toBe(false);
+  });
+});
