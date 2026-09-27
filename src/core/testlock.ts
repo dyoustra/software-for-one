@@ -42,19 +42,48 @@ export function walkTestTree(root: string, base = ""): string[] {
   return out.sort();
 }
 
+function sha256(file: string): string {
+  return createHash("sha256").update(fs.readFileSync(file)).digest("hex");
+}
+
+/**
+ * Every `conftest.py` outside the test tree. pytest loads them for the whole
+ * run, so one can change how any test is collected or run, including skipping
+ * it, without a test file changing. On the first real build a slice agent
+ * wrote one at the repo root to work around a gate bug. That one was harmless,
+ * but the lock could not tell. Hashing them here means a new one reads as an
+ * added file and fails the gate like any other change to the suite.
+ */
+function collectionHooks(dir: string, testDir: string, base = ""): string[] {
+  const out: string[] = [];
+  for (const entry of fs.readdirSync(path.join(dir, base), { withFileTypes: true })) {
+    const rel = base ? `${base}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      if (rel === testDir || entry.name === ".git" || entry.name === ".sfo") continue;
+      if (IGNORED_DIRS.has(entry.name)) continue;
+      out.push(...collectionHooks(dir, testDir, rel));
+    } else if (entry.name === "conftest.py") {
+      out.push(rel);
+    }
+  }
+  return out;
+}
+
 function hashTree(dir: string, testDir: string): TestLock {
   const root = path.join(dir, testDir);
   const lock: TestLock = {};
   for (const rel of walkTestTree(root)) {
-    const body = fs.readFileSync(path.join(root, rel));
-    lock[`${testDir}/${rel}`] = createHash("sha256").update(body).digest("hex");
+    lock[`${testDir}/${rel}`] = sha256(path.join(root, rel));
+  }
+  for (const rel of collectionHooks(dir, testDir)) {
+    lock[rel] = sha256(path.join(dir, rel));
   }
   return lock;
 }
 
 export function lockTests(id: string, testDir: string, env?: Env): void {
   const tree = hashTree(projectDir(id, env), testDir);
-  if (Object.keys(tree).length === 0) {
+  if (!Object.keys(tree).some((p) => p.startsWith(`${testDir}/`))) {
     // An empty lock verifies clean forever, so a project with no tests would
     // sail through the gate that exists to prove tests were satisfied. If the
     // tree is empty here, test-write produced nothing — surface that now

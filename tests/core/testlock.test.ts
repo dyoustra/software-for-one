@@ -91,3 +91,38 @@ describe("an empty test tree is a failure, not a pass", () => {
     expect(() => lockTests("p", "tests", env)).toThrow(/nothing to lock/i);
   });
 });
+
+describe("collection hooks outside the test tree", () => {
+  it("fails the lock when a conftest.py appears at the repo root", () => {
+    // A root conftest.py can skip or deselect any test without a test file
+    // changing. A slice agent wrote one on the first real build.
+    lockTests("p", "tests", env);
+    fs.writeFileSync(path.join(dir, "conftest.py"), "collect_ignore = ['tests']\n");
+
+    expect(verifyTestLock("p", "tests", env)).toEqual(["conftest.py"]);
+  });
+
+  it("fails the lock when a locked root conftest.py is edited", () => {
+    fs.writeFileSync(path.join(dir, "conftest.py"), "# original\n");
+    lockTests("p", "tests", env);
+    fs.writeFileSync(path.join(dir, "conftest.py"), "collect_ignore = ['tests']\n");
+
+    expect(verifyTestLock("p", "tests", env)).toEqual(["conftest.py"]);
+  });
+
+  it("ignores a conftest.py inside a virtualenv", () => {
+    lockTests("p", "tests", env);
+    fs.mkdirSync(path.join(dir, ".venv", "lib"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".venv", "lib", "conftest.py"), "# third party\n");
+
+    expect(verifyTestLock("p", "tests", env)).toEqual([]);
+  });
+
+  it("still refuses to lock when the only file is a root conftest.py", () => {
+    fs.rmSync(path.join(dir, "tests"), { recursive: true, force: true });
+    fs.mkdirSync(path.join(dir, "tests"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "conftest.py"), "# hooks\n");
+
+    expect(() => lockTests("p", "tests", env)).toThrow(/nothing to lock/);
+  });
+});
