@@ -27,6 +27,11 @@ export async function runSingleStage(
   // The build prompt reads "you are building one slice, named in your
   // instructions" — and this command has no slice to name. Running it anyway
   // spends a full stage on an agent told to build something unspecified.
+  if (stage === "smoke") {
+    throw new Error(
+      `smoke runs real checks and a repair loop, not one agent — it runs as part of \`sfo run ${id}\``,
+    );
+  }
   if (stage === "build") {
     throw new Error(
       `the build stage runs one slice at a time and \`sfo stage\` has no slice to give it — ` +

@@ -99,8 +99,9 @@ describe("showBudget", () => {
     showBudget(id, env);
     log.mockRestore();
 
-    expect(lines.at(-1)).toContain("$4.00 spent of a $10.00 ceiling");
-    expect(lines.at(-1)).toContain("$6.00 left");
+    expect(lines.at(-2)).toContain("$4.00 spent of a $10.00 ceiling");
+    expect(lines.at(-2)).toContain("$6.00 left");
+    expect(lines.at(-1)).toBe("smoke cap: $2.00 per run");
   });
 
   it("says so when there is no ceiling", async () => {
@@ -110,6 +111,6 @@ describe("showBudget", () => {
     showBudget(id, env);
     log.mockRestore();
 
-    expect(lines.at(-1)).toMatch(/no ceiling set/);
+    expect(lines.at(-2)).toMatch(/no ceiling set/);
   });
 });

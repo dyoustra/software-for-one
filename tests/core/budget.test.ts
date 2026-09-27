@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { readBudget, writeBudget, budgetState } from "../../src/core/budget.js";
+import { readBudget, writeBudget, budgetState, clearBudget, readSmokeCap, writeSmokeCap } from "../../src/core/budget.js";
 import { recordCost } from "../../src/core/cost.js";
 
 let env: Record<string, string>;
@@ -84,5 +84,16 @@ describe("budget", () => {
     expect(billed?.spent).toBe(8);
     expect(billed?.billedOnly).toBe(true);
     expect(readBudget("p", env)).toBe(100);
+  });
+
+  it("keeps the smoke cap and the ceiling independent in their shared file", () => {
+    expect(readSmokeCap("p", env)).toBe(2);
+    writeSmokeCap("p", 0.5, env);
+    expect(readBudget("p", env)).toBeNull();
+    writeBudget("p", 30, env);
+    expect(readSmokeCap("p", env)).toBe(0.5);
+    expect(clearBudget("p", env)).toBe(true);
+    expect(readBudget("p", env)).toBeNull();
+    expect(readSmokeCap("p", env)).toBe(0.5);
   });
 });

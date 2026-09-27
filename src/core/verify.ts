@@ -284,6 +284,32 @@ export function runVerify(id: string, archetype: string, slice: Slice, env?: Env
   return runRecipe(projectDir(id, env), recipe, testPaths);
 }
 
+/**
+ * The gate for a change made after the build, which may touch code any slice
+ * relies on: every passed slice's tests at once. Not the unscoped suite, which
+ * would also run the tests of slices that failed and were never expected to
+ * pass.
+ */
+export function runPassedGate(id: string, archetype: string, passed: Slice[], env?: Env): VerifyResult {
+  const tamperedTests = verifyTestLock(id, TEST_DIR, env);
+  if (tamperedTests.length > 0) {
+    return {
+      ok: false,
+      steps: [],
+      tamperedTests,
+      reason: `the test suite changed since it was locked: ${tamperedTests.join(", ")}`,
+    };
+  }
+  const recipe = verifyRecipeFor(archetype);
+  if (recipe.length === 0) {
+    return { ok: false, steps: [], tamperedTests: [], reason: `no gates available for archetype "${archetype}"` };
+  }
+  const testPaths = [...new Set(passed.flatMap((s) => sliceTestFiles(id, s, env)))];
+  // A scoped step given no paths runs unscoped, which is the suite this avoids.
+  const steps = testPaths.length > 0 ? recipe : recipe.filter((step) => !step.scopeable);
+  return runRecipe(projectDir(id, env), steps, testPaths);
+}
+
 /** Stages from here on write or check code, and need to be able to run it. */
 const FIRST_CODE_STAGE = "test-write";
 
@@ -295,8 +321,12 @@ const FIRST_CODE_STAGE = "test-write";
  */
 export function agentToolsForStage(id: string, stage: string, env?: Env): string[] {
   const order = PIPELINE_STAGES as readonly string[];
-  // The adjudicator rules on a test by running it, so it gets the build's tools.
-  const base = stage.startsWith("build-") || stage.startsWith("adjudicate-") ? "build" : stage;
+  // The adjudicator rules on a test by running it, and smoke repair is a build
+  // agent by another name, so both get the build's tools.
+  const base =
+    stage.startsWith("build-") || stage.startsWith("adjudicate-") || stage === "smoke-repair"
+      ? "build"
+      : stage;
   const runsCode = order.indexOf(base) >= order.indexOf(FIRST_CODE_STAGE);
   let archetype = "unknown";
   if (runsCode) {

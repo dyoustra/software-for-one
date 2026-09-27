@@ -1,5 +1,5 @@
 import { readState } from "../core/state.js";
-import { budgetState, writeBudget, clearBudget, formatBudget } from "../core/budget.js";
+import { budgetState, writeBudget, clearBudget, formatBudget, readSmokeCap, writeSmokeCap } from "../core/budget.js";
 import type { Env } from "../core/paths.js";
 
 /**
@@ -24,6 +24,18 @@ export function showBudget(id: string, env?: Env): void {
   console.log(
     state ? formatBudget(state) : `no ceiling set — \`sfo budget ${id} <usd>\` to set one`,
   );
+  console.log(`smoke cap: $${readSmokeCap(id, env).toFixed(2)} per run`);
+}
+
+/** Zero is allowed: it means smoke runs only checks that declare no cost. */
+export function setSmokeCap(id: string, raw: string, env?: Env): void {
+  readState(id, env);
+  const usd = Number(raw);
+  if (!Number.isFinite(usd) || usd < 0) {
+    throw new Error(`smoke cap must be a dollar amount of zero or more, got "${raw}"`);
+  }
+  writeSmokeCap(id, usd, env);
+  console.log(`smoke cap: $${usd.toFixed(2)} per run`);
 }
 
 /**

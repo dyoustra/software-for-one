@@ -18,17 +18,51 @@ interface BudgetFile {
   billedOnly: boolean;
 }
 
-function readBudgetFile(id: string, env?: Env): BudgetFile | null {
+interface RawBudget {
+  ceilingUsd?: unknown;
+  billedOnly?: unknown;
+  smokeCapUsd?: unknown;
+}
+
+function readRaw(id: string, env?: Env): RawBudget {
   const file = artifactPath(id, BUDGET_FILE, env);
-  if (!fs.existsSync(file)) return null;
-  let parsed: { ceilingUsd?: unknown; billedOnly?: unknown };
+  if (!fs.existsSync(file)) return {};
   try {
-    parsed = JSON.parse(fs.readFileSync(file, "utf8")) as typeof parsed;
+    return JSON.parse(fs.readFileSync(file, "utf8")) as RawBudget;
   } catch {
     throw new Error(`${BUDGET_FILE} is not valid JSON`);
   }
+}
+
+/** The ceiling and the smoke cap share a file; setting either keeps the other. */
+function writeRaw(id: string, raw: RawBudget, env?: Env): void {
+  const file = artifactPath(id, BUDGET_FILE, env);
+  const kept = Object.fromEntries(Object.entries(raw).filter(([, v]) => v !== undefined));
+  if (Object.keys(kept).length === 0) {
+    fs.rmSync(file, { force: true });
+    return;
+  }
+  fs.mkdirSync(sfoDir(id, env), { recursive: true });
+  fs.writeFileSync(file, `${JSON.stringify(kept, null, 2)}\n`);
+}
+
+function readBudgetFile(id: string, env?: Env): BudgetFile | null {
+  const parsed = readRaw(id, env);
   if (typeof parsed.ceilingUsd !== "number") return null;
   return { ceilingUsd: parsed.ceilingUsd, billedOnly: parsed.billedOnly === true };
+}
+
+/** What one smoke run may spend on real calls, by the checks' declared costs. */
+export const DEFAULT_SMOKE_CAP_USD = 2;
+
+export function readSmokeCap(id: string, env?: Env): number {
+  const raw = readRaw(id, env).smokeCapUsd;
+  return typeof raw === "number" && raw >= 0 ? raw : DEFAULT_SMOKE_CAP_USD;
+}
+
+export function writeSmokeCap(id: string, capUsd: number, env?: Env): void {
+  if (!(capUsd >= 0)) throw new Error("smoke cap must be zero or more");
+  writeRaw(id, { ...readRaw(id, env), smokeCapUsd: capUsd }, env);
 }
 
 export function readBudget(id: string, env?: Env): number | null {
@@ -37,18 +71,18 @@ export function readBudget(id: string, env?: Env): number | null {
 
 export function writeBudget(id: string, ceilingUsd: number, env?: Env, billedOnly = false): void {
   if (!(ceilingUsd > 0)) throw new Error("budget ceiling must be positive");
-  fs.mkdirSync(sfoDir(id, env), { recursive: true });
-  fs.writeFileSync(
-    artifactPath(id, BUDGET_FILE, env),
-    `${JSON.stringify({ ceilingUsd, ...(billedOnly ? { billedOnly } : {}) }, null, 2)}\n`,
+  writeRaw(
+    id,
+    { ...readRaw(id, env), ceilingUsd, billedOnly: billedOnly ? true : undefined },
+    env,
   );
 }
 
 /** Removes the ceiling. Returns whether there was one to remove. */
 export function clearBudget(id: string, env?: Env): boolean {
-  const file = artifactPath(id, BUDGET_FILE, env);
-  if (!fs.existsSync(file)) return false;
-  fs.rmSync(file);
+  const raw = readRaw(id, env);
+  if (typeof raw.ceilingUsd !== "number") return false;
+  writeRaw(id, { ...raw, ceilingUsd: undefined, billedOnly: undefined }, env);
   return true;
 }
 

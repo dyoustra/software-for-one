@@ -12,6 +12,7 @@ describe("stages", () => {
       "test-write",
       "test-repair",
       "build",
+      "smoke",
       "review",
       "deliver",
     ]);

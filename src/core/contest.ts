@@ -108,3 +108,50 @@ export function takeRuling(id: string, env?: Env): Ruling | string {
     return `${RULING_FILE} is not valid JSON`;
   }
 }
+
+/**
+ * The way out of a wrong test, offered once. Without it an agent facing a
+ * test no correct code can pass has two moves: fail, or bend the code until
+ * the test is satisfied — which in the first real build is what it did.
+ */
+export function contestInstructions(sliceId: string, contest: ContestRecord | undefined): string[] {
+  if (!contest) {
+    return [
+      "## If a test is wrong",
+      "",
+      "If you are confident a test for your work is wrong — it contradicts its",
+      "criterion, no correct implementation could satisfy it, or only code that",
+      "would be wrong in real use can pass it — do not work around it, and do not",
+      "change production code to fit it. Write `.sfo/CONTEST.json` and stop:",
+      "",
+      `    {"sliceId":"${sliceId}","criterionId":"AC-...","testFile":"tests/...","testName":"test_...",`,
+      '     "claim":"unsatisfiable | contradicts_criterion | forces_wrong_code",',
+      '     "why":"<what is wrong, with the evidence>","proposedFix":"<how the test should change>"}',
+      "",
+      "An independent adjudicator rules on it. You get one contest for this work.",
+      "A contest ruled against you costs nothing but time; working around a wrong",
+      "test is a defect in what you deliver.",
+    ];
+  }
+  const test = `${contest.testFile} ${contest.testName}`.trim();
+  if (contest.ruling === "uphold") {
+    return [
+      "## Your contest was ruled against",
+      "",
+      `You contested ${test}. The adjudicator upheld it:`,
+      "",
+      contest.rulingWhy,
+      "",
+      "The test stands. Make it pass without changing any test.",
+    ];
+  }
+  return [
+    "## Your contest was upheld",
+    "",
+    `You contested ${test}, and the test was amended (${contest.changedFiles.join(", ") || "criterion reworded"}):`,
+    "",
+    contest.rulingWhy,
+    "",
+    "The suite is locked again as amended. Your contest is spent.",
+  ];
+}

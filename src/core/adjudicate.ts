@@ -258,6 +258,11 @@ export async function adjudicate(
   ctx: AdjudicationContext,
   slice: Slice,
   contest: Contest,
+  /**
+   * False outside the build: only the slice loop resumes a criterion park, so
+   * elsewhere a questioned criterion is recorded and reported, not parked.
+   */
+  mayPark = true,
 ): Promise<AdjudicationOutcome> {
   const openedAt = new Date().toISOString();
   const stage = `adjudicate-${slice.id}`;
@@ -283,6 +288,13 @@ export async function adjudicate(
       openedAt,
       ruledAt: new Date().toISOString(),
     };
+
+    if (ruling.ruling === "criterion_defect" && !mayPark) {
+      const reported: ContestRecord = { ...record, status: "ruled" };
+      saveRecord(ctx, reported);
+      recordDecision(ctx, reported, "adjudicator");
+      return { kind: "ruled" };
+    }
 
     if (ruling.ruling === "criterion_defect" && ruling.question) {
       const questionId = `CQ-${slice.id}`;

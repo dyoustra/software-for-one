@@ -101,10 +101,12 @@ export function buildProgram(): Command {
     .argument("<id>", "project id")
     .argument("[usd]", "new ceiling in dollars, or `none` to remove it; omit to show the current one")
     .option("--billed-only", "count only billed spend, not usage drawn from a Claude subscription")
-    .action(guarded(async (id: string, usd: string | undefined, opts: { billedOnly?: boolean }) => {
-      const { showBudget, setBudget } = await import("./commands/budget.js");
-      if (usd === undefined) showBudget(id);
-      else setBudget(id, usd, undefined, opts.billedOnly ?? false);
+    .option("--smoke <usd>", "what one smoke run may spend on real calls (default $2)")
+    .action(guarded(async (id: string, usd: string | undefined, opts: { billedOnly?: boolean; smoke?: string }) => {
+      const { showBudget, setBudget, setSmokeCap } = await import("./commands/budget.js");
+      if (opts.smoke !== undefined) setSmokeCap(id, opts.smoke);
+      if (usd !== undefined) setBudget(id, usd, undefined, opts.billedOnly ?? false);
+      if (usd === undefined && opts.smoke === undefined) showBudget(id);
     }));
 
   program

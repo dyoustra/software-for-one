@@ -15,6 +15,7 @@ import { lockTests } from "./testlock.js";
 import { verifyRecipeFor } from "./archetype.js";
 import {
   runVerify,
+  runPassedGate,
   agentToolsForStage,
   checkSuiteBeforeLock,
   detectArchetype,
@@ -29,8 +30,9 @@ import { loadPrompt } from "../stages/prompts.js";
 import { projectDir, logPath, type Env } from "./paths.js";
 import type { Runner, StageResult, UsageLimit } from "../runner/types.js";
 import { writeLimit, clearLimit } from "./limit.js";
-import { takeContest, contestFor, type ContestRecord } from "./contest.js";
+import { takeContest, contestFor, contestInstructions, type ContestRecord } from "./contest.js";
 import { adjudicate, resumeCriterion, type AdjudicationContext, type AdjudicationOutcome } from "./adjudicate.js";
+import { runSmoke, type SmokeDeps } from "./smoke.js";
 
 /** The artifact a human must produce before a blocking stage can run. */
 const HUMAN_INPUT: Record<string, string> = { clarify: "ANSWERS.json" };
@@ -46,6 +48,7 @@ export const MAX_SLICE_ATTEMPTS = 2;
 
 export type VerifyFn = (id: string, archetype: string, slice: Slice, env?: Env) => VerifyResult;
 export type SuiteCheckFn = (id: string, env?: Env) => VerifyResult;
+export type PassedGateFn = (id: string, archetype: string, passed: Slice[], env?: Env) => VerifyResult;
 
 export interface AdvanceOptions {
   /** Overridable so tests can exercise ticking without waiting 30s. */
@@ -56,6 +59,10 @@ export interface AdvanceOptions {
    * installing. Production never passes it.
    */
   verify?: VerifyFn;
+  /** The real-seam runs and credential reads of the smoke stage. Injected so tests make no real call. */
+  smoke?: SmokeDeps;
+  /** The gate a smoke repair must pass. Injected for the same reason as `verify`. */
+  passedGate?: PassedGateFn;
   /** The pre-lock check on test-repair's output. Injected for the same reason. */
   suiteCheck?: SuiteCheckFn;
 }
@@ -383,7 +390,7 @@ function buildPromptFor(
     "",
     ...gate.map((command) => `    ${command}`),
     "",
-    ...contestSection(slice, contest),
+    ...contestInstructions(slice.id, contest),
     ...(previousFailure
       ? [
           "",
@@ -399,53 +406,6 @@ function buildPromptFor(
         ]
       : []),
   ].join("\n");
-}
-
-/**
- * The way out of a wrong test, offered once. Without it an agent facing a
- * test no correct code can pass has two moves: fail, or bend the code until
- * the test is satisfied — which in the first real build is what it did.
- */
-function contestSection(slice: Slice, contest: ContestRecord | undefined): string[] {
-  if (!contest) {
-    return [
-      "## If a test is wrong",
-      "",
-      "If you are confident a test for your slice is wrong — it contradicts its",
-      "criterion, no correct implementation could satisfy it, or only code that",
-      "would be wrong in real use can pass it — do not work around it, and do not",
-      "change production code to fit it. Write `.sfo/CONTEST.json` and stop:",
-      "",
-      `    {"sliceId":"${slice.id}","criterionId":"AC-...","testFile":"tests/...","testName":"test_...",`,
-      '     "claim":"unsatisfiable | contradicts_criterion | forces_wrong_code",',
-      '     "why":"<what is wrong, with the evidence>","proposedFix":"<how the test should change>"}',
-      "",
-      "An independent adjudicator rules on it. You get one contest for this slice.",
-      "A contest ruled against you costs nothing but time; working around a wrong",
-      "test is a defect in what you deliver.",
-    ];
-  }
-  const test = `${contest.testFile} ${contest.testName}`.trim();
-  if (contest.ruling === "uphold") {
-    return [
-      "## Your contest was ruled against",
-      "",
-      `You contested ${test}. The adjudicator upheld it:`,
-      "",
-      contest.rulingWhy,
-      "",
-      "The test stands. Make it pass without changing any test.",
-    ];
-  }
-  return [
-    "## Your contest was upheld",
-    "",
-    `You contested ${test}, and the test was amended (${contest.changedFiles.join(", ") || "criterion reworded"}):`,
-    "",
-    contest.rulingWhy,
-    "",
-    "The suite is locked again as amended. Your contest is spent.",
-  ];
 }
 
 /** The commands the gate will run for this slice, as a person would type them. */
@@ -854,6 +814,62 @@ export async function advance(
 
       // Each passing slice committed itself; this catches the state left by any
       // that failed, so what was abandoned is in the history too.
+      commitStage(id, upcoming, env);
+      continue;
+    }
+
+    // Real seams, after the build and before anything reports on it. Mostly
+    // mechanical: an agent runs only to repair a seam that failed.
+    if (upcoming === "smoke") {
+      let archetype: string;
+      try {
+        archetype = detectArchetype(id, env);
+      } catch (err) {
+        console.error(`sfo: smoke cannot run — ${reason(err)}`);
+        state = failedState(readState(id, env), upcoming);
+        writeState(state, env);
+        return;
+      }
+      const smoked = await runSmoke({
+        id,
+        env,
+        runner,
+        archetype,
+        verify: opts.verify ?? runVerify,
+        suiteCheck: opts.suiteCheck ?? checkSuiteBeforeLock,
+        passedGate: opts.passedGate ?? runPassedGate,
+        budgetExceeded: () => budgetState(id, env)?.exceeded ?? false,
+        withHeartbeat: async (fn) => {
+          const stop = startHeartbeat(id, env, heartbeatMs);
+          try {
+            return await fn();
+          } finally {
+            stop();
+          }
+        },
+        deps: opts.smoke,
+      });
+      state = readState(id, env);
+
+      if (smoked.outcome === "failed") {
+        console.error(`sfo: smoke cannot run — ${smoked.reason}`);
+        state = failedState(state, upcoming);
+        writeState(state, env);
+        return;
+      }
+      // Both parks leave smoke to run again from the start: it is cheap, and
+      // a half-finished repair has already been kept or discarded.
+      const budget = budgetState(id, env);
+      const park: Park | null =
+        smoked.outcome === "limit"
+          ? { park: "limit", stage: smoked.stage, limit: smoked.limit }
+          : smoked.outcome === "budget" && budget
+            ? { park: "budget", stage: smoked.stage, budget }
+            : null;
+      if (park) {
+        applyPark(id, { ...state, currentStage: previousStage }, park, env);
+        return;
+      }
       commitStage(id, upcoming, env);
       continue;
     }

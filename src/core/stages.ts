@@ -7,6 +7,7 @@ export const PIPELINE_STAGES = [
   "test-write",
   "test-repair",
   "build",
+  "smoke",
   "review",
   "deliver",
 ] as const;

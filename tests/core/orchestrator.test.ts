@@ -1548,3 +1548,53 @@ describe("an amended test and the contested slice's history", () => {
   });
 });
 
+
+describe("the smoke stage in the pipeline", () => {
+  const OCR_SEAM = {
+    id: "vision-ocr",
+    name: "macOS Vision OCR",
+    kind: "platform",
+    effect: "read_only",
+    testMode: null,
+    credential: null,
+    constraints: [],
+    smoke: { checks: ["read known text"], maxCostUsd: 0, async: false },
+  };
+
+  it("exercises the listed seams after the build and before review", async () => {
+    const base = producesArtifacts();
+    const runner = new FakeRunner(true, 0, undefined, (stage) => {
+      base(stage);
+      if (stage === "spec") {
+        fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "SERVICES.jsonl"), `${JSON.stringify(OCR_SEAM)}\n`);
+      }
+      if (stage === "test-write") {
+        fs.mkdirSync(path.join(env.SFO_HOME, "p", "tests", "smoke"), { recursive: true });
+        fs.writeFileSync(path.join(env.SFO_HOME, "p", "tests", "smoke", "test_smoke_vision_ocr.py"), "def test_ocr(): pass\n");
+      }
+    });
+    const ran: string[] = [];
+    const smoke = {
+      spawnSeam: async ({ args, env: childEnv }: { args: string[]; env: Record<string, string | undefined> }) => {
+        ran.push(args.at(-1) ?? "");
+        fs.writeFileSync(
+          childEnv.SFO_SMOKE_RESULTS ?? "",
+          JSON.stringify({ seam: "vision-ocr", check: "read known text", level: "completed", detail: "read it" }),
+        );
+        return { exitCode: 0, output: "", timedOut: false };
+      },
+    };
+    seed("capture");
+    await advance("p", runner, env, { verify: PASSES, smoke });
+    fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.json"), '{"answers":[]}');
+    await advance("p", runner, env, { verify: PASSES, smoke });
+
+    expect(ran).toEqual(["tests/smoke/test_smoke_vision_ocr.py"]);
+    const { readSmokeRecords } = await import("../../src/core/smoke.js");
+    expect(readSmokeRecords("p", env).map((r) => r.level)).toEqual(["completed"]);
+    const stages = runner.calls.map(stageOf);
+    expect(stages.indexOf("review")).toBeGreaterThan(stages.lastIndexOf("build-S-03"));
+    expect(subjects().some((s) => s.startsWith("stage(smoke)"))).toBe(true);
+    expect(readState("p", env).status).toBe("done");
+  });
+});
