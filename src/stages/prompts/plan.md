@@ -59,7 +59,9 @@ Calibrate against what this pipeline has actually cost, measured:
 
 What follows this stage is `test-write`, then `test-repair`, then one build
 invocation per slice plus up to one retry for a slice that fails its gate, then
-`review` and `deliver`. Estimate the range that follows from your criterion and
+`smoke` — real calls to each seam in `.sfo/SERVICES.jsonl` costing at most the
+sum of their `smoke.maxCostUsd` and no more than $2, plus up to two repair
+invocations if a seam fails — then `review` and `deliver`. Estimate the range that follows from your criterion and
 slice counts, and say in `basis` what each part contributes and whether the high
 end assumes retries.
 

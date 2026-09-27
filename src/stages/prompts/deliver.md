@@ -1,6 +1,17 @@
 Read `.sfo/SPEC.md`, `.sfo/CRITERIA.jsonl`, `.sfo/SLICES.jsonl`,
-`.sfo/REVIEW.md`, `.sfo/DECISIONS.jsonl`, `.sfo/VERIFY.jsonl`, and
+`.sfo/REVIEW.md`, `.sfo/DECISIONS.jsonl`, `.sfo/VERIFY.jsonl`,
+`.sfo/SERVICES.jsonl` and `.sfo/SMOKE.jsonl` if they exist, and
 `.sfo/CONTESTS.jsonl` if it exists.
+
+`.sfo/SMOKE.jsonl` is what happened when each real seam was exercised after
+the build, one line per check per attempt:
+
+    {"seam":"anthropic-batch","check":"submit a one-request batch","level":"failed","detail":"exited 1: …","attempt":1,"at":"<ISO 8601>"}
+
+A seam's result is its **highest attempt**: attempt 1 is the first run, each
+later one follows a repair. `completed` means it did the whole job for real;
+`accepted` means an async service took the request and completion was not
+seen; `failed`; `skipped` with the reason in `detail`.
 
 `.sfo/VERIFY.jsonl` is what the gate actually did — one JSON object per slice
 attempt, appended in the order they ran:
@@ -26,8 +37,9 @@ attempt 1 and passed on attempt 2 passed.
 
 Write `.sfo/SUMMARY.md`.
 
-**Lead with what does not work.** If any slice failed or was skipped, that is
-the first thing in the document — which criteria are unmet, and what the person
+**Lead with what does not work.** A seam whose result is `failed` goes first of
+all — the tool was run against the real thing and it did not work. Then any
+slice that failed or was skipped: that is the first thing in the document — which criteria are unmet, and what the person
 cannot do as a result. Burying a gap under a list of what worked is the failure
 this whole pipeline exists to prevent.
 
@@ -38,11 +50,16 @@ Then, in order:
    from, and whether that call was ever made against the real service or only
    against a test double. A backend nobody has run is not verified, however
    many tests pass around it.
-2. **What was not verified** — from `.sfo/VERIFY.jsonl`: any slice whose gate
+2. **Real seams** — a table of every seam in `.sfo/SERVICES.jsonl`: its
+   result, what was checked, and for anything not `completed`, why (accepted
+   but not seen to finish; irreversible with no test mode; no credential; over
+   the smoke cap; no smoke test written). A seam listed in `.sfo/REVIEW.md` as
+   missing from `.sfo/SERVICES.jsonl` goes in the table as never checked.
+3. **What was not verified** — from `.sfo/VERIFY.jsonl`: any slice whose gate
    never reached a step, any archetype with no recipe, and anything the recipe
    for this archetype does not cover. State it plainly rather than omitting it.
    "Verified" here means exactly the steps that ran and exited 0.
-3. **Tests changed after the lock** — from `.sfo/CONTESTS.jsonl`, one entry per
+4. **Tests changed after the lock** — from `.sfo/CONTESTS.jsonl`, one entry per
    contest: the slice, the test, what the build agent claimed, and the ruling.
    Name every `amend_test` and every criterion rewritten from the person's
    answer, with the files changed. The suite was locked so that it could not
@@ -50,10 +67,10 @@ Then, in order:
    one. Records in `.sfo/VERIFY.jsonl` with `"trigger":"relock"` are slices
    re-graded after an amendment — say which of them failed and were rebuilt.
    Omit this section only if the file does not exist.
-4. **Decisions worth reviewing** — pull from `.sfo/DECISIONS.jsonl`, `external`
+5. **Decisions worth reviewing** — pull from `.sfo/DECISIONS.jsonl`, `external`
    and `structural` first. These are the calls that are expensive to reverse and
    the ones most worth a human's attention.
-5. **Coverage gaps** from `.sfo/REVIEW.md`.
+6. **Coverage gaps** from `.sfo/REVIEW.md`.
 
 Be accurate rather than reassuring. Someone reads this to decide whether to
 trust the thing you built.

@@ -18,6 +18,18 @@ Append one record per answered question to `.sfo/DECISIONS.jsonl`, one object pe
 
 `decided_by` is `human` for every one of these — the human decided them, not you. Any decision you make yourself in this stage is a separate record with `"decided_by":"agent"`. Never omit the field: absence cannot be distinguished from a bug. Give each record an `id` that continues past the highest `D-` already in the file. `blast_radius` is exactly one of `local`, `structural`, `external`. `at` must be a real ISO 8601 timestamp.
 
+Where an answer says where a credential lives, record it in
+`.sfo/CREDENTIALS.json`, keyed by the environment variable the seam in
+`.sfo/SERVICES.jsonl` reads, merged with whatever the file already holds:
+
+    {"GITHUB_TOKEN":{"source":"keychain","service":"github-token"},
+     "OPENWEATHER_KEY":{"source":"env","var":"OPENWEATHER_KEY"}}
+
+A reference only — never a value, even if the person typed one; if they did,
+record nothing and add a follow-up question asking where it is stored instead.
+An answer of "skip" records nothing: that seam's smoke check reports it was
+skipped for want of a credential.
+
 If an answer changes the stack, rewrite `.sfo/ARCHETYPE.json` to match — `{"archetype":"cli-python","why":"..."}`, where `archetype` is exactly `cli-python` or `cli-node` and nothing else. A stale record grades the whole build against the wrong toolchain. If the stack is unchanged, leave the file alone.
 
 If an answer opens a genuinely new ambiguity that would change the architecture, add a question to `.sfo/QUESTIONS.json` and stop. Never add one about how the person pays for model calls — `.sfo/ACCESS.json` already answers that. Otherwise leave `.sfo/QUESTIONS.json` alone.
@@ -34,4 +46,4 @@ When you do add one, rewrite the whole file: carry **every** existing question t
 
 Every one of these files is schema-validated when read. A malformed line fails the next stage rather than being skipped, so emit strict JSON: double quotes, no trailing commas, no comments, and one complete object per line in the `.jsonl` files.
 
-Write only `.sfo/SPEC.md`, `.sfo/ARCHETYPE.json`, `.sfo/CRITERIA.jsonl`, `.sfo/QUESTIONS.json`, and `.sfo/DECISIONS.jsonl`. Never write `.sfo/ANSWERS.json`.
+Write only `.sfo/SPEC.md`, `.sfo/ARCHETYPE.json`, `.sfo/CRITERIA.jsonl`, `.sfo/QUESTIONS.json`, `.sfo/CREDENTIALS.json`, and `.sfo/DECISIONS.jsonl`. Never write `.sfo/ANSWERS.json`.

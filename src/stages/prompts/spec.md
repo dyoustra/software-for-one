@@ -1,6 +1,6 @@
-Read `.sfo/IDEA.md`, `.sfo/RESEARCH.md`, and `.sfo/ACCESS.json`. Produce a specification.
+Read `.sfo/IDEA.md`, `.sfo/RESEARCH.md`, `.sfo/SERVICES.jsonl`, and `.sfo/ACCESS.json`. Produce a specification.
 
-**Write each file as you finish it, not all at the end.** Write `.sfo/SPEC.md` first and save it, then `.sfo/ARCHETYPE.json`, then `.sfo/CRITERIA.jsonl`, then `.sfo/QUESTIONS.json`, then append to `.sfo/DECISIONS.jsonl`. Stages get killed mid-run; partial output that a re-run can build on beats losing twenty minutes of work to a dropped connection.
+**Write each file as you finish it, not all at the end.** Write `.sfo/SPEC.md` first and save it, then `.sfo/ARCHETYPE.json`, then `.sfo/CRITERIA.jsonl`, then `.sfo/SERVICES.jsonl`, then `.sfo/QUESTIONS.json`, then append to `.sfo/DECISIONS.jsonl`. Stages get killed mid-run; partial output that a re-run can build on beats losing twenty minutes of work to a dropped connection.
 
 Write `.sfo/SPEC.md` containing:
 - **What this is** — one paragraph.
@@ -71,6 +71,34 @@ If `.sfo/ACCESS.json` does not exist, the project predates it: ask one
 `blocking` question about how the tool will authenticate to a model, and only
 if it calls one.
 
+**Settle the real seams.** Rewrite `.sfo/SERVICES.jsonl` so it lists exactly
+the services and platform APIs *this design* uses — add what research missed,
+remove what the design does not touch — one object per line in the format
+research used:
+
+    {"id":"anthropic-batch","name":"Anthropic Message Batches API","kind":"network",
+     "effect":"billed","testMode":null,
+     "credential":{"name":"ANTHROPIC_API_KEY","covers":"anthropic_api_key"},
+     "constraints":[{"rule":"each request's custom_id matches ^[a-zA-Z0-9_-]{1,64}$","source":"https://docs.anthropic.com/en/api/creating-message-batches"}],
+     "smoke":{"checks":["submit a one-request batch"],"maxCostUsd":0.01,"async":true}}
+
+- **`effect` decides whether a real check may run unattended**, so get it
+  right: anything that sends, posts, charges, or deletes where the person
+  cannot take it back is `irreversible`, and will be exercised only through
+  `testMode` or not at all. When in doubt, `irreversible`.
+- Every constraint keeps a `source` URL. Add the ones the design now depends
+  on; the test suite's fakes will be built to reject whatever these say the
+  real service rejects.
+- `smoke.checks` are the cheapest harmless calls that prove the seam works —
+  one tiny request, a one-item batch, OCR of a rendered image — and
+  `smoke.maxCostUsd` their worst case. They run on synthetic fixtures, never
+  the person's data.
+- A credential the person's profile does not cover (`covers` is `null`) is a
+  `blocking` question: *where is it* — a Keychain entry or an environment
+  variable — or skip the seams that need it. Word it so the answer can be
+  written down as a reference, e.g. options `keychain:<service>`,
+  `env:<VARIABLE>`, `skip`. Never ask for the value itself.
+
 Questions for the human go in `.sfo/QUESTIONS.json`. Every question is either
 `blocking` or `preference`:
 - **Blocking** — the answer changes the architecture; guessing wrong wastes the build.
@@ -113,7 +141,7 @@ no trailing commas, no comments, and one complete object per line in the
 `.jsonl` files.
 
 Write only `.sfo/SPEC.md`, `.sfo/ARCHETYPE.json`, `.sfo/CRITERIA.jsonl`,
-`.sfo/QUESTIONS.json`, and `.sfo/DECISIONS.jsonl`.
+`.sfo/SERVICES.jsonl`, `.sfo/QUESTIONS.json`, and `.sfo/DECISIONS.jsonl`.
 
 Once you have chosen the stack, rewrite the project's root `.gitignore` for it —
 dependency directories, build output, caches, virtual environments, and anything

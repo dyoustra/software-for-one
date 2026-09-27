@@ -5,6 +5,9 @@ import { ARCHETYPE_FILE } from "../../src/core/stack.js";
 import { VERIFY_FILE } from "../../src/core/verifyRecord.js";
 import { ACCESS_FILE } from "../../src/core/access.js";
 import { CONTESTS_FILE, CONTEST_FILE, RULING_FILE } from "../../src/core/contest.js";
+import { SERVICES_FILE, CREDENTIALS_FILE, smokeTestFile } from "../../src/core/services.js";
+import { SMOKE_FILE } from "../../src/core/smoke.js";
+import { SMOKE_DIR } from "../../src/core/archetype.js";
 
 describe("loadPrompt", () => {
   it("loads each phase 1 agentic stage prompt", () => {
@@ -57,5 +60,27 @@ describe("prompts and the artifacts they are graded on", () => {
     expect(loadPrompt("deliver")).toContain(`.sfo/${CONTESTS_FILE}`);
     expect(loadPrompt("adjudicate")).toContain(`.sfo/${RULING_FILE}`);
     expect(loadPrompt("build")).toContain(`.sfo/${CONTEST_FILE}`);
+  });
+
+  it("hands the seam list from the stage that starts it to every stage that relies on it", () => {
+    for (const stage of ["research", "spec", "test-write", "review", "deliver", "smoke"]) {
+      expect(loadPrompt(stage), stage).toContain(`.sfo/${SERVICES_FILE}`);
+    }
+    expect(loadPrompt("clarify")).toContain(`.sfo/${CREDENTIALS_FILE}`);
+    expect(loadPrompt("deliver")).toContain(`.sfo/${SMOKE_FILE}`);
+  });
+
+  it("tells test-write the smoke contract the smoke stage reads", () => {
+    // The stage finds a seam's file by name, passes these variables, and parses
+    // exactly these levels. A prompt that drifted from any of them produces
+    // smoke tests the stage reports as never written, or never reporting.
+    const tw = loadPrompt("test-write");
+    const batch = { id: "anthropic-batch" } as Parameters<typeof smokeTestFile>[0];
+    expect(tw).toContain(smokeTestFile(batch, "cli-python"));
+    expect(tw).toContain(smokeTestFile(batch, "cli-node"));
+    expect(tw).toContain(`${SMOKE_DIR}/`);
+    expect(tw).toContain("SFO_SMOKE_RESULTS");
+    expect(tw).toContain("SFO_SMOKE_ASYNC_WAIT_SECONDS");
+    for (const level of ["completed", "accepted", "failed", "skipped"]) expect(tw).toContain(`\`${level}\``);
   });
 });

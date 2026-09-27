@@ -1,4 +1,5 @@
-Read `.sfo/SPEC.md`, `.sfo/CRITERIA.jsonl`, and the test suite.
+Read `.sfo/SPEC.md`, `.sfo/CRITERIA.jsonl`, `.sfo/SERVICES.jsonl`, the test
+suite, and the source.
 
 You are auditing **coverage**, not correctness. The suite already checks that
 the code does what the criteria say; your job is to find what nothing checks.
@@ -11,6 +12,15 @@ Look for:
 - **Tests weaker than their criterion.** A criterion saying "at most 255 bytes
   when UTF-8 encoded" tested only with ASCII input; a determinism criterion
   tested with a single run.
+
+- **Seams nobody listed.** Every external client or platform API the source
+  imports should have a record in `.sfo/SERVICES.jsonl`. One that does not was
+  never smoke-checked and its fake enforces nothing; name it.
+- **Fakes looser than their service.** A constraint in `.sfo/SERVICES.jsonl`
+  that the corresponding fake does not enforce.
+- **A smoke test that looks irreversible.** A smoke test whose calls send,
+  post, charge, or delete, for a seam whose `effect` says otherwise. This is
+  the one finding that is about safety rather than coverage: lead with it.
 
 Write `.sfo/REVIEW.md`: findings with severity, each naming the criterion or
 spec section and what is missing. Say plainly if you find nothing — an audit

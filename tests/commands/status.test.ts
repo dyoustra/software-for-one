@@ -181,3 +181,21 @@ describe("the budget note", () => {
     expect(listed[0]?.note).toBeUndefined();
   });
 });
+
+describe("a delivered project whose seams failed", () => {
+  it("says which, instead of plain done", () => {
+    seed("p", "deliver", "done");
+    const line = (seam: string, level: string, attempt: number) =>
+      JSON.stringify({ seam, check: "c", level, detail: "", attempt, at: "2026-09-27T00:00:00.000Z" });
+    fs.writeFileSync(
+      path.join(env.SFO_HOME, "p", ".sfo", "SMOKE.jsonl"),
+      [
+        line("anthropic-batch", "failed", 1),
+        line("anthropic-batch", "failed", 2),
+        line("vision-ocr", "failed", 1),
+        line("vision-ocr", "completed", 2),
+      ].join("\n") + "\n",
+    );
+    expect(formatStatus(listProjects(env))).toMatch(/done, but failed against the real thing: anthropic-batch$/m);
+  });
+});

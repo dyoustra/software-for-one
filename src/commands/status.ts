@@ -6,6 +6,7 @@ import { budgetState } from "../core/budget.js";
 import { readEstimate } from "../core/estimate.js";
 import { readLimit, formatLimit } from "../core/limit.js";
 import { readContests } from "../core/contest.js";
+import { readSmokeRecords, latestSmoke } from "../core/smoke.js";
 
 /** A project plus whatever short explanation the listing owes the reader. */
 export type ProjectSummary = ProjectState & { note?: string };
@@ -71,6 +72,17 @@ function criterionNote(state: ProjectState, env: Env | undefined): string | unde
   }
 }
 
+/** A delivered project whose real seams did not all work. Never throws. */
+function smokeNote(state: ProjectState, env: Env | undefined): string | undefined {
+  if (state.status !== "done") return undefined;
+  try {
+    const failed = [...new Set(latestSmoke(readSmokeRecords(state.id, env)).filter((r) => r.level === "failed").map((r) => r.seam))];
+    return failed.length > 0 ? `done, but failed against the real thing: ${failed.join(", ")}` : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function listProjects(env?: Env): ProjectSummary[] {
   const root = projectsRoot(env);
   if (!fs.existsSync(root)) return [];
@@ -88,7 +100,7 @@ export function listProjects(env?: Env): ProjectSummary[] {
         ? noteFor(state, art)
         : limit
           ? formatLimit(state.id, limit)
-          : (criterionNote(state, env) ?? budgetNote(state, env));
+          : (criterionNote(state, env) ?? budgetNote(state, env) ?? smokeNote(state, env));
       out.push(note !== undefined ? { ...state, note } : state);
     } catch {
       // A directory with no readable state is not a project. Skip it silently —
