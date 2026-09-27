@@ -31,13 +31,13 @@ export function showBudget(id: string, env?: Env): void {
  * orchestrator refuses to run, and the only remedy is hand-editing the
  * project's BUDGET.json.
  */
-export function setBudget(id: string, raw: string, env?: Env): void {
+export function setBudget(id: string, raw: string, env?: Env, billedOnly = false): void {
   readState(id, env);
   if (raw === "none") {
     console.log(clearBudget(id, env) ? `ceiling removed for ${id}` : `${id} had no ceiling`);
     return;
   }
-  writeBudget(id, parseBudget(raw), env);
+  writeBudget(id, parseBudget(raw), env, billedOnly);
   const state = budgetState(id, env);
   if (state) console.log(formatBudget(state));
 }

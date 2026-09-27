@@ -1,4 +1,4 @@
-import { readCostRecords, totalCost, type CostRecord } from "../core/cost.js";
+import { readCostRecords, totalCost, spendByBilling, type CostRecord } from "../core/cost.js";
 import { readState } from "../core/state.js";
 import { budgetState, formatBudget } from "../core/budget.js";
 import { listProjects } from "./status.js";
@@ -73,6 +73,20 @@ export function formatProjectCost(records: CostRecord[]): string {
   );
 }
 
+/**
+ * The table's COST column adds money that was charged to money that was not:
+ * on a subscription, `claude` reports what the run would have cost at API
+ * prices. Null when nothing ran on a plan, since then the total means what it
+ * says.
+ */
+export function formatBillingSplit(records: CostRecord[]): string | null {
+  const split = spendByBilling(records);
+  if (split.plan === 0) return null;
+  const parts = [`$${split.api.toFixed(2)} billed`, `$${split.plan.toFixed(2)} API-equivalent on your plan`];
+  if (split.unknown > 0) parts.push(`$${split.unknown.toFixed(2)} unlabeled (from before billing was recorded)`);
+  return parts.join(" · ");
+}
+
 export interface ProjectCost {
   id: string;
   records: CostRecord[];
@@ -96,15 +110,17 @@ export function showCost(id: string | undefined, env?: Env): void {
     // Reading state first so an unknown id reports "no such project" instead of
     // quietly showing an empty bill.
     readState(id, env);
-    console.log(formatProjectCost(readCostRecords(id, env)));
+    const records = readCostRecords(id, env);
+    console.log(formatProjectCost(records));
+    const split = formatBillingSplit(records);
+    if (split) console.log(`\n${split}`);
     const budget = budgetState(id, env);
     if (budget) console.log(`\n${formatBudget(budget)}`);
     return;
   }
 
-  console.log(
-    formatAllCosts(
-      listProjects(env).map((p) => ({ id: p.id, records: readCostRecords(p.id, env) })),
-    ),
-  );
+  const projects = listProjects(env).map((p) => ({ id: p.id, records: readCostRecords(p.id, env) }));
+  console.log(formatAllCosts(projects));
+  const split = formatBillingSplit(projects.flatMap((p) => p.records));
+  if (split) console.log(`\n${split}`);
 }

@@ -4,6 +4,8 @@
 # runner's usage parsing is exercised, and exits with whatever FAKE_EXIT says.
 echo "ARGS: $*"
 echo "CWD: $(pwd)"
+# Presence only, never the value: logs are not a place for keys.
+if [ -n "$ANTHROPIC_API_KEY" ]; then echo "KEY: set"; else echo "KEY: unset"; fi
 echo '{"type":"system","subtype":"init","session_id":"fake"}'
 # Deliberate non-JSON line: the real binary interleaves these, and the parser
 # must skip them rather than give up on the run's cost data.

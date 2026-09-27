@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import { artifactPath, sfoDir, type Env } from "./paths.js";
 import type { StageUsage } from "../runner/types.js";
+import type { Billing } from "./access.js";
 
 export const COST_FILE = "COST.jsonl";
 
@@ -18,6 +19,13 @@ export interface CostRecord {
   ok: boolean;
   /** Absent in records written before the SDK path existed; read as "cli". */
   via: CostVia;
+  /**
+   * Billed to an API key, or drawn from a subscription's limits, where
+   * `usage.costUsd` is only what the same work would have cost at API prices.
+   * Absent when nobody chose: every record from before profiles, and runs that
+   * inherited whatever credential the shell had.
+   */
+  billing?: Billing;
   usage: StageUsage;
 }
 
@@ -51,6 +59,7 @@ function parseCostRecord(value: unknown): CostRecord | null {
     at: rec.at,
     ok: rec.ok === true,
     via: rec.via === "sdk" ? "sdk" : "cli",
+    ...(rec.billing === "api" || rec.billing === "plan" ? { billing: rec.billing } : {}),
     usage: usage as unknown as StageUsage,
   };
 }
@@ -69,9 +78,17 @@ export function recordCost(
   // Defaults to "cli" because every spawned stage runs through the claude
   // binary; only triage can currently take the SDK route.
   via: CostVia = "cli",
+  billing?: Billing,
 ): void {
   if (!usage) return;
-  const record: CostRecord = { stage, at: new Date().toISOString(), ok, via, usage };
+  const record: CostRecord = {
+    stage,
+    at: new Date().toISOString(),
+    ok,
+    via,
+    ...(billing ? { billing } : {}),
+    usage,
+  };
   fs.mkdirSync(sfoDir(id, env), { recursive: true });
   fs.appendFileSync(artifactPath(id, COST_FILE, env), `${JSON.stringify(record)}\n`);
 }
@@ -115,4 +132,16 @@ export function totalCost(records: CostRecord[]): StageUsage {
     for (const f of USAGE_FIELDS) total[f] += r.usage[f];
   }
   return total;
+}
+
+export interface SpendByBilling {
+  api: number;
+  plan: number;
+  unknown: number;
+}
+
+export function spendByBilling(records: CostRecord[]): SpendByBilling {
+  const out: SpendByBilling = { api: 0, plan: 0, unknown: 0 };
+  for (const r of records) out[r.billing ?? "unknown"] += r.usage.costUsd;
+  return out;
 }

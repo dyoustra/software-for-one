@@ -11,6 +11,8 @@ export interface StructuredRunOptions {
   /** Hard per-invocation spend cap, passed through as `--max-budget-usd`. */
   maxBudgetUsd?: number;
   cwd?: string;
+  /** The child's environment; defaults to this process's. */
+  env?: NodeJS.ProcessEnv | Record<string, string | undefined>;
 }
 
 export interface StructuredRunResult {
@@ -100,6 +102,7 @@ export function runStructured(opts: StructuredRunOptions): Promise<StructuredRun
       // Triage has no project directory. Running in the repo root would let
       // CLAUDE.md discovery pull unrelated project context into the prompt.
       cwd: opts.cwd ?? os.tmpdir(),
+      env: opts.env ?? process.env,
       // stdin must be closed: left open, the binary waits 3s for input and
       // prints a warning into the output we are about to parse.
       stdio: ["ignore", "pipe", "pipe"],

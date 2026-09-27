@@ -616,7 +616,7 @@ async function runSlices(
     } finally {
       stopHeartbeat();
     }
-    recordCost(id, stageName, result.ok, result.usage, env);
+    recordCost(id, stageName, result.ok, result.usage, env, "cli", result.billing);
 
     const { archetype: gradedAs, verdict } = gradeAttempt(id, slice, result, verify, env);
     writeVerifyLog(id, stageName, verdict, env);
@@ -744,7 +744,7 @@ export async function advance(
 
     // Recorded before the ok/failed branch: a stage that failed still spent
     // money, and billing only the happy path under-reports every retry.
-    recordCost(id, upcoming, result.ok, result.usage, env);
+    recordCost(id, upcoming, result.ok, result.usage, env, "cli", result.billing);
 
     warnOnDroppedCriteria(criteriaBefore, criterionIds(id, env), upcoming);
 

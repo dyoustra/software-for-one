@@ -89,10 +89,11 @@ export function buildProgram(): Command {
     .description("Show or set a project's spending ceiling")
     .argument("<id>", "project id")
     .argument("[usd]", "new ceiling in dollars, or `none` to remove it; omit to show the current one")
-    .action(guarded(async (id: string, usd?: string) => {
+    .option("--billed-only", "count only billed spend, not usage drawn from a Claude subscription")
+    .action(guarded(async (id: string, usd: string | undefined, opts: { billedOnly?: boolean }) => {
       const { showBudget, setBudget } = await import("./commands/budget.js");
       if (usd === undefined) showBudget(id);
-      else setBudget(id, usd);
+      else setBudget(id, usd, undefined, opts.billedOnly ?? false);
     }));
 
   program

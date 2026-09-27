@@ -53,7 +53,7 @@ export async function runSingleStage(
   });
 
   // Re-runs are appended, not replaced — the bill counts every attempt.
-  recordCost(id, stage, result.ok, result.usage, env);
+  recordCost(id, stage, result.ok, result.usage, env, "cli", result.billing);
 
   if (result.ok && state.status === "failed") {
     // `advance` refuses failed projects and its error tells the user to come

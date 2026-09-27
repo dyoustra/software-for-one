@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { formatProjectCost, formatAllCosts, showCost } from "../../src/commands/cost.js";
+import { formatProjectCost, formatAllCosts, formatBillingSplit, showCost } from "../../src/commands/cost.js";
 import { writeState } from "../../src/core/state.js";
 import { writeBudget } from "../../src/core/budget.js";
 import { recordCost, type CostRecord, type CostVia } from "../../src/core/cost.js";
@@ -120,5 +120,22 @@ describe("showCost", () => {
     log.mockRestore();
 
     expect(lines.join("\n")).toContain("$4.00 spent of a $10.00 ceiling");
+  });
+});
+
+describe("formatBillingSplit", () => {
+  it("says nothing when nothing ran on a plan, since the total means what it says", () => {
+    expect(formatBillingSplit([{ ...rec("a", 1), billing: "api" }, rec("b", 2)])).toBeNull();
+  });
+
+  it("separates billed spend from plan usage and unlabeled records", () => {
+    const out = formatBillingSplit([
+      { ...rec("a", 1), billing: "api" },
+      { ...rec("b", 2.5), billing: "plan" },
+      rec("c", 0.25),
+    ]);
+    expect(out).toBe(
+      "$1.00 billed · $2.50 API-equivalent on your plan · $0.25 unlabeled (from before billing was recorded)",
+    );
   });
 });

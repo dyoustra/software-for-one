@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import type { Runner, RunStageInput, StageResult, StageUsage } from "./types.js";
+import { billingFor, childEnv, type Billing, type ResolvedAccess } from "../core/access.js";
 
 export const DEFAULT_MODEL = "claude-opus-5";
 
@@ -10,6 +11,8 @@ export interface ClaudeCodeRunnerOptions {
   env?: Record<string, string>;
   /** Hard per-invocation spend cap, passed through as `--max-budget-usd`. */
   maxBudgetUsd?: number;
+  /** Which credential the child runs on. Absent means whatever the shell has. */
+  access?: ResolvedAccess;
 }
 
 function num(value: unknown): number {
@@ -94,10 +97,14 @@ export class ClaudeCodeRunner implements Runner {
   private readonly bin: string;
   private readonly extraEnv: Record<string, string>;
   private readonly maxBudgetUsd?: number;
+  private readonly access: ResolvedAccess;
+  private readonly billing: Billing | undefined;
 
   constructor(opts: ClaudeCodeRunnerOptions = {}) {
     this.bin = opts.bin ?? "claude";
     this.extraEnv = opts.env ?? {};
+    this.access = opts.access ?? { method: "inherit" };
+    this.billing = billingFor(this.access, process.env);
     // Env var so every call site (sfo run, sfo stage, the detached child)
     // inherits the same ceiling without threading an option through each one.
     const fromEnv = Number(process.env.SFO_MAX_BUDGET_USD);
@@ -148,7 +155,7 @@ export class ClaudeCodeRunner implements Runner {
 
       const child = spawn(this.bin, args, {
         cwd: input.workdir,
-        env: { ...process.env, ...this.extraEnv },
+        env: { ...childEnv(process.env, this.access), ...this.extraEnv },
         stdio: ["ignore", log, log],
       });
 
@@ -163,6 +170,7 @@ export class ClaudeCodeRunner implements Runner {
           // the file so `sfo logs -f` shows live progress, and we read the
           // spend back out once the process has closed it.
           usage: readUsage(input.logPath),
+          billing: this.billing,
         });
       });
 

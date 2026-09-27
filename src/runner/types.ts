@@ -24,6 +24,8 @@ export interface StageResult {
   logPath: string;
   /** Absent when the process died before emitting a result event. */
   usage?: StageUsage;
+  /** Whether the spend was billed or came out of plan limits; absent when unknown. */
+  billing?: "api" | "plan";
 }
 
 export interface Runner {

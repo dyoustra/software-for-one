@@ -265,3 +265,47 @@ describe("readLogTail", () => {
     expect(readLogTail(f)).toBe("");
   });
 });
+
+describe("ClaudeCodeRunner credentials", () => {
+  const withShellKey = async (fn: () => Promise<void>): Promise<void> => {
+    const before = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "sk-from-shell";
+    try {
+      await fn();
+    } finally {
+      if (before === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = before;
+    }
+  };
+
+  it("hides a key in the shell from a subscription run and labels it plan", async () => {
+    await withShellKey(async () => {
+      const log = path.join(dir, "out.log");
+      const res = await new ClaudeCodeRunner({
+        bin: FAKE,
+        access: { method: "claude_subscription" },
+      }).runStage({ workdir: dir, prompt: "x", logPath: log });
+      expect(fs.readFileSync(log, "utf8")).toContain("KEY: unset");
+      expect(res.billing).toBe("plan");
+    });
+  });
+
+  it("hands the chosen key to an API-key run and labels it api", async () => {
+    const log = path.join(dir, "out.log");
+    const res = await new ClaudeCodeRunner({
+      bin: FAKE,
+      access: { method: "anthropic_api_key", apiKey: "sk-chosen" },
+    }).runStage({ workdir: dir, prompt: "x", logPath: log });
+    expect(fs.readFileSync(log, "utf8")).toContain("KEY: set");
+    expect(res.billing).toBe("api");
+  });
+
+  it("passes the shell through with no access chosen", async () => {
+    await withShellKey(async () => {
+      const log = path.join(dir, "out.log");
+      const res = await new ClaudeCodeRunner({ bin: FAKE }).runStage({ workdir: dir, prompt: "x", logPath: log });
+      expect(fs.readFileSync(log, "utf8")).toContain("KEY: set");
+      expect(res.billing).toBe("api");
+    });
+  });
+});

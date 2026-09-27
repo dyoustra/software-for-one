@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { recordCost, readCostRecords, totalCost, type CostRecord } from "../../src/core/cost.js";
+import { recordCost, readCostRecords, totalCost, spendByBilling, type CostRecord } from "../../src/core/cost.js";
 import type { StageUsage } from "../../src/runner/types.js";
 
 let env: Record<string, string>;
@@ -150,5 +150,16 @@ describe("totalCost", () => {
   it("returns zeros for no records", () => {
     expect(totalCost([]).costUsd).toBe(0);
     expect(totalCost([]).inputTokens).toBe(0);
+  });
+});
+
+describe("billing", () => {
+  it("records billing when given, and reads it back", () => {
+    recordCost("p", "spec", true, usage({ costUsd: 1 }), env, "cli", "plan");
+    recordCost("p", "triage", true, usage({ costUsd: 0.5 }), env, "sdk", "api");
+    recordCost("p", "old", true, usage({ costUsd: 0.25 }), env);
+    const records = readCostRecords("p", env);
+    expect(records.map((r) => r.billing)).toEqual(["plan", "api", undefined]);
+    expect(spendByBilling(records)).toEqual({ api: 0.5, plan: 1, unknown: 0.25 });
   });
 });

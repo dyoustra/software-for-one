@@ -69,4 +69,20 @@ describe("budget", () => {
     fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "BUDGET.json"), "{ nope");
     expect(() => readBudget("p", env)).toThrow(/BUDGET\.json is not valid JSON/);
   });
+
+  it("counts plan usage by default, and only billed or unlabeled spend when billed-only", () => {
+    recordCost("p", "spec", true, usage, env, "cli", "plan");
+    recordCost("p", "triage", true, usage, env, "sdk", "api");
+    recordCost("p", "old", true, usage, env);
+
+    writeBudget("p", 100, env);
+    expect(budgetState("p", env)?.spent).toBe(12);
+
+    // Unlabeled records count: nobody knows they were free.
+    writeBudget("p", 100, env, true);
+    const billed = budgetState("p", env);
+    expect(billed?.spent).toBe(8);
+    expect(billed?.billedOnly).toBe(true);
+    expect(readBudget("p", env)).toBe(100);
+  });
 });
