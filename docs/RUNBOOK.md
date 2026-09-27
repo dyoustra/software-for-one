@@ -101,3 +101,68 @@ than "how many criteria are too many".
   2-criterion group may not justify a build invocation's fixed cost.
 - The rough estimate anchors on a single calibration point ($3–6) and will
   read precise while being weakly informative until more real runs accumulate.
+
+---
+
+# First end-to-end build: `shotname` (Phase 2, B11, 2026-09-26)
+
+**Outcome: all 11 slices passed, all 80 criteria met, 187 tests green. $99.79 total.**
+The built CLI runs, and its missing-key preflight refuses cleanly without touching
+files. Naming itself was not exercised (no API key in the build shell).
+
+## Cost by phase
+
+| Phase | Cost | Notes |
+|---|---|---|
+| research → clarify (Phase 1, incl. reruns) | $9.39 | |
+| plan | $1.13 | estimated the build at $17–$48 |
+| test-write | $11.73 | 77 turns, 32 min. Not in the estimate at all |
+| test-repair | $9.19 | ran blind (see below) |
+| build, 11 slices | $56.56 | incl. ~$34 lost to sfo defects |
+| review + deliver (twice) | $11.81 | first pass reported on a half-built project |
+
+**Per slice, once agents could run their toolchain: about $1.85 and 3 minutes**
+(S-05 to S-11, S-01's final attempt). Blind, the same slices ran $2.50–$6.30 and
+up to 34 minutes. A clean run with the fixes below would be roughly $22 for the
+build plus ~$7 for review and deliver, inside the plan's estimate. The estimate's
+real miss was test-write, which it did not cover.
+
+## Defects the run found, all fixed
+
+| Defect | Cost on this run | Fix |
+|---|---|---|
+| Stages ran with `acceptEdits` only: every `uv`, `pytest`, `ruff`, `mypy` denied | test-repair and S-01–S-03 built blind | `--allowedTools` per stage, derived from the recipe (`d209cfe`) |
+| Headless runs inherited the user's own allowlist (`python3`, `xargs`, `gh api`) | none observed | `--setting-sources project,local` (`d209cfe`) |
+| test-repair locked 4 lint/type errors into test files; no slice could pass lint | 1 slice attempt, run stopped | install/lint/typecheck checked before `lockTests` (`7614ee3`) |
+| Build prompt said the gate ignored tidiness; `ruff check` is in it | S-01 attempt 1 | prompt lists the exact gate commands (`7614ee3`) |
+| Retries got the same prompt as the failed attempt | every retry | retry sees the tail of the last verify log (`7614ee3`) |
+| `verify.ts` passed `tests/__pycache__/*.pyc` to pytest (exit 4) | 1 S-01 attempt | shared filtered walk (`137b8a3`) |
+| Root `conftest.py` outside the lock could alter collection | an agent wrote two | lock hashes every `conftest.py` (`145f6df`); caught S-04's on attempt 1 |
+| Estimate omitted test-write/test-repair and was checked after them | $11.73 unseen by the gate | estimate covers everything after plan, checked before test-write (`67a1fe7`) |
+| `advance` ignored projects Phase 1 marked `done` at clarify | project could not continue | `6a6e498` |
+| `sfo retry` left a delivered project `done` | `sfo run` would no-op | reopens the build (`1d4ba2e`) |
+
+## Tests that were wrong, adjudicated by hand
+
+Both recorded in the project's `DECISIONS.jsonl`.
+
+- **AC-009 peak memory.** Measured with `tracemalloc` from a 3.6 KB baseline. CPython
+  `pathlib` interns every path segment, triggered by the locked fixture itself, so
+  peak grew 530x regardless of the code. Real peak RSS: 27.7 MB at 500 files, 28.9 MB
+  at 50,000 (1.05x, limit 2x). Rewritten to measure RSS in subprocesses. This one test
+  failed S-01 twice and skipped 8 of 11 slices.
+- **Four lint/type errors** in test files (import order, a deliberate local-time call,
+  a `typer` vs `click` annotation). No assertion changed.
+
+## Open
+
+- **No way to contest a test.** Twice a build agent hit a defect in the locked suite.
+  With AC-009 it failed twice. With `monkeypatch.undo()` also reverting the fixture's
+  environment (S-04), it first wrote a `conftest.py` (blocked), then **changed
+  production code** to cache credentials per directory so the flawed test would pass.
+  Both needed an adjudicator; neither had one to ask.
+- **Slices run sequentially** though the plan has independent ones (five after S-05).
+- **The real-world seams never executed:** Vision OCR, the Anthropic and Ollama
+  transports, the Spotlight probe. `SUMMARY.md` leads with this.
+- `review` found real coverage gaps (e.g. `--resolution` never tied to the bytes sent).
+  Nothing acts on them.
