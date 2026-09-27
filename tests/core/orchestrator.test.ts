@@ -735,6 +735,19 @@ describe("what a build agent is told", () => {
     expect(prompt).not.toContain("previous attempt");
   });
 
+  it("lets a build slice run its toolchain, and research only the web and inspection", async () => {
+    // With edits only, every build agent on the first real project was denied
+    // uv, pytest, ruff and mypy, and wrote code it could never run.
+    const runner = pipelineRunner("cli-python");
+    await runPipeline(runner, { verify: PASSES });
+
+    const build = runner.calls.find((c) => stageOf(c) === "build-S-01");
+    const research = runner.calls.find((c) => stageOf(c) === "research");
+    expect(build?.allowedTools).toContain("Bash(uv *)");
+    expect(research?.allowedTools).toContain("WebSearch");
+    expect(research?.allowedTools).not.toContain("Bash(uv *)");
+  });
+
   it("shows a retry what the failed attempt's gate reported", async () => {
     // Without it a retry starts from the same prompt as the attempt that
     // failed, and can only find out what went wrong by failing again.

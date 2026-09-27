@@ -111,8 +111,18 @@ export class ClaudeCodeRunner implements Runner {
       "stream-json",
       // Not optional: the binary refuses stream-json under --print without it.
       "--verbose",
+      // User settings excluded: a stage runs unattended, and the user's own
+      // allowlist is written for sessions they watch. On the machine sfo was
+      // built on it allowed python3, xargs (which runs anything) and `gh api`
+      // (writes to GitHub as the user), and every stage inherited them. What a
+      // stage may run is decided by sfo, per stage, in --allowedTools.
+      "--setting-sources",
+      "project,local",
       "--permission-mode",
       "acceptEdits",
+      // Variadic, so it must be followed by another flag: placed last, it
+      // would swallow the prompt as one more tool name.
+      ...(input.allowedTools?.length ? ["--allowedTools", ...input.allowedTools] : []),
       "--model",
       input.model ?? DEFAULT_MODEL,
     ];

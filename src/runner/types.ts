@@ -3,6 +3,8 @@ export interface RunStageInput {
   prompt: string;
   logPath: string;
   model?: string;
+  /** `--allowedTools` patterns. Absent means edits only: every command is denied. */
+  allowedTools?: string[];
 }
 
 /** What one `claude -p` invocation cost, as reported by its own result event. */

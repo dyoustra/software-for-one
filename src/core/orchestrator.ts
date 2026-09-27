@@ -15,6 +15,7 @@ import { lockTests } from "./testlock.js";
 import { verifyRecipeFor } from "./archetype.js";
 import {
   runVerify,
+  agentToolsForStage,
   checkSuiteBeforeLock,
   detectArchetype,
   verifiabilityProblem,
@@ -610,6 +611,7 @@ async function runSlices(
           previousFailureFor(id, stageName, env),
         ),
         logPath: logPath(id, stageName, env),
+        allowedTools: agentToolsForStage(id, stageName, env),
       });
     } finally {
       stopHeartbeat();
@@ -734,6 +736,7 @@ export async function advance(
         workdir: projectDir(id, env),
         prompt: loadPrompt(upcoming),
         logPath: logPath(id, upcoming, env),
+        allowedTools: agentToolsForStage(id, upcoming, env),
       });
     } finally {
       stopHeartbeat();

@@ -5,6 +5,7 @@ import { readState, writeState } from "../core/state.js";
 import { budgetState, formatBudget } from "../core/budget.js";
 import { recordCost } from "../core/cost.js";
 import { commitStage } from "../core/repo.js";
+import { agentToolsForStage } from "../core/verify.js";
 import type { Runner } from "../runner/types.js";
 
 /**
@@ -48,6 +49,7 @@ export async function runSingleStage(
     workdir: projectDir(id, env),
     prompt: loadPrompt(stage),
     logPath: logPath(id, stage, env),
+    allowedTools: agentToolsForStage(id, stage, env),
   });
 
   // Re-runs are appended, not replaced — the bill counts every attempt.

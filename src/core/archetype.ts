@@ -93,3 +93,29 @@ const RECIPES: Record<ArchetypeName, VerifyStep[]> = {
 export function verifyRecipeFor(archetype: string): VerifyStep[] {
   return isArchetypeName(archetype) ? RECIPES[archetype] : [];
 }
+
+/** Inspection only: reading the tree, never changing anything outside an edit. */
+const READ_ONLY_COMMANDS = ["ls", "cat", "head", "tail", "grep", "find", "wc", "diff", "pwd"];
+
+/** Looking packages and docs up from the shell. Chosen by the user over toolchain-only. */
+const NETWORK_COMMANDS = ["curl"];
+
+/**
+ * `--allowedTools` for a stage. Headless `claude -p` has nobody to approve a
+ * command, and user settings are not loaded, so this list is the whole of what
+ * a stage may run beyond editing files in the project.
+ *
+ * Every stage may inspect the tree and use the web; research depends on the
+ * web tools. Stages that run code also get the archetype's toolchain, derived
+ * from the recipe so an agent can always run exactly what its gate will run.
+ * That adds no new trust: the gate already executes the agent's code. With
+ * edits only, every build agent on the first real project was denied uv,
+ * pytest, ruff and mypy, and wrote code it could not run.
+ */
+export function agentToolsFor(archetype: string, runsCode: boolean): string[] {
+  const toolchain = runsCode
+    ? [...new Set(verifyRecipeFor(archetype).map((step) => step.command))]
+    : [];
+  const commands = [...toolchain, ...READ_ONLY_COMMANDS, ...NETWORK_COMMANDS];
+  return [...commands.map((c) => `Bash(${c} *)`), "WebFetch", "WebSearch"];
+}

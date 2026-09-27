@@ -9,6 +9,7 @@ import {
   slicesWithoutTests,
   detectArchetype,
   verifiabilityProblem,
+  agentToolsForStage,
   TEST_DIR,
 } from "../../src/core/verify.js";
 import { ARCHETYPE_FILE } from "../../src/core/stack.js";
@@ -295,5 +296,35 @@ describe("sliceTestFiles ignores compiled files", () => {
     const slice: Slice = { id: "S-01", name: "E", criterionIds: ["AC-001"], prerequisites: [] };
 
     expect(sliceTestFiles("p", slice, env)).toEqual(["tests/test_s01_enumeration.py"]);
+  });
+});
+
+describe("agentToolsForStage", () => {
+  it("gives stages before any code exists the web and inspection, no toolchain", () => {
+    // User settings are not loaded, so research gets WebSearch only from here.
+    fs.writeFileSync(path.join(dir, "pyproject.toml"), '[project]\nname = "p"\n');
+    for (const stage of ["research", "spec", "clarify", "plan"]) {
+      const tools = agentToolsForStage("p", stage, env);
+      expect(tools).toContain("WebSearch");
+      expect(tools).toContain("Bash(grep *)");
+      expect(tools).not.toContain("Bash(uv *)");
+    }
+  });
+
+  it("gives code stages the gate's own toolchain, inspection and the network", () => {
+    fs.writeFileSync(path.join(dir, "pyproject.toml"), '[project]\nname = "p"\n');
+    for (const stage of ["test-write", "test-repair", "build-S-01", "review"]) {
+      const tools = agentToolsForStage("p", stage, env);
+      expect(tools).toContain("Bash(uv *)");
+      expect(tools).toContain("Bash(grep *)");
+      expect(tools).toContain("Bash(curl *)");
+      expect(tools).not.toContain("Bash(npm *)");
+    }
+  });
+
+  it("grants no toolchain when the archetype is unknown", () => {
+    const tools = agentToolsForStage("p", "build-S-01", env);
+    expect(tools.some((t) => t.startsWith("Bash(uv") || t.startsWith("Bash(npm"))).toBe(false);
+    expect(tools).toContain("Bash(ls *)");
   });
 });

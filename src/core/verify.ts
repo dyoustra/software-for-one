@@ -1,10 +1,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { verifyRecipeFor, type VerifyStep } from "./archetype.js";
+import { verifyRecipeFor, agentToolsFor, type VerifyStep } from "./archetype.js";
 import { readStack } from "./stack.js";
 import { verifyTestLock, readTestLock, walkTestTree } from "./testlock.js";
 import { projectDir, type Env } from "./paths.js";
+import { PIPELINE_STAGES } from "./stages.js";
 import type { Slice } from "./slices.js";
 
 /**
@@ -281,4 +282,28 @@ export function runVerify(id: string, archetype: string, slice: Slice, env?: Env
   }
 
   return runRecipe(projectDir(id, env), recipe, testPaths);
+}
+
+/** Stages from here on write or check code, and need to be able to run it. */
+const FIRST_CODE_STAGE = "test-write";
+
+/**
+ * `--allowedTools` for a stage. Stages before any code exists (research, spec,
+ * clarify, plan) get inspection and the web; from test-write on, the
+ * archetype's toolchain too. An archetype record that fails to validate gets
+ * no toolchain.
+ */
+export function agentToolsForStage(id: string, stage: string, env?: Env): string[] {
+  const order = PIPELINE_STAGES as readonly string[];
+  const base = stage.startsWith("build-") ? "build" : stage;
+  const runsCode = order.indexOf(base) >= order.indexOf(FIRST_CODE_STAGE);
+  let archetype = "unknown";
+  if (runsCode) {
+    try {
+      archetype = detectArchetype(id, env);
+    } catch {
+      // Recorded but unregistered: grant nothing the recipe would have implied.
+    }
+  }
+  return agentToolsFor(archetype, runsCode);
 }

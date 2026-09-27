@@ -25,6 +25,39 @@ describe("ClaudeCodeRunner", () => {
     expect(out).toContain("hello");
   });
 
+  it("passes allowed tools before another flag, so the prompt stays the prompt", async () => {
+    // --allowedTools is variadic. Placed just before the prompt, it would read
+    // the prompt as one more tool name and the agent would get no instructions.
+    const runner = new ClaudeCodeRunner({ bin: FAKE });
+    const log = path.join(dir, "out.log");
+    await runner.runStage({
+      workdir: dir,
+      prompt: "THE-PROMPT",
+      logPath: log,
+      allowedTools: ["Bash(uv *)", "WebFetch"],
+    });
+    const out = fs.readFileSync(log, "utf8");
+    const tools = out.indexOf("--allowedTools");
+    expect(tools).toBeGreaterThan(-1);
+    expect(out.indexOf("Bash(uv *)")).toBeGreaterThan(tools);
+    expect(out.indexOf("--model")).toBeGreaterThan(out.indexOf("WebFetch"));
+    expect(out.indexOf("THE-PROMPT")).toBeGreaterThan(out.indexOf("--model"));
+  });
+
+  it("loads project and local settings only, never the user's", async () => {
+    // The user's allowlist is written for sessions they watch; a stage runs
+    // unattended and must not inherit it.
+    const log = path.join(dir, "out.log");
+    await new ClaudeCodeRunner({ bin: FAKE }).runStage({ workdir: dir, prompt: "x", logPath: log });
+    expect(fs.readFileSync(log, "utf8")).toContain("--setting-sources project,local");
+  });
+
+  it("passes no --allowedTools when none are given", async () => {
+    const log = path.join(dir, "out.log");
+    await new ClaudeCodeRunner({ bin: FAKE }).runStage({ workdir: dir, prompt: "x", logPath: log });
+    expect(fs.readFileSync(log, "utf8")).not.toContain("--allowedTools");
+  });
+
   it("passes --verbose, which the binary requires alongside stream-json", async () => {
     const runner = new ClaudeCodeRunner({ bin: FAKE });
     const log = path.join(dir, "out.log");
