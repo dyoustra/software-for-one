@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { commitStage, buildCommitMessage } from "../../src/core/repo.js";
+import { readDecisions } from "../../src/core/decisions.js";
 
 let env: Record<string, string>;
 
@@ -217,5 +218,48 @@ describe("stage logs stay ignored", () => {
     commitStage("p", "spec", env, () => {});
 
     expect(fs.readFileSync(path.join(dir, ".gitignore"), "utf8")).toBe(original);
+  });
+});
+
+describe("the commit guard", () => {
+  const committed = (dir: string): string[] =>
+    execFileSync("git", ["ls-files"], { cwd: dir, encoding: "utf8" }).split("\n").filter(Boolean);
+
+  it("leaves secrets and oversized files out, ignores them, and commits the rest", () => {
+    const dir = makeProject("p");
+    fs.writeFileSync(path.join(dir, "app.py"), "x = 1\n");
+    fs.writeFileSync(path.join(dir, ".env"), "TOKEN=abc\n");
+    fs.writeFileSync(path.join(dir, ".env.example"), "TOKEN=\n");
+    fs.writeFileSync(path.join(dir, "config.py"), `KEY = "sk-ant-api03-${"a".repeat(80)}"\n`);
+    fs.writeFileSync(path.join(dir, "model.bin"), Buffer.alloc(6 * 1024 * 1024));
+    const logs: string[] = [];
+    commitStage("p", "build-S-01", env, (m) => logs.push(m));
+
+    const files = committed(dir);
+    expect(files).toEqual(expect.arrayContaining(["app.py", ".env.example", ".gitignore"]));
+    expect(files).not.toEqual(expect.arrayContaining([".env"]));
+    expect(files).not.toContain("config.py");
+    expect(files).not.toContain("model.bin");
+    expect(fs.readFileSync(path.join(dir, ".gitignore"), "utf8")).toMatch(/\/\.env\n[\s\S]*\/config\.py[\s\S]*\/model\.bin/);
+    expect(logs.join("\n")).toMatch(/left config.py out of the build-S-01 commit — it contains what looks like an Anthropic API key/);
+    // Still on disk: the guard keeps things out of history, not out of the project.
+    expect(fs.existsSync(path.join(dir, ".env"))).toBe(true);
+  });
+
+  it("does not mistake a test fixture's short dummy key for a real one", () => {
+    const dir = makeProject("p");
+    fs.mkdirSync(path.join(dir, "tests"));
+    fs.writeFileSync(path.join(dir, "tests", "conftest.py"), 'KEY = "sk-ant-test-key"\n');
+    commitStage("p", "test-write", env, () => {});
+    expect(committed(dir)).toContain("tests/conftest.py");
+  });
+
+  it("only unstages a pipeline record, never ignores it, and records the decision", () => {
+    const dir = makeProject("p");
+    fs.writeFileSync(path.join(dir, ".sfo", "NOTES.md"), `pasted: ghp_${"b".repeat(36)}\n`);
+    commitStage("p", "spec", env, () => {});
+    expect(committed(dir)).not.toContain(".sfo/NOTES.md");
+    expect(fs.readFileSync(path.join(dir, ".gitignore"), "utf8")).not.toContain("NOTES.md");
+    expect(readDecisions("p", env).some((d) => d.id.startsWith("D-withheld-spec-"))).toBe(true);
   });
 });

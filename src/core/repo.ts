@@ -2,6 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { projectDir, type Env } from "./paths.js";
+import { withheldFrom, type Withheld } from "./commitGuard.js";
+import { appendDecision } from "./decisions.js";
 
 /** Files named in a commit subject before it stops being readable. */
 const MAX_NAMED_FILES = 5;
@@ -86,6 +88,52 @@ function ensureLogsIgnored(cwd: string, log: (message: string) => void): void {
   }
 }
 
+/**
+ * Takes suspicious files out of the commit and keeps them out of every later
+ * one. Files under `.sfo/` are only unstaged: ignoring one would drop the
+ * pipeline's own record from history for good, so it is left for a person.
+ */
+function withhold(
+  id: string,
+  cwd: string,
+  stage: string,
+  withheld: Withheld[],
+  env: Env | undefined,
+  log: (message: string) => void,
+): void {
+  execFileSync("git", ["rm", "--cached", "-q", "--", ...withheld.map((w) => w.path)], { cwd, stdio: "pipe" });
+  const ignorable = withheld.filter((w) => !w.path.startsWith(".sfo/"));
+  if (ignorable.length > 0) {
+    const file = path.join(cwd, ".gitignore");
+    const body = fs.existsSync(file) ? fs.readFileSync(file, "utf8") : "";
+    const lines = ignorable.map((w) => `/${w.path}`).filter((l) => !body.split("\n").includes(l));
+    if (lines.length > 0) {
+      const sep = body === "" || body.endsWith("\n") ? "" : "\n";
+      fs.writeFileSync(file, `${body}${sep}# withheld by sfo's commit guard\n${lines.join("\n")}\n`);
+      execFileSync("git", ["add", "--", ".gitignore"], { cwd, stdio: "pipe" });
+    }
+  }
+  for (const w of withheld) log(`sfo: left ${w.path} out of the ${stage} commit — it ${w.why}`);
+  try {
+    appendDecision(
+      id,
+      {
+        id: `D-withheld-${stage}-${Date.now()}`,
+        decision: `What to do with ${withheld.map((w) => w.path).join(", ")} staged by ${stage}`,
+        chose: "leave it out of history, and ignore it from now on (files under .sfo/ are only left out)",
+        considered: "commit it; fail the stage",
+        why: withheld.map((w) => `${w.path} ${w.why}`).join("; "),
+        decided_by: "agent",
+        blast_radius: "external",
+        at: new Date().toISOString(),
+      },
+      env,
+    );
+  } catch {
+    // The warning above is the part that must happen.
+  }
+}
+
 export function commitStage(
   id: string,
   stage: string,
@@ -112,14 +160,18 @@ export function commitStage(
 
     execFileSync("git", ["add", "-A"], { cwd, stdio: "pipe" });
 
-    const staged = execFileSync("git", ["diff", "--cached", "--name-only"], {
-      cwd,
-      encoding: "utf8",
-      stdio: "pipe",
-    })
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean);
+    const listStaged = (): string[] =>
+      execFileSync("git", ["diff", "--cached", "--name-only"], { cwd, encoding: "utf8", stdio: "pipe" })
+        .split("\n")
+        .map((line) => line.trim())
+        .filter(Boolean);
+
+    // `-A` is unavoidable here — an agent's output cannot be listed ahead of
+    // time — so what it staged is checked instead.
+    const withheld = withheldFrom(cwd, listStaged());
+    if (withheld.length > 0) withhold(id, cwd, stage, withheld, env, log);
+
+    const staged = listStaged();
 
     // A stage that changed nothing must not leave an empty commit behind —
     // that is noise in exactly the history someone is trying to read.
