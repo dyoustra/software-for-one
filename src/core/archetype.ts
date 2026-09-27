@@ -47,6 +47,12 @@ export function gitignoreFor(archetype: string): string {
   return `${[header, ...COMMON, ...specific].join("\n")}\n`;
 }
 
+/**
+ * Tests that make real calls. Locked with the suite, never run by the slice
+ * gate: a slice must not be graded on a network, a key, or a bill.
+ */
+export const SMOKE_DIR = "tests/smoke";
+
 export interface VerifyStep {
   name: string;
   command: string;
@@ -74,15 +80,28 @@ const RECIPES: Record<ArchetypeName, VerifyStep[]> = {
     { name: "install", command: "uv", args: ["sync"], scopeable: false },
     { name: "lint", command: "uv", args: ["run", "ruff", "check", "."], scopeable: false },
     { name: "typecheck", command: "uv", args: ["run", "mypy", "--strict", "."], scopeable: false },
-    { name: "test", command: "uv", args: ["run", "pytest", "-q"], scopeable: true },
+    { name: "test", command: "uv", args: ["run", "pytest", "-q", `--ignore=${SMOKE_DIR}`], scopeable: true },
   ],
   "cli-node": [
     { name: "install", command: "npm", args: ["ci"], scopeable: false },
     { name: "lint", command: "npm", args: ["run", "lint"], scopeable: false },
     { name: "typecheck", command: "npm", args: ["run", "typecheck"], scopeable: false },
-    { name: "test", command: "npx", args: ["vitest", "run"], scopeable: true },
+    { name: "test", command: "npx", args: ["vitest", "run", "--exclude", `${SMOKE_DIR}/**`], scopeable: true },
   ],
 };
+
+/**
+ * One smoke file, run on its own so a raised exception can be pinned to the
+ * seam it came from rather than failing every seam in the run.
+ */
+const SMOKE_RUNNERS: Record<ArchetypeName, (file: string) => { command: string; args: string[] }> = {
+  "cli-python": (file) => ({ command: "uv", args: ["run", "pytest", "-q", file] }),
+  "cli-node": (file) => ({ command: "npx", args: ["vitest", "run", file] }),
+};
+
+export function smokeRunnerFor(archetype: string, file: string): { command: string; args: string[] } | null {
+  return isArchetypeName(archetype) ? SMOKE_RUNNERS[archetype](file) : null;
+}
 
 /**
  * An unknown archetype gets NO recipe, deliberately — the opposite of the

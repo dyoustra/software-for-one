@@ -73,3 +73,22 @@ describe("recipe gates correctness, not style", () => {
     expect(install?.args).not.toContain("--frozen");
   });
 });
+
+describe("smoke tests and the gate", () => {
+  it("never lets a slice gate collect tests/smoke", async () => {
+    const { verifyRecipeFor, SMOKE_DIR } = await import("../../src/core/archetype.js");
+    const python = verifyRecipeFor("cli-python").find((s) => s.name === "test");
+    const node = verifyRecipeFor("cli-node").find((s) => s.name === "test");
+    expect(python?.args).toContain(`--ignore=${SMOKE_DIR}`);
+    expect(node?.args.join(" ")).toContain(`--exclude ${SMOKE_DIR}/**`);
+  });
+
+  it("runs one smoke file on its own, and nothing for an unknown archetype", async () => {
+    const { smokeRunnerFor } = await import("../../src/core/archetype.js");
+    expect(smokeRunnerFor("cli-python", "tests/smoke/test_smoke_x.py")).toEqual({
+      command: "uv",
+      args: ["run", "pytest", "-q", "tests/smoke/test_smoke_x.py"],
+    });
+    expect(smokeRunnerFor("cli-rust", "f")).toBeNull();
+  });
+});

@@ -731,7 +731,7 @@ describe("what a build agent is told", () => {
     const [prompt] = promptsFor(runner, "S-01");
     expect(prompt).toContain("uv run ruff check .");
     expect(prompt).toContain("uv run mypy --strict .");
-    expect(prompt).toContain("uv run pytest -q tests/test_s01.py");
+    expect(prompt).toContain("uv run pytest -q --ignore=tests/smoke tests/test_s01.py");
     expect(prompt).not.toContain("previous attempt");
   });
 
