@@ -2,6 +2,9 @@ import { readState, writeState } from "../core/state.js";
 import { readSlices, skippedBy } from "../core/slices.js";
 import type { Env } from "../core/paths.js";
 
+/** Stages that report on the build. A retry reopens the build, so they rerun. */
+const PAST_BUILD = new Set(["review", "deliver"]);
+
 /**
  * Clears a slice's failure so the build loop attempts it again.
  *
@@ -35,9 +38,14 @@ export function retrySlices(id: string, sliceId?: string, env?: Env): string {
       ...state,
       slicesFailed,
       sliceAttempts,
+      // A project that already delivered is past `build`, and `done` at the
+      // last stage makes `advance` return without running anything. The build
+      // is reopened, and review and deliver run again on the new result
+      // rather than leaving a summary that describes the failure.
+      currentStage: PAST_BUILD.has(state.currentStage) ? "build" : state.currentStage,
       // A project that gave up is runnable again; without this `sfo run`
       // refuses and points back here, which is a loop with no exit.
-      status: state.status === "failed" ? "awaiting_human" : state.status,
+      status: state.status === "failed" || state.status === "done" ? "awaiting_human" : state.status,
       pid: null,
       updatedAt: new Date().toISOString(),
     },

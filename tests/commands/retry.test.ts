@@ -15,14 +15,21 @@ const SLICES: Slice[] = [
   { id: "S-03", name: "Reporting", criterionIds: ["AC-003"], prerequisites: [] },
 ];
 
-function seed(slicesFailed: string[], sliceAttempts: Record<string, number>) {
+function seed(
+  slicesFailed: string[],
+  sliceAttempts: Record<string, number>,
+  where: { currentStage: string; status: "failed" | "done" } = {
+    currentStage: "build",
+    status: "failed",
+  },
+) {
   fs.mkdirSync(path.join(env.SFO_HOME, "p", ".sfo"), { recursive: true });
   writeState(
     {
       id: "p",
       title: "T",
-      currentStage: "build",
-      status: "failed",
+      currentStage: where.currentStage,
+      status: where.status,
       attempts: { build: 1 },
       sliceAttempts,
       slicesPassed: [],
@@ -71,6 +78,18 @@ describe("retrySlices", () => {
     retrySlices("p", undefined, env);
 
     expect(readState("p", env).status).toBe("awaiting_human");
+  });
+
+  it("reopens the build of a project that already delivered", () => {
+    // A build with a failed slice still runs review and deliver and ends done.
+    // Left at deliver/done, `sfo run` would do nothing after the retry.
+    seed(["S-01"], { "S-01": 2 }, { currentStage: "deliver", status: "done" });
+
+    retrySlices("p", undefined, env);
+
+    const s = readState("p", env);
+    expect(s.currentStage).toBe("build");
+    expect(s.status).toBe("awaiting_human");
   });
 
   it("names the dependents that come back into play", () => {
