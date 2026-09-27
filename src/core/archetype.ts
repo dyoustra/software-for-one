@@ -50,8 +50,13 @@ export function gitignoreFor(archetype: string): string {
 /**
  * Tests that make real calls. Locked with the suite, never run by the slice
  * gate: a slice must not be graded on a network, a key, or a bill.
+ *
+ * Beside the test tree rather than inside it. The unit suite's fixtures exist
+ * to fake exactly what a smoke test needs real: on the first project an
+ * autouse fixture in tests/conftest.py set the API key to a dummy for every
+ * test under tests/, and the first real smoke run was refused with a 401.
  */
-export const SMOKE_DIR = "tests/smoke";
+export const SMOKE_DIR = "smoke";
 
 export interface VerifyStep {
   name: string;
@@ -95,7 +100,9 @@ const RECIPES: Record<ArchetypeName, VerifyStep[]> = {
  * seam it came from rather than failing every seam in the run.
  */
 const SMOKE_RUNNERS: Record<ArchetypeName, (file: string) => { command: string; args: string[] }> = {
-  "cli-python": (file) => ({ command: "uv", args: ["run", "pytest", "-q", file] }),
+  // --noconftest: outside tests/ no suite conftest applies, but one at the
+  // project root would, and it could stub the very thing being checked.
+  "cli-python": (file) => ({ command: "uv", args: ["run", "pytest", "-q", "--noconftest", file] }),
   "cli-node": (file) => ({ command: "npx", args: ["vitest", "run", file] }),
 };
 

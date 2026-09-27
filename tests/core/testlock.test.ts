@@ -126,3 +126,18 @@ describe("collection hooks outside the test tree", () => {
     expect(() => lockTests("p", "tests", env)).toThrow(/nothing to lock/);
   });
 });
+
+describe("the smoke tests beside the test tree", () => {
+  it("are locked, so an edit to one fails the gate like any other test", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "sfo-lock-smoke-"));
+    const e = { SFO_HOME: home };
+    const dir = path.join(home, "p");
+    fs.mkdirSync(path.join(dir, "tests"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "smoke"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "tests", "test_a.py"), "a\n");
+    fs.writeFileSync(path.join(dir, "smoke", "test_smoke_x.py"), "x\n");
+    lockTests("p", "tests", e);
+    fs.writeFileSync(path.join(dir, "smoke", "test_smoke_x.py"), "y\n");
+    expect(verifyTestLock("p", "tests", e)).toEqual(["smoke/test_smoke_x.py"]);
+  });
+});

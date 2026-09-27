@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { artifactPath, projectDir, sfoDir, type Env } from "./paths.js";
+import { SMOKE_DIR } from "./archetype.js";
 
 export const TEST_LOCK_FILE = "TESTS.lock.json";
 export type TestLock = Record<string, string>;
@@ -59,7 +60,7 @@ function collectionHooks(dir: string, testDir: string, base = ""): string[] {
   for (const entry of fs.readdirSync(path.join(dir, base), { withFileTypes: true })) {
     const rel = base ? `${base}/${entry.name}` : entry.name;
     if (entry.isDirectory()) {
-      if (rel === testDir || entry.name === ".git" || entry.name === ".sfo") continue;
+      if (rel === testDir || rel === SMOKE_DIR || entry.name === ".git" || entry.name === ".sfo") continue;
       if (IGNORED_DIRS.has(entry.name)) continue;
       out.push(...collectionHooks(dir, testDir, rel));
     } else if (entry.name === "conftest.py") {
@@ -69,11 +70,18 @@ function collectionHooks(dir: string, testDir: string, base = ""): string[] {
   return out;
 }
 
+/**
+ * The smoke tests live beside the test tree, not in it, and are as much a
+ * contract: a build agent that could edit them could decide what "works for
+ * real" means.
+ */
 function hashTree(dir: string, testDir: string): TestLock {
-  const root = path.join(dir, testDir);
   const lock: TestLock = {};
-  for (const rel of walkTestTree(root)) {
-    lock[`${testDir}/${rel}`] = sha256(path.join(root, rel));
+  for (const tree of [testDir, SMOKE_DIR]) {
+    const root = path.join(dir, tree);
+    for (const rel of walkTestTree(root)) {
+      lock[`${tree}/${rel}`] = sha256(path.join(root, rel));
+    }
   }
   for (const rel of collectionHooks(dir, testDir)) {
     lock[rel] = sha256(path.join(dir, rel));

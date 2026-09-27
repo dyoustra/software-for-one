@@ -51,9 +51,10 @@ function git(...args: string[]): void {
 }
 
 /** A built project: slices passed, smoke files for the given seams, locked and committed. */
-function project(services: Service[], files: string[] = services.map((s) => `tests/smoke/test_smoke_${s.id.replace(/-/g, "_")}.py`)): void {
+function project(services: Service[], files: string[] = services.map((s) => `smoke/test_smoke_${s.id.replace(/-/g, "_")}.py`)): void {
   fs.mkdirSync(path.join(dir, ".sfo"), { recursive: true });
-  fs.mkdirSync(path.join(dir, "tests", "smoke"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "smoke"), { recursive: true });
+  fs.mkdirSync(path.join(dir, "tests"), { recursive: true });
   fs.writeFileSync(path.join(dir, "tests", "test_s01.py"), "def test_s01(): pass\n");
   for (const f of files) fs.writeFileSync(path.join(dir, f), "def test_it(): pass\n");
   fs.writeFileSync(path.join(dir, ".sfo", "SERVICES.jsonl"), services.map((s) => JSON.stringify(s)).join("\n") + "\n");
@@ -147,13 +148,13 @@ const ok = (level = "completed", costUsd?: number) => () => ({
 
 describe("planSmoke", () => {
   const exists = () => {
-    fs.mkdirSync(path.join(dir, "tests", "smoke"), { recursive: true });
+    fs.mkdirSync(path.join(dir, "smoke"), { recursive: true });
   };
 
   it("never runs an irreversible seam without a test mode", () => {
     exists();
     const send = seam({ id: "send-email", effect: "irreversible", credential: null });
-    fs.writeFileSync(path.join(dir, "tests/smoke/test_smoke_send_email.py"), "");
+    fs.writeFileSync(path.join(dir, "smoke/test_smoke_send_email.py"), "");
     const plan = planSmoke([send], "cli-python", dir, 2, () => ({ ok: true, env: {} }));
     expect(plan.run).toEqual([]);
     expect(plan.skipped[0].detail).toMatch(/irreversible, and the service has no test mode/);
@@ -167,7 +168,7 @@ describe("planSmoke", () => {
     const a = seam({ id: "a", smoke: { checks: ["c"], maxCostUsd: 1.5, async: false } });
     const b = seam({ id: "b", smoke: { checks: ["c"], maxCostUsd: 1, async: false } });
     const c = seam({ id: "c", smoke: { checks: ["c"], maxCostUsd: 0.5, async: false } });
-    for (const s of ["a", "b", "c"]) fs.writeFileSync(path.join(dir, `tests/smoke/test_smoke_${s}.py`), "");
+    for (const s of ["a", "b", "c"]) fs.writeFileSync(path.join(dir, `smoke/test_smoke_${s}.py`), "");
     const plan = planSmoke([a, b, c], "cli-python", dir, 2, () => ({ ok: true, env: {} }));
     expect(plan.run.map((r) => r.service.id)).toEqual(["a", "c"]);
     expect(plan.skipped).toMatchObject([{ seam: "b", detail: expect.stringMatching(/over the \$2.00 smoke cap/) }]);
@@ -258,7 +259,7 @@ describe("runSmoke", () => {
 
   it("refuses a smoke suite that changed after the lock", async () => {
     project([seam()]);
-    fs.writeFileSync(path.join(dir, "tests/smoke/test_smoke_anthropic_batch.py"), "def test_it(): assert True\n");
+    fs.writeFileSync(path.join(dir, "smoke/test_smoke_anthropic_batch.py"), "def test_it(): assert True\n");
     const out = await runSmoke(context(new RepairRunner(), seams({ "anthropic-batch": ok() })));
     expect(out).toMatchObject({ outcome: "failed", reason: expect.stringMatching(/changed since it was locked/) });
   });
@@ -339,7 +340,7 @@ describe("runSmoke", () => {
           JSON.stringify({
             sliceId: "SMOKE",
             criterionId: "AC-001",
-            testFile: "tests/smoke/test_smoke_anthropic_batch.py",
+            testFile: "smoke/test_smoke_anthropic_batch.py",
             testName: "test_it",
             claim: "unsatisfiable",
             why: "the fixture is empty",
@@ -372,7 +373,7 @@ describe("a repair that contests every time", () => {
           JSON.stringify({
             sliceId: "SMOKE",
             criterionId: "AC-001",
-            testFile: "tests/smoke/test_smoke_anthropic_batch.py",
+            testFile: "smoke/test_smoke_anthropic_batch.py",
             testName: "test_it",
             claim: "unsatisfiable",
             why: "again",

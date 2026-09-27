@@ -54,18 +54,22 @@ would have caught a 128-character id sent where 64 is the limit. A constraint a
 fake genuinely cannot enforce (a rate limit) gets a comment beside the fake
 saying so.
 
-**Smoke tests: one file per seam, under `tests/smoke/`.** These run later,
-against the real service or platform API, and the slice gate never runs them.
+**Smoke tests: one file per seam, under `smoke/` at the project root** —
+beside `tests/`, not inside it. These run later, against the real service or
+platform API, and the slice gate never runs them. They live outside `tests/`
+because the suite's own fixtures exist to fake exactly what a smoke test needs
+real: a suite-wide fixture that sets a dummy API key would replace the real one.
+For `cli-python` they also run with `--noconftest`, so they must not rely on
+any `conftest.py`; put shared helpers in an ordinary module under `smoke/`.
 
 - Name each file for its seam id, dashes as underscores:
-  `tests/smoke/test_smoke_anthropic_batch.py`, or
-  `tests/smoke/smoke_anthropic_batch.test.ts` for `cli-node`. A seam with no
-  file is reported as never checked.
+  `smoke/test_smoke_anthropic_batch.py`, or `smoke/smoke_anthropic_batch.test.ts`
+  for `cli-node`. A seam with no file is reported as never checked.
 - Each file performs that seam's `smoke.checks` through **production wiring**
   — the real client, not a fake — using the same interface the rest of your
   suite imports.
 - **Synthetic inputs only.** Build small, realistic fixtures under
-  `tests/smoke/fixtures/` (render a PNG with known text for an OCR check) and
+  `smoke/fixtures/` (render a PNG with known text for an OCR check) and
   copy them into a temporary directory before use. Never read the person's
   files.
 - The credential arrives in the environment variable `credential.name` names.
@@ -93,5 +97,5 @@ that *errors* — an import that cannot resolve a module you never create, a
 reference to a symbol nothing defines, a syntax error. Write tests that fail
 cleanly against a skeleton.
 
-Write only files under the test tree. Do not create source modules, do not write
+Write only files under the test tree and `smoke/`. Do not create source modules, do not write
 a skeleton, do not modify anything under `.sfo/`.

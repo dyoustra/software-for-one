@@ -76,7 +76,7 @@ describe("CREDENTIALS.json", () => {
 
 describe("smokeTestFile", () => {
   it("names one file per seam, in the archetype's convention", () => {
-    expect(smokeTestFile(BATCH, "cli-python")).toBe("tests/smoke/test_smoke_anthropic_batch.py");
-    expect(smokeTestFile(BATCH, "cli-node")).toBe("tests/smoke/smoke_anthropic_batch.test.ts");
+    expect(smokeTestFile(BATCH, "cli-python")).toBe("smoke/test_smoke_anthropic_batch.py");
+    expect(smokeTestFile(BATCH, "cli-node")).toBe("smoke/smoke_anthropic_batch.test.ts");
   });
 });

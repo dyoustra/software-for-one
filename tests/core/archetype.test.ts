@@ -75,7 +75,7 @@ describe("recipe gates correctness, not style", () => {
 });
 
 describe("smoke tests and the gate", () => {
-  it("never lets a slice gate collect tests/smoke", async () => {
+  it("never lets a slice gate collect the smoke tests", async () => {
     const { verifyRecipeFor, SMOKE_DIR } = await import("../../src/core/archetype.js");
     const python = verifyRecipeFor("cli-python").find((s) => s.name === "test");
     const node = verifyRecipeFor("cli-node").find((s) => s.name === "test");
@@ -85,9 +85,9 @@ describe("smoke tests and the gate", () => {
 
   it("runs one smoke file on its own, and nothing for an unknown archetype", async () => {
     const { smokeRunnerFor } = await import("../../src/core/archetype.js");
-    expect(smokeRunnerFor("cli-python", "tests/smoke/test_smoke_x.py")).toEqual({
+    expect(smokeRunnerFor("cli-python", "smoke/test_smoke_x.py")).toEqual({
       command: "uv",
-      args: ["run", "pytest", "-q", "tests/smoke/test_smoke_x.py"],
+      args: ["run", "pytest", "-q", "--noconftest", "smoke/test_smoke_x.py"],
     });
     expect(smokeRunnerFor("cli-rust", "f")).toBeNull();
   });

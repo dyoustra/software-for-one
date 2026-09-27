@@ -3,6 +3,7 @@ import { z } from "zod";
 import { artifactPath, sfoDir, type Env } from "./paths.js";
 import { readRecords } from "./jsonl.js";
 import { KeyRefSchema, ModelMethodSchema } from "./access.js";
+import { SMOKE_DIR } from "./archetype.js";
 
 export const SERVICES_FILE = "SERVICES.jsonl";
 export const CREDENTIALS_FILE = "CREDENTIALS.json";
@@ -85,5 +86,5 @@ export function writeCredentials(id: string, credentials: Credentials, env?: Env
 /** The smoke test file for a seam: one file per seam, named for its id. */
 export function smokeTestFile(service: Service, archetype: string): string {
   const stem = service.id.replace(/-/g, "_");
-  return archetype === "cli-node" ? `tests/smoke/smoke_${stem}.test.ts` : `tests/smoke/test_smoke_${stem}.py`;
+  return archetype === "cli-node" ? `${SMOKE_DIR}/smoke_${stem}.test.ts` : `${SMOKE_DIR}/test_smoke_${stem}.py`;
 }

@@ -1,6 +1,6 @@
 # Real Seams — Spec
 
-**Status:** Design approved, pre-implementation
+**Status:** Implemented, 2026-09-27. See §10 for where it differs from the design
 **Date:** 2026-09-27
 **Depends on:** `MODEL_ACCESS_SPEC.md` (credentials), `CONTEST_SPEC.md` (contesting a wrong smoke test)
 **Precedes:** `PARALLEL_SLICES_SPEC.md`
@@ -246,3 +246,32 @@ is reported, not hidden.
   attempts, and continues to review either way.
 - A smoke contest uses the id `SMOKE` and follows the contest rules.
 - Cost records for stage `smoke` carry `billing: "api"`.
+
+## 10. As built
+
+- **Smoke tests live in `smoke/` at the project root, not `tests/smoke/`.**
+  The first real smoke run against shotname was refused with a 401: an
+  autouse fixture in `tests/conftest.py` set `ANTHROPIC_API_KEY` to a dummy
+  for every test under `tests/`, smoke tests included. The unit suite's
+  fixtures exist to fake exactly what a smoke test needs to be real, so smoke
+  tests sit beside the suite. For `cli-python` they also run with
+  `--noconftest`. `smoke/` is hash-locked with `tests/`, and the slice gate
+  skips it (`--ignore=smoke` / `--exclude 'smoke/**'`).
+- **One process per seam.** Each seam's file runs on its own, so an exception
+  can be pinned to the seam that raised it, and each process gets only its
+  own seam's credential. sfo's own `ANTHROPIC_API_KEY`/`AUTH_TOKEN` are
+  removed first.
+- **The cap is per seam** (`smoke.maxCostUsd`), not per check. It's stored in
+  `BUDGET.json` next to the ceiling, and each survives changes to the other.
+- **A seam's result is its highest attempt**, not its last line per check. A
+  test that crashes reports under the placeholder check `(smoke test)`, and
+  keying by check would let that failure outlive the fix.
+- **The repair gate is every *passed* slice's tests together.** The unscoped
+  suite would also run the tests of slices that failed the build.
+- **A criterion contested during smoke is recorded and reported, not
+  parked.** Only the slice loop resumes a criterion park.
+- **Verified live against shotname** on 2026-09-27. With the original
+  128-character hash, smoke failed with the exact 400 the user hit. With the
+  fix, it passed end to end (accepted, then completed, results parsed) in
+  about 2 minutes.
+

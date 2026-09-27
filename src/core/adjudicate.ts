@@ -17,6 +17,7 @@ import {
   type ContestRecord,
   type Ruling,
 } from "./contest.js";
+import { SMOKE_DIR } from "./archetype.js";
 import { loadPrompt } from "../stages/prompts.js";
 import { projectDir, logPath, type Env } from "./paths.js";
 import type { Slice } from "./slices.js";
@@ -41,7 +42,7 @@ export type AdjudicationOutcome =
 
 /** The files the test lock covers are the only ones the adjudicator may touch. */
 export function isTestPath(p: string): boolean {
-  return p.startsWith(`${TEST_DIR}/`) || path.basename(p) === "conftest.py";
+  return p.startsWith(`${TEST_DIR}/`) || p.startsWith(`${SMOKE_DIR}/`) || path.basename(p) === "conftest.py";
 }
 
 /**

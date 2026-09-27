@@ -731,7 +731,7 @@ describe("what a build agent is told", () => {
     const [prompt] = promptsFor(runner, "S-01");
     expect(prompt).toContain("uv run ruff check .");
     expect(prompt).toContain("uv run mypy --strict .");
-    expect(prompt).toContain("uv run pytest -q --ignore=tests/smoke tests/test_s01.py");
+    expect(prompt).toContain("uv run pytest -q --ignore=smoke tests/test_s01.py");
     expect(prompt).not.toContain("previous attempt");
   });
 
@@ -1569,8 +1569,8 @@ describe("the smoke stage in the pipeline", () => {
         fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "SERVICES.jsonl"), `${JSON.stringify(OCR_SEAM)}\n`);
       }
       if (stage === "test-write") {
-        fs.mkdirSync(path.join(env.SFO_HOME, "p", "tests", "smoke"), { recursive: true });
-        fs.writeFileSync(path.join(env.SFO_HOME, "p", "tests", "smoke", "test_smoke_vision_ocr.py"), "def test_ocr(): pass\n");
+        fs.mkdirSync(path.join(env.SFO_HOME, "p", "smoke"), { recursive: true });
+        fs.writeFileSync(path.join(env.SFO_HOME, "p", "smoke", "test_smoke_vision_ocr.py"), "def test_ocr(): pass\n");
       }
     });
     const ran: string[] = [];
@@ -1589,7 +1589,7 @@ describe("the smoke stage in the pipeline", () => {
     fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.json"), '{"answers":[]}');
     await advance("p", runner, env, { verify: PASSES, smoke });
 
-    expect(ran).toEqual(["tests/smoke/test_smoke_vision_ocr.py"]);
+    expect(ran).toEqual(["smoke/test_smoke_vision_ocr.py"]);
     const { readSmokeRecords } = await import("../../src/core/smoke.js");
     expect(readSmokeRecords("p", env).map((r) => r.level)).toEqual(["completed"]);
     const stages = runner.calls.map(stageOf);
