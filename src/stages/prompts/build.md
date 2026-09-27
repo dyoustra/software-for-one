@@ -23,6 +23,12 @@ type checker as well as the tests, so code that passes its tests can still be
 rejected — run the linter's fixer and the formatter, then check again. Nothing
 downstream will fix it for you.
 
+The gate's last step scans the lines you added outside the test tree for
+`TODO`, `FIXME`, "not implemented" (including `NotImplementedError`), and
+"lorem ipsum", and fails on any of them. A stub that passes its tests is
+exactly what that step exists to catch. The skeleton's existing stubs for
+other slices are not yours and are not scanned — leave them as they are.
+
 When you make a choice the spec did not settle, append it to
 `.sfo/DECISIONS.jsonl` with `"decided_by":"agent"` and an honest
 `blast_radius`. `local` means one slice would be rebuilt; `structural` means

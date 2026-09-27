@@ -4,6 +4,7 @@ import { spawnSync } from "node:child_process";
 import { verifyRecipeFor, agentToolsFor, type VerifyStep } from "./archetype.js";
 import { readStack } from "./stack.js";
 import { verifyTestLock, readTestLock, walkTestTree } from "./testlock.js";
+import { scanAddedLines, formatHits } from "./gaming.js";
 import { projectDir, type Env } from "./paths.js";
 import { PIPELINE_STAGES } from "./stages.js";
 import type { Slice } from "./slices.js";
@@ -281,7 +282,23 @@ export function runVerify(id: string, archetype: string, slice: Slice, env?: Env
     };
   }
 
-  return runRecipe(projectDir(id, env), recipe, testPaths);
+  return withGamingScan(projectDir(id, env), runRecipe(projectDir(id, env), recipe, testPaths));
+}
+
+/**
+ * The last step of a passing gate: tests can pass over a stub, so passing is
+ * not the end of the question. Runs only when everything else passed, so its
+ * failure is never mistaken for the reason a test failed.
+ */
+function withGamingScan(cwd: string, result: VerifyResult): VerifyResult {
+  if (!result.ok) return result;
+  const hits = scanAddedLines(cwd);
+  if (hits.length === 0) return result;
+  return {
+    ...result,
+    ok: false,
+    steps: [...result.steps, { name: "anti-gaming", ok: false, exitCode: 1, output: formatHits(hits) }],
+  };
 }
 
 /**
@@ -314,7 +331,7 @@ export function runPassedGate(
   const testPaths = [...new Set([...passed.flatMap((s) => sliceTestFiles(id, s, env)), ...extraTests])];
   // A scoped step given no paths runs unscoped, which is the suite this avoids.
   const steps = testPaths.length > 0 ? recipe : recipe.filter((step) => !step.scopeable);
-  return runRecipe(projectDir(id, env), steps, testPaths);
+  return withGamingScan(projectDir(id, env), runRecipe(projectDir(id, env), steps, testPaths));
 }
 
 /**
