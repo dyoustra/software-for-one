@@ -26,10 +26,18 @@ export function buildProgram(): Command {
   program
     .command("new")
     .description("Capture an idea and start a run")
-    .argument("<idea>", "the idea, in your own words")
+    .argument("[idea]", "the idea, in your own words; omit to pipe it in or write it in $EDITOR")
     .option("--budget <usd>", "park the project when spend reaches this many dollars")
     .option("--access <methods>", "how this project may pay for model calls, overriding your profile")
-    .action(guarded(async (idea: string, opts: { budget?: string; access?: string }) => {
+    .option("--no-run", "capture and triage only; start later with `sfo run`")
+    .action(guarded(async (arg: string | undefined, opts: { budget?: string; access?: string; run: boolean }) => {
+      const { readIdea, editInEditor, readAllStdin } = await import("./commands/new.js");
+      const idea = await readIdea(arg, {
+        isTTY: Boolean(process.stdin.isTTY),
+        readStdin: readAllStdin,
+        edit: (template) => editInEditor(template),
+      });
+
       // Parsed before triage, so a malformed ceiling costs nothing.
       const { parseBudget } = await import("./commands/budget.js");
       const ceiling = opts.budget === undefined ? null : parseBudget(opts.budget);
@@ -46,9 +54,16 @@ export function buildProgram(): Command {
       const path = triagePathFor(resolved);
       if (resolved.method === "inherit") warnSlowTriagePath(path);
 
+      let verdict = "ready";
+      let counterOffer: string | null = null;
       const id = await createProject(
         idea,
-        (i) => triage(i, { path, access: resolved }),
+        async (i) => {
+          const outcome = await triage(i, { path, access: resolved });
+          verdict = outcome.result.verdict;
+          counterOffer = outcome.result.counterOffer;
+          return outcome;
+        },
         randomBytes(3).toString("hex"),
         undefined,
         access,
@@ -66,6 +81,21 @@ export function buildProgram(): Command {
       const { readEstimate, formatEstimate } = await import("./core/estimate.js");
       const front = readEstimate(id).find((e) => e.phase === "front");
       if (front) console.log(formatEstimate(front));
+
+      // Starting an idea triage called out of scope spends money on something
+      // it just said this cannot build; the counter-offer is the useful part.
+      if (verdict === "out_of_scope") {
+        console.log(`triage: out of scope${counterOffer ? ` — it could build this instead: ${counterOffer}` : ""}`);
+        console.log(`not started — \`sfo run ${id}\` to build it anyway`);
+        return;
+      }
+      if (!opts.run) {
+        console.log(`not started — \`sfo run ${id}\` when you are ready`);
+        return;
+      }
+      const { guardRunnable, runDetached } = await import("./commands/run.js");
+      guardRunnable(id);
+      console.log(`started (pid ${runDetached(id)}) — you'll get a notification when it needs you or is done`);
     }));
 
   program
@@ -93,6 +123,15 @@ export function buildProgram(): Command {
       } else {
         console.log(`started (pid ${runDetached(id, opts)})`);
       }
+    }));
+
+  program
+    .command("stop")
+    .description("Stop a running project, leaving everything it made in place")
+    .argument("<id>", "project id")
+    .action(guarded(async (id: string) => {
+      const { stopRun } = await import("./commands/stop.js");
+      console.log(stopRun(id));
     }));
 
   program

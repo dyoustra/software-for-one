@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
-import { execFileSync } from "node:child_process";
+import os from "node:os";
+import { execFileSync, spawnSync } from "node:child_process";
 import { projectDir, sfoDir, type Env } from "../core/paths.js";
 import { writeState } from "../core/state.js";
 import { writeArtifact, appendArtifact } from "../core/artifacts.js";
@@ -133,3 +134,51 @@ export async function createProject(
 
   return id;
 }
+
+export type ReadText = () => Promise<string>;
+
+const TEMPLATE = [
+  "",
+  "# Describe the idea in your own words. Lines starting with # are ignored.",
+  "# Say what it should do, for whom, and anything you already know you want.",
+  "",
+].join("\n");
+
+/**
+ * The idea as given, from standard input when piped, or from `$EDITOR` at a
+ * terminal: a dictated idea is often longer than a shell argument wants to be.
+ */
+export async function readIdea(
+  arg: string | undefined,
+  io: { isTTY: boolean; readStdin: ReadText; edit: (template: string) => string },
+): Promise<string> {
+  const raw = arg ?? (io.isTTY ? io.edit(TEMPLATE) : await io.readStdin());
+  const idea = raw
+    .split("\n")
+    .filter((line) => !line.startsWith("#"))
+    .join("\n")
+    .trim();
+  if (idea === "") throw new Error("no idea given — pass it as an argument, pipe it in, or write it in the editor");
+  return idea;
+}
+
+export function editInEditor(template: string, env: NodeJS.ProcessEnv = process.env): string {
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "sfo-idea-")), "IDEA.md");
+  fs.writeFileSync(file, template);
+  const editor = env.VISUAL || env.EDITOR || "vi";
+  // Through a shell, because $EDITOR is routinely "code --wait" or similar.
+  const result = spawnSync(`${editor} "$SFO_IDEA_FILE"`, {
+    shell: true,
+    stdio: "inherit",
+    env: { ...env, SFO_IDEA_FILE: file },
+  });
+  if (result.status !== 0) throw new Error(`the editor (${editor}) exited ${result.status ?? "abnormally"}`);
+  return fs.readFileSync(file, "utf8");
+}
+
+export async function readAllStdin(): Promise<string> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) chunks.push(chunk as Buffer);
+  return Buffer.concat(chunks).toString("utf8");
+}
+

@@ -29,4 +29,12 @@ describe("buildProgram", () => {
     expect(flags("run")).toContain("--use-api-key");
     expect(flags("budget")).toContain("--billed-only");
   });
+
+  it("registers stop, and lets new hold the run", () => {
+    const program = buildProgram();
+    expect(program.commands.map((c) => c.name())).toContain("stop");
+    const newCmd = program.commands.find((c) => c.name() === "new");
+    expect(newCmd?.options.map((o) => o.long)).toContain("--no-run");
+  });
 });
+

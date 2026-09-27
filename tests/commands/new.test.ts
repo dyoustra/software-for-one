@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { createProject, slugify, warnSlowTriagePath } from "../../src/commands/new.js";
+import { createProject, slugify, warnSlowTriagePath, readIdea } from "../../src/commands/new.js";
 import { readState } from "../../src/core/state.js";
 import { readArtifact } from "../../src/core/artifacts.js";
 import { readCostRecords } from "../../src/core/cost.js";
@@ -220,5 +220,26 @@ describe("createProject and model access", () => {
     });
     const id = await createProject("x", t, "ggg777", env);
     expect(readCostRecords(id, env)[0].billing).toBe("plan");
+  });
+});
+
+describe("readIdea", () => {
+  const io = (over: Partial<{ isTTY: boolean; stdin: string; edited: string }> = {}) => ({
+    isTTY: over.isTTY ?? false,
+    readStdin: async () => over.stdin ?? "",
+    edit: () => over.edited ?? "",
+  });
+
+  it("takes the argument as given", async () => {
+    expect(await readIdea("rename my screenshots", io())).toBe("rename my screenshots");
+  });
+
+  it("reads a piped idea, and one written in the editor without its comment lines", async () => {
+    expect(await readIdea(undefined, io({ stdin: "a longer\nidea\n" }))).toBe("a longer\nidea");
+    expect(await readIdea(undefined, io({ isTTY: true, edited: "# Describe it\ntrack the L train\n# more\n" }))).toBe("track the L train");
+  });
+
+  it("refuses an empty idea rather than triaging nothing", async () => {
+    await expect(readIdea(undefined, io({ isTTY: true, edited: "# only comments\n" }))).rejects.toThrow(/no idea given/);
   });
 });

@@ -11,6 +11,8 @@ import type { Env } from "../core/paths.js";
 import { readProfile, resolveAccess, resolveProjectAccess, type ResolvedAccess } from "../core/access.js";
 import { recordCost } from "../core/cost.js";
 import { FallbackRunner } from "../runner/fallback.js";
+import { desktopNotifier, type Notifier } from "../core/notify.js";
+import { listProjects } from "./status.js";
 import type { Runner } from "../runner/types.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -24,8 +26,37 @@ export interface GuardOptions {
 
 /** Runs the pipeline in this process. Called by the detached child. */
 export async function runAttached(id: string, opts: GuardOptions = {}): Promise<void> {
-  const access = resolveProjectAccess(id, { useApiKey: opts.useApiKey });
-  await advance(id, runnerFor(id, access));
+  try {
+    const access = resolveProjectAccess(id, { useApiKey: opts.useApiKey });
+    await advance(id, runnerFor(id, access));
+  } catch (err) {
+    desktopNotifier(`sfo: ${id}`, `stopped with an error — ${err instanceof Error ? err.message : String(err)}`);
+    throw err;
+  }
+  notifyOutcome(id);
+}
+
+/**
+ * Says where the run ended up, in the words `sfo status` would use. This is
+ * the half of fire-and-forget that tells you it is time to come back.
+ */
+export function notifyOutcome(id: string, env?: Env, notify: Notifier = desktopNotifier): void {
+  let state;
+  try {
+    state = readState(id, env);
+  } catch {
+    return;
+  }
+  const note = listProjects(env).find((p) => p.id === id)?.note;
+  const message =
+    state.status === "done"
+      ? (note ?? "done — SUMMARY.md is ready")
+      : state.status === "failed"
+        ? `failed at ${state.currentStage} — ${recoveryHint(id, state.currentStage)}`
+        : state.status === "awaiting_human"
+          ? (note ?? `needs you — \`sfo answer ${id}\``)
+          : null;
+  if (message) notify(`sfo: ${state.title}`, message);
 }
 
 /**

@@ -8,6 +8,7 @@ import { readLimit, formatLimit } from "../core/limit.js";
 import { readContests } from "../core/contest.js";
 import { readSmokeRecords, latestSmoke } from "../core/smoke.js";
 import { readFindings } from "../core/findings.js";
+import { isStopped } from "../core/stopped.js";
 
 /** A project plus whatever short explanation the listing owes the reader. */
 export type ProjectSummary = ProjectState & { note?: string };
@@ -101,9 +102,12 @@ export function listProjects(env?: Env): ProjectSummary[] {
       // than pause it, and a budget park is fixable by raising the ceiling.
       const art = blockingPriorArt(state, env);
       const limit = state.status === "awaiting_human" ? readLimit(state.id, env) : null;
+      const stopped = state.status === "awaiting_human" && isStopped(state.id, env);
       const note = art
         ? noteFor(state, art)
-        : limit
+        : stopped
+          ? `stopped by you — \`sfo run ${state.id}\` resumes it`
+          : limit
           ? formatLimit(state.id, limit)
           : (criterionNote(state, env) ?? budgetNote(state, env) ?? smokeNote(state, env));
       out.push(note !== undefined ? { ...state, note } : state);

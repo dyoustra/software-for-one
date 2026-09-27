@@ -31,6 +31,7 @@ import { loadPrompt } from "../stages/prompts.js";
 import { projectDir, logPath, type Env } from "./paths.js";
 import type { Runner, StageResult, UsageLimit } from "../runner/types.js";
 import { writeLimit, clearLimit } from "./limit.js";
+import { clearStopped } from "./stopped.js";
 import { takeContest, contestFor, contestInstructions, type ContestRecord } from "./contest.js";
 import { adjudicate, resumeCriterion, type AdjudicationContext, type AdjudicationOutcome } from "./adjudicate.js";
 import { runSmoke, type SmokeDeps, type SmokeContext } from "./smoke.js";
@@ -770,6 +771,7 @@ export async function advance(
   // A run starting is the answer to a limit park, whether the window reset or
   // the human switched credentials. If it is hit again it is written again.
   clearLimit(id, env);
+  clearStopped(id, env);
 
   while (true) {
     const upcoming = pickStage(id, state, env);
