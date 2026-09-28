@@ -33,6 +33,14 @@ slices are cut where they are. Nothing stops for a human to approve it — it is
 read after the fact, by someone working out why the build went the way it did,
 and by the deliver stage. Write it to be understood cold, months later.
 
+**No slice may produce anything under `tests/`.** The suite is hash-locked
+before the first slice runs, and every slice is graded against it, so a slice
+whose job is to add fixtures, captured data, or golden files to the test tree
+can never pass: its work reads as tampering. Anything a test reads must exist
+before the lock, which makes it `test-write`'s job. If the spec needs a corpus
+captured from the real world, say so in `PLAN.md` so test-write captures it;
+data the *product* ships belongs outside `tests/` and can be a slice's work.
+
 Finally, append one line to `.sfo/ESTIMATE.jsonl` estimating what everything
 after this stage will cost — `test-write`, `test-repair`, every build slice,
 `review` and `deliver`:

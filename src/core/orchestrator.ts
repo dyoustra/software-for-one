@@ -9,9 +9,9 @@ import { recordCost } from "./cost.js";
 import { budgetState, formatBudget, type BudgetState } from "./budget.js";
 import { readEstimate, formatEstimate, type Estimate } from "./estimate.js";
 import { readDecisions, appendDecision } from "./decisions.js";
-import { commitStage } from "./repo.js";
+import { commitStage, discardPaths } from "./repo.js";
 import { readPriorArt, blocksPipeline } from "./priorart.js";
-import { lockTests } from "./testlock.js";
+import { lockTests, verifyTestLock } from "./testlock.js";
 import { verifyRecipeFor } from "./archetype.js";
 import {
   runVerify,
@@ -31,7 +31,7 @@ import { loadPrompt } from "../stages/prompts.js";
 import { projectDir, logPath, type Env } from "./paths.js";
 import type { Runner, StageResult, UsageLimit } from "../runner/types.js";
 import { writeLimit, clearLimit } from "./limit.js";
-import { clearStopped, clearCrash } from "./stopped.js";
+import { clearStopped, clearCrash, clearFailure, writeFailure } from "./stopped.js";
 import { takeContest, contestFor, contestInstructions, type ContestRecord } from "./contest.js";
 import { adjudicate, resumeCriterion, type AdjudicationContext, type AdjudicationOutcome } from "./adjudicate.js";
 import { runSmoke, type SmokeDeps, type SmokeContext } from "./smoke.js";
@@ -334,6 +334,19 @@ function buildUnfinished(id: string, state: ProjectState, env: Env | undefined):
 
 function reason(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Fails the project at `stage`, and writes down why. Printing was not enough:
+ * a detached run's output is discarded, so a failure with only a console line
+ * read as "failed" with no reason anywhere a person could find it.
+ */
+function fail(id: string, state: ProjectState, stage: string, why: string, env: Env | undefined): ProjectState {
+  console.error(`sfo: ${why}`);
+  writeFailure(id, { stage, reason: why, at: new Date().toISOString() }, env);
+  const failed = failedState(state, stage);
+  writeState(failed, env);
+  return failed;
 }
 
 /** The state a stage that could not complete leaves behind. */
@@ -779,6 +792,7 @@ export async function advance(
   clearLimit(id, env);
   clearStopped(id, env);
   clearCrash(id, env);
+  clearFailure(id, env);
 
   while (true) {
     const upcoming = pickStage(id, state, env);
@@ -825,10 +839,18 @@ export async function advance(
         return;
       }
       if (built.outcome === "failed") {
-        console.error(`sfo: build cannot start — ${built.reason}`);
-        state = failedState(state, upcoming);
-        writeState(state, env);
+        fail(id, state, upcoming, `build cannot start — ${built.reason}`, env);
         return;
+      }
+
+      // A failed slice's changes to the suite are tampering, whatever their
+      // intent, and committed they poison every later stage's lock check. The
+      // first project to hit this had a slice capture 262 fixtures into
+      // tests/; smoke then refused a suite that no longer matched its lock.
+      const drift = verifyTestLock(id, TEST_DIR, env);
+      if (drift.length > 0) {
+        discardPaths(projectDir(id, env), drift);
+        console.error(`sfo: discarded changes to the locked suite left by failed slices: ${drift.slice(0, 5).join(", ")}${drift.length > 5 ? ` and ${drift.length - 5} more` : ""}`);
       }
 
       // Each passing slice committed itself; this catches the state left by any
@@ -846,9 +868,7 @@ export async function advance(
       try {
         archetype = detectArchetype(id, env);
       } catch (err) {
-        console.error(`sfo: ${upcoming} cannot run — ${reason(err)}`);
-        state = failedState(readState(id, env), upcoming);
-        writeState(state, env);
+        fail(id, readState(id, env), upcoming, `${upcoming} cannot run — ${reason(err)}`, env);
         return;
       }
       const smokeCtx: SmokeContext = {
@@ -883,9 +903,7 @@ export async function advance(
       state = readState(id, env);
 
       if (ran.outcome === "failed") {
-        console.error(`sfo: ${upcoming} cannot run — ${ran.reason}`);
-        state = failedState(state, upcoming);
-        writeState(state, env);
+        fail(id, state, upcoming, `${upcoming} cannot run — ${ran.reason}`, env);
         return;
       }
       // Parked from the stage before, so the next run repeats this one whole.
@@ -940,14 +958,7 @@ export async function advance(
     }
 
     if (!result.ok) {
-      state = {
-        ...state,
-        status: "failed",
-        pid: null,
-        attempts: { ...state.attempts, [upcoming]: (state.attempts[upcoming] ?? 0) + 1 },
-        updatedAt: new Date().toISOString(),
-      };
-      writeState(state, env);
+      fail(id, state, upcoming, `the ${upcoming} agent exited ${result.exitCode} — see \`sfo logs ${id}\``, env);
       return;
     }
 
@@ -984,24 +995,22 @@ export async function advance(
       if (!checked.ok) {
         const failed = checked.steps.find((st) => !st.ok);
         const detail = failed?.output.trim().split("\n").slice(-15).join("\n") ?? "";
-        console.error(
-          `sfo: test-repair left a suite that does not pass ${failed?.name ?? "the gate"} — ` +
+        fail(
+          id,
+          state,
+          upcoming,
+          `test-repair left a suite that does not pass ${failed?.name ?? "the gate"} — ` +
             `${checked.reason ?? "check failed"}. It is not locked, because no build ` +
             `slice could fix it afterwards. Re-run \`sfo stage ${id} test-repair\`.` +
             (detail ? `\n${detail}` : ""),
+          env,
         );
-        state = failedState(state, upcoming);
-        writeState(state, env);
         return;
       }
       try {
         lockTests(id, TEST_DIR, env);
       } catch (err) {
-        console.error(
-          `sfo: cannot freeze the test suite — ${reason(err)}. Re-run \`sfo stage ${id} test-write\`.`,
-        );
-        state = failedState(state, upcoming);
-        writeState(state, env);
+        fail(id, state, upcoming, `cannot freeze the test suite — ${reason(err)}. Re-run \`sfo stage ${id} test-write\`.`, env);
         return;
       }
     }

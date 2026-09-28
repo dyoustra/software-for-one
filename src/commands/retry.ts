@@ -3,7 +3,7 @@ import { readSlices, skippedBy } from "../core/slices.js";
 import type { Env } from "../core/paths.js";
 
 /** Stages that report on the build. A retry reopens the build, so they rerun. */
-const PAST_BUILD = new Set(["review", "deliver"]);
+const PAST_BUILD = new Set(["smoke", "review", "deliver"]);
 
 /**
  * Clears a slice's failure so the build loop attempts it again.

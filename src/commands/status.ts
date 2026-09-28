@@ -8,7 +8,7 @@ import { readLimit, formatLimit } from "../core/limit.js";
 import { readContests } from "../core/contest.js";
 import { readSmokeRecords, latestSmoke } from "../core/smoke.js";
 import { readFindings } from "../core/findings.js";
-import { isStopped, readCrash } from "../core/stopped.js";
+import { isStopped, readCrash, readFailure } from "../core/stopped.js";
 
 /** A project plus whatever short explanation the listing owes the reader. */
 export type ProjectSummary = ProjectState & { note?: string };
@@ -104,9 +104,12 @@ export function listProjects(env?: Env): ProjectSummary[] {
       const limit = state.status === "awaiting_human" ? readLimit(state.id, env) : null;
       const stopped = state.status === "awaiting_human" && isStopped(state.id, env);
       const crash = state.status === "awaiting_human" ? readCrash(state.id, env) : null;
+      const failure = state.status === "failed" ? readFailure(state.id, env) : null;
       const note = art
         ? noteFor(state, art)
-        : crash
+        : failure
+          ? `failed at ${failure.stage}: ${failure.reason.split("\n")[0]}`
+          : crash
           ? `crashed in ${crash.stage}: ${crash.error.split("\n")[0]} — \`sfo run ${state.id}\` retries it`
           : stopped
           ? `stopped by you — \`sfo run ${state.id}\` resumes it`

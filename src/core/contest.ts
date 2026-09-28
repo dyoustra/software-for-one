@@ -13,10 +13,12 @@ export const ContestSchema = z.object({
   sliceId: z.string().min(1),
   criterionId: z.string().min(1),
   testFile: z.string().min(1),
-  testName: z.string(),
+  // Optional in substance: a contest is its claim and its why. A missing fix
+  // or test name cost the first real project a slice attempt.
+  testName: z.string().nullish().transform((v) => v ?? ""),
   claim: z.enum(["unsatisfiable", "contradicts_criterion", "forces_wrong_code"]),
   why: z.string().min(1),
-  proposedFix: z.string(),
+  proposedFix: z.string().nullish().transform((v) => v ?? ""),
 });
 export type Contest = z.infer<typeof ContestSchema>;
 

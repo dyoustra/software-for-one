@@ -1626,3 +1626,38 @@ describe("a run that dies mid-stage", () => {
     expect(resumed.calls.map(stageOf)[0]).toBe("clarify");
   });
 });
+
+describe("what a failed slice leaves in the suite", () => {
+  it("is discarded before the build's final commit, so later stages see the locked suite", async () => {
+    // The first slice to capture fixtures into tests/ failed as tampering, and
+    // the build then committed its 262 files; smoke refused the drifted suite.
+    const base = producesArtifacts();
+    const runner = new FakeRunner(true, 0, undefined, (stage) => {
+      base(stage);
+      if (stage === "build-S-03") {
+        fs.mkdirSync(path.join(env.SFO_HOME, "p", "tests", "fixtures"), { recursive: true });
+        fs.writeFileSync(path.join(env.SFO_HOME, "p", "tests", "fixtures", "captured.json"), "{}");
+      }
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    await runPipeline(runner, { verify: failing("S-03") });
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/discarded changes to the locked suite.*captured.json/));
+    error.mockRestore();
+
+    expect(readState("p", env).slicesFailed).toEqual(["S-03"]);
+    expect(fs.existsSync(path.join(env.SFO_HOME, "p", "tests", "fixtures", "captured.json"))).toBe(false);
+    expect(verifyTestLock("p", "tests", env)).toEqual([]);
+  });
+});
+
+describe("a failed stage", () => {
+  it("says why in sfo status, not just that it failed", async () => {
+    const runner = new FakeRunner(false);
+    seed("capture");
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    await advance("p", runner, env);
+    error.mockRestore();
+    expect(readState("p", env).status).toBe("failed");
+    expect(formatStatus(listProjects(env))).toMatch(/failed at research: the research agent exited 1/);
+  });
+});

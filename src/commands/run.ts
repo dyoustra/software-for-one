@@ -70,7 +70,7 @@ export function notifyOutcome(id: string, env?: Env, notify: Notifier = desktopN
     state.status === "done"
       ? (note ?? "done — SUMMARY.md is ready")
       : state.status === "failed"
-        ? `failed at ${state.currentStage} — ${recoveryHint(id, state.currentStage)}`
+        ? (note ?? `failed at ${state.currentStage} — ${recoveryHint(id, state.currentStage)}`)
         : state.status === "awaiting_human"
           ? (note ?? `needs you — \`sfo answer ${id}\``)
           : null;

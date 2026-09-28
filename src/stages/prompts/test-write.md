@@ -40,9 +40,13 @@ in Python). The verification gate type-checks the whole tree in strict mode,
 tests included, and an unannotated test fails every slice's gate rather than
 just its own.
 
-Build any fixtures the criteria imply. `.sfo/SPEC.md` may already describe the
-fixture corpus it expects; if so, build that. Fixtures are code and go in the
-test tree.
+Build any fixtures the criteria imply, **all of them, now** — including data
+that has to be captured from the real world (an archive of posts, a sample of
+real responses). The suite is locked when you finish, and nothing after you
+may add to `tests/`: a fixture you leave for a build slice to capture is one
+that slice can never add, and the slice fails. Capture it yourself; you have
+network access. `.sfo/SPEC.md` and `.sfo/PLAN.md` may already describe the
+fixture corpus they expect; if so, build that. Fixtures go in the test tree.
 
 **Fakes must be as strict as the real thing.** For every `network` seam in
 `.sfo/SERVICES.jsonl`, the fake you build rejects any input that breaks one of
