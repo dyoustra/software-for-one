@@ -21,12 +21,14 @@ export const FindingSchema = z.object({
   id: z.string().regex(/^R-\d+$/, "R- followed by digits"),
   round: z.union([z.literal(1), z.literal(2)]),
   severity: z.enum(["high", "medium", "low"]),
-  kind: z.enum(["code", "coverage", "spec", "seam", "safety"]),
+  kind: z.enum(["code", "coverage", "spec", "seam", "safety", "test"]),
   criterionId: z.string().min(1).nullable().default(null),
   decisionId: z.string().min(1).nullable().default(null),
   summary: z.string().min(1),
   evidence: z.string(),
   test: z.string().min(1).nullable().default(null),
+  /** `kind: "test"` only: the test or helper that is itself wrong. */
+  testFile: z.string().min(1).nullable().default(null),
   /** Round 2 only: the repaired finding whose repair introduced this one. */
   causedBy: z.string().nullable().default(null),
   /** The commit whose repair made this finding's test pass. */
@@ -51,6 +53,9 @@ export function writeFindings(id: string, findings: Finding[], env?: Env): void 
  * separate question, answered by marking it unrepaired rather than quietly
  * demoting it to a report.
  */
+/** At most this many `test` findings go to the adjudicator per review. */
+export const MAX_TEST_ADJUDICATIONS = 3;
+
 export function isRepairable(f: Finding): boolean {
   return f.round === 1 && f.severity === "high" && f.kind === "code";
 }

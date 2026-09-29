@@ -439,5 +439,41 @@ export async function runSmoke(ctx: SmokeContext): Promise<SmokeOutcome> {
     record(id, rerun, attempt, env);
     failing = rerun.filter((l) => l.level === "failed");
   }
+
+  // Still failing after its repairs: the smoke test itself may be what is
+  // wrong, and nothing but the adjudicator may change a locked test. Filed on
+  // the repair agent's behalf if it never contested.
+  if (failing.length > 0 && !contestFor(id, SMOKE_CONTEST_ID, env)) {
+    const seam = failing[0].seam;
+    const planned = plan.run.find((p) => p.service.id === seam);
+    if (planned) {
+      const evidence = failing
+        .filter((f) => f.seam === seam)
+        .map((f) => `${f.check}: ${f.detail}`)
+        .join("\n");
+      const adjudicated = await adjudicate(
+        { id, env, runner: ctx.runner, archetype, slices: readSlices(id, env), verify: ctx.verify, suiteCheck: ctx.suiteCheck, withHeartbeat: ctx.withHeartbeat },
+        smokeSlice,
+        {
+          sliceId: SMOKE_CONTEST_ID,
+          criterionId: "(smoke)",
+          testFile: planned.file,
+          testName: "",
+          claim: "unsatisfiable",
+          why:
+            `This seam's smoke checks still fail after ${repairs} repair attempt${repairs === 1 ? "" : "s"} that were ` +
+            `each gated on every built slice. Decide whether the test, not the code, is wrong.\n\n${evidence}`,
+          proposedFix: "",
+        },
+        false,
+      );
+      if (adjudicated.kind === "limit") return { outcome: "limit", stage: adjudicated.stage, limit: adjudicated.limit };
+      if (contestFor(id, SMOKE_CONTEST_ID, env)?.ruling === "amend_test") {
+        attempt++;
+        const again = await ctx.withHeartbeat(() => runSeams([planned]));
+        record(id, again, attempt, env);
+      }
+    }
+  }
   return { outcome: "complete" };
 }

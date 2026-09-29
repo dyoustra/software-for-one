@@ -352,3 +352,36 @@ describe("a repair that caused a regression", () => {
     expect(git("status", "--porcelain", "--", ".", ":(exclude).sfo")).toBe("");
   });
 });
+
+describe("a finding that says a test is wrong", () => {
+  it("goes to the adjudicator, and an amendment resolves it", async () => {
+    const agent = new Agent(
+      reviewer([finding("R-001", { kind: "test", severity: "medium", test: null, testFile: "tests/test_s01.py" })], (stage) => {
+        if (stage.startsWith("adjudicate-")) {
+          fs.writeFileSync(path.join(dir, "tests", "test_s01.py"), "def test_s01() -> None: assert 1\n");
+          fs.writeFileSync(
+            path.join(dir, ".sfo", "RULING.json"),
+            JSON.stringify({ ruling: "amend_test", why: "it read the wrong file", changedFiles: [], question: null }),
+          );
+        }
+      }),
+    );
+    await runReview(ctx(agent));
+
+    expect(stages(agent)).toEqual(["review", "adjudicate-REVIEW-R-001"]);
+    expect(readFindings("p", env)[0]).toMatchObject({ status: "repaired", statusWhy: "the adjudicator amended tests/test_s01.py" });
+    expect(verifyTestLock("p", "tests", env)).toEqual([]);
+  });
+
+  it("stays reported when the adjudicator upholds the test", async () => {
+    const agent = new Agent(
+      reviewer([finding("R-001", { kind: "test", severity: "medium", test: null, testFile: "tests/test_s01.py" })], (stage) => {
+        if (stage.startsWith("adjudicate-")) {
+          fs.writeFileSync(path.join(dir, ".sfo", "RULING.json"), JSON.stringify({ ruling: "uphold", why: "it is fine", changedFiles: [], question: null }));
+        }
+      }),
+    );
+    await runReview(ctx(agent));
+    expect(readFindings("p", env)[0]).toMatchObject({ status: "report_only", statusWhy: expect.stringMatching(/upheld tests\/test_s01.py: it is fine/) });
+  });
+});

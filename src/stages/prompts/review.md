@@ -36,8 +36,13 @@ Write `.sfo/FINDINGS.jsonl`, one object per line:
   for), `medium`, or `low`.
 - `kind` is `code` (the behaviour is wrong or hollow), `coverage` (a missing or
   weak test), `spec` (the spec or a criterion itself looks wrong or
-  contradictory), `seam`, or `safety`.
-- `criterionId` and `decisionId` are `null` when they do not apply.
+  contradictory), `seam`, `safety`, or `test` — **a test or test helper that
+  is itself wrong**: it cannot observe what it claims to, asserts the
+  impossible, or checks the wrong file. Name it in `testFile`. A `test`
+  finding goes to an independent adjudicator, which may amend the test; it is
+  the only way a locked test gets fixed, so use it when a test, not the code,
+  is what is broken.
+- `criterionId`, `decisionId` and `testFile` are `null` when they do not apply.
 
 **Every `high` + `code` finding must come with a test that reproduces it**,
 under `tests/review/`, named for the finding — `tests/review/test_r001_*.py`,

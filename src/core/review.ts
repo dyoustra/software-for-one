@@ -1,6 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
-import { readFindings, writeFindings, isRepairable, REVIEW_TEST_DIR, type Finding } from "./findings.js";
+import {
+  readFindings,
+  writeFindings,
+  isRepairable,
+  REVIEW_TEST_DIR,
+  MAX_TEST_ADJUDICATIONS,
+  type Finding,
+} from "./findings.js";
 import { readDecisions } from "./decisions.js";
 import { readState } from "./state.js";
 import { readSlices, type Slice } from "./slices.js";
@@ -199,6 +206,14 @@ export async function runReview(ctx: ReviewContext): Promise<ReviewOutcome> {
   let findings = triageFindings(ctx, findingsOrNone(id, env));
   writeFindings(id, findings, env);
 
+  const judged = await adjudicateTestFindings(ctx, findings);
+  if ("limit" in judged) {
+    writeFindings(id, judged.findings, env);
+    return { outcome: "limit", stage: judged.limit.stage, limit: judged.limit.limit };
+  }
+  findings = judged.findings;
+  writeFindings(id, findings, env);
+
   const passed = (): Slice[] => {
     const ids = new Set(readState(id, env).slicesPassed);
     return readSlices(id, env).filter((s) => ids.has(s.id));
@@ -228,7 +243,7 @@ export async function runReview(ctx: ReviewContext): Promise<ReviewOutcome> {
     if (taken.kind === "contest" && !contestFor(id, REVIEW_CONTEST_ID, env)) {
       discardPaths(dir, changedPaths(dir));
       const adjudicated = await adjudicate(
-        { id, env, runner: ctx.runner, archetype, slices: readSlices(id, env), verify: ctx.verify, suiteCheck: ctx.suiteCheck, withHeartbeat: ctx.withHeartbeat },
+        adjudicationContext(ctx),
         reviewSlice,
         taken.contest,
         false,
@@ -308,6 +323,65 @@ export async function runReview(ctx: ReviewContext): Promise<ReviewOutcome> {
     .map((f): Finding => ({ ...f, test: null, status: "report_only" }));
   writeFindings(id, rollBackRegressions(ctx, [...findings, ...added], passed), env);
   return { outcome: "complete" };
+}
+
+/**
+ * A review that says a test is itself wrong has made a contest's case for it.
+ * Filed with the adjudicator on the reviewer's behalf, because nothing else
+ * may touch a locked test: on the first run to meet this, a smoke harness that
+ * read its terminal after closing it failed on every attempt while review had
+ * already said why.
+ */
+async function adjudicateTestFindings(
+  ctx: ReviewContext,
+  findings: Finding[],
+): Promise<{ findings: Finding[] } | { findings: Finding[]; limit: { stage: string; limit: UsageLimit } }> {
+  let out = findings.map((f) =>
+    f.kind === "test" && f.status === "report_only" && f.round === 1 ? { ...f, status: "open" as const } : f,
+  );
+  const candidates = out.filter((f) => f.kind === "test" && f.status === "open" && f.testFile).slice(0, MAX_TEST_ADJUDICATIONS);
+  for (const f of candidates) {
+    const sliceId = `${REVIEW_CONTEST_ID}-${f.id}`;
+    if (contestFor(ctx.id, sliceId, ctx.env)) continue;
+    const outcome = await adjudicate(
+      { ...adjudicationContext(ctx) },
+      { id: sliceId, name: `test named by ${f.id}`, criterionIds: [f.criterionId ?? "(none)"], prerequisites: [] },
+      {
+        sliceId,
+        criterionId: f.criterionId ?? "(none)",
+        testFile: f.testFile as string,
+        testName: "",
+        claim: "unsatisfiable",
+        why: `${f.summary}\n\n${f.evidence}`,
+        proposedFix: "",
+      },
+      false,
+    );
+    if (outcome.kind === "limit") return { findings: out, limit: { stage: outcome.stage, limit: outcome.limit } };
+    const ruling = contestFor(ctx.id, sliceId, ctx.env);
+    out = out.map((g) =>
+      g.id !== f.id
+        ? g
+        : ruling?.ruling === "amend_test"
+          ? { ...g, status: "repaired", statusWhy: `the adjudicator amended ${f.testFile}` }
+          : { ...g, status: "report_only", statusWhy: `the adjudicator upheld ${f.testFile}: ${ruling?.rulingWhy ?? "no ruling"}` },
+    );
+  }
+  // Any beyond the cap, or naming no file, stay reported.
+  return { findings: out.map((f) => (f.kind === "test" && f.status === "open" ? { ...f, status: "report_only" } : f)) };
+}
+
+function adjudicationContext(ctx: ReviewContext): AdjudicationContext {
+  return {
+    id: ctx.id,
+    env: ctx.env,
+    runner: ctx.runner,
+    archetype: ctx.archetype,
+    slices: readSlices(ctx.id, ctx.env),
+    verify: ctx.verify,
+    suiteCheck: ctx.suiteCheck,
+    withHeartbeat: ctx.withHeartbeat,
+  };
 }
 
 /**

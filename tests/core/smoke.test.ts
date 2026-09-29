@@ -298,7 +298,8 @@ describe("runSmoke", () => {
     );
 
     expect(fs.readFileSync(path.join(dir, "src.py"), "utf8")).toBe("x = 1\n");
-    expect(runner.calls).toHaveLength(2);
+    // Two repairs, then the smoke test itself goes to the adjudicator.
+    expect(runner.calls.map((c) => path.basename(c.logPath, ".log"))).toEqual(["smoke-repair", "smoke-repair", "adjudicate-SMOKE"]);
     expect(runner.calls[1].prompt).toMatch(/previous repair failed the gate[\s\S]*FAILED tests\/test_s01.py/);
   });
 
@@ -307,7 +308,7 @@ describe("runSmoke", () => {
     const runner = new RepairRunner();
     const out = await runSmoke(context(runner, seams({ "anthropic-batch": () => ({ lines: [], exit: 1 }) })));
     expect(out).toEqual({ outcome: "complete" });
-    expect(runner.calls).toHaveLength(2);
+    expect(runner.calls.map((c) => path.basename(c.logPath, ".log"))).toEqual(["smoke-repair", "smoke-repair", "adjudicate-SMOKE"]);
     expect(latestSmoke(readSmokeRecords("p", env))[0].level).toBe("failed");
   });
 
@@ -393,6 +394,31 @@ describe("a repair that contests every time", () => {
     const stages = runner.calls.map((c) => path.basename(c.logPath, ".log"));
     expect(stages).toEqual(["smoke-repair", "adjudicate-SMOKE", "smoke-repair", "smoke-repair"]);
   }, 10_000);
+});
+
+describe("a smoke test that is itself wrong", () => {
+  it("goes to the adjudicator after the repairs, and the seam is checked again when amended", async () => {
+    project([seam()]);
+    let amended = false;
+    const runner = new RepairRunner((stage) => {
+      if (stage === "adjudicate-SMOKE") {
+        amended = true;
+        fs.writeFileSync(path.join(dir, "smoke/test_smoke_anthropic_batch.py"), "def test_it(): assert 1\n");
+        fs.writeFileSync(
+          path.join(dir, ".sfo", "RULING.json"),
+          JSON.stringify({ ruling: "amend_test", why: "it read the pty after closing it", changedFiles: [], question: null }),
+        );
+      }
+    });
+    const spawn = seams({ "anthropic-batch": () => (amended ? ok()() : { lines: [], exit: 1 }) });
+    await runSmoke(context(runner, spawn));
+
+    const { readContests } = await import("../../src/core/contest.js");
+    expect(readContests("p", env)[0]).toMatchObject({ sliceId: "SMOKE", ruling: "amend_test" });
+    const records = readSmokeRecords("p", env);
+    expect(Math.max(...records.map((r) => r.attempt))).toBe(4);
+    expect(latestSmoke(records).every((r) => r.level === "completed")).toBe(true);
+  });
 });
 
 describe("latestSmoke", () => {
