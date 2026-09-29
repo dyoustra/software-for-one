@@ -265,6 +265,34 @@ export function discardPaths(cwd: string, paths: string[]): void {
   }
 }
 
+export function headCommit(cwd: string): string {
+  return git(cwd, ["rev-parse", "HEAD"]).trim();
+}
+
+/**
+ * Undoes one commit's changes to the project, leaving `.sfo/` alone: a commit
+ * made by `commitStage` also carries the pipeline's own state, costs and
+ * findings, which a plain `git revert` would roll back too — and refuses to
+ * try while they are being written. The reverse patch applies whole or not at
+ * all, so a revert that conflicts with later work changes nothing: guessing
+ * at a merge is how a rollback meant to restore known code produces unknown
+ * code instead.
+ */
+export function revertCommit(cwd: string, sha: string): { ok: boolean; detail: string } {
+  const short = sha.slice(0, 7);
+  try {
+    const patch = git(cwd, ["diff", "--binary", `${sha}^`, sha, ...OUTSIDE_SFO]);
+    if (patch.trim() === "") return { ok: true, detail: `${short} changed nothing outside .sfo/` };
+    execFileSync("git", ["apply", "-R", "--index", "-"], { cwd, input: patch, stdio: ["pipe", "pipe", "pipe"] });
+    const subject = git(cwd, ["log", "-1", "--format=%s", sha]).trim();
+    git(cwd, ["commit", "--no-verify", "-q", "-m", `Revert "${subject}" (sfo rollback of ${short})`]);
+    return { ok: true, detail: `reverted ${short}` };
+  } catch (err) {
+    const stderr = (err as { stderr?: Buffer | string })?.stderr?.toString().trim();
+    return { ok: false, detail: `could not revert ${short}: ${(stderr || String(err)).split("\n")[0]}` };
+  }
+}
+
 /**
  * Commits exactly the named paths. For changes sfo can enumerate, unlike an
  * agent's output, which is why `commitStage` still has to stage everything.

@@ -8,7 +8,7 @@ import { recordCost } from "./cost.js";
 import { lockTests, verifyTestLock, TEST_LOCK_FILE } from "./testlock.js";
 import { TEST_DIR, agentToolsForStage, type VerifyResult } from "./verify.js";
 import { verifyRecipeFor } from "./archetype.js";
-import { changedPaths, commitPaths, commitStage, discardPaths } from "./repo.js";
+import { changedPaths, commitPaths, commitStage, discardPaths, headCommit, revertCommit } from "./repo.js";
 import { takeContest, contestFor, contestInstructions } from "./contest.js";
 import { adjudicate, type AdjudicationContext } from "./adjudicate.js";
 import { loadPrompt } from "../stages/prompts.js";
@@ -257,10 +257,11 @@ export async function runReview(ctx: ReviewContext): Promise<ReviewOutcome> {
       continue;
     }
     commitStage(id, "review-repair", env);
+    const repairCommit = headCommit(dir);
     kept = true;
     previous = null;
     const fixed = new Set(nowPassing.map((f) => f.id));
-    findings = findings.map((f) => (fixed.has(f.id) ? { ...f, status: "repaired" } : f));
+    findings = findings.map((f) => (fixed.has(f.id) ? { ...f, status: "repaired", repairCommit } : f));
     writeFindings(id, findings, env);
   }
 
@@ -288,6 +289,12 @@ export async function runReview(ctx: ReviewContext): Promise<ReviewOutcome> {
       "with `\"round\":2` and ids continuing past the highest `R-` in the file.",
       "Do not change existing lines. **Write no tests this round** — nothing",
       "will be repaired after it. Update `.sfo/REVIEW.md` with a section for this round.",
+      "",
+      "**If a repair caused a finding, say which.** Set `causedBy` to the id of the",
+      "`repaired` finding whose repair introduced it (the repair's commit is in that",
+      "line's `repairCommit`), and `null` otherwise. A `high` finding a repair",
+      "caused rolls that repair back, restoring the code before it — so name a",
+      "repair only when its change is the cause, not merely nearby.",
     ].join("\n"),
   );
   if (second.limited) {
@@ -299,6 +306,47 @@ export async function runReview(ctx: ReviewContext): Promise<ReviewOutcome> {
   const added = after
     .filter((f) => f.round === 2 && !known.has(f.id))
     .map((f): Finding => ({ ...f, test: null, status: "report_only" }));
-  writeFindings(id, [...findings, ...added], env);
+  writeFindings(id, rollBackRegressions(ctx, [...findings, ...added], passed), env);
   return { outcome: "complete" };
+}
+
+/**
+ * Reverts each repair that round 2 says introduced a high-severity problem.
+ * What comes back is the code before that repair: its original findings open
+ * again, known and reported, instead of a new regression nobody asked for.
+ */
+function rollBackRegressions(ctx: ReviewContext, findings: Finding[], passed: () => Slice[]): Finding[] {
+  const dir = projectDir(ctx.id, ctx.env);
+  const byId = new Map(findings.map((f) => [f.id, f]));
+  const culprits = new Map<string, string[]>();
+  for (const f of findings) {
+    if (f.round !== 2 || f.severity !== "high" || !f.causedBy) continue;
+    const commit = byId.get(f.causedBy)?.repairCommit;
+    if (!commit) continue;
+    culprits.set(commit, [...(culprits.get(commit) ?? []), f.id]);
+  }
+  if (culprits.size === 0) return findings;
+
+  let out = findings;
+  for (const [commit, caused] of culprits) {
+    const reverted = revertCommit(dir, commit);
+    if (!reverted.ok) {
+      console.error(`sfo: ${reverted.detail}; ${caused.join(", ")} stand as reported`);
+      out = out.map((f) => (caused.includes(f.id) ? { ...f, statusWhy: `rollback failed — ${reverted.detail}` } : f));
+      continue;
+    }
+    out = out.map((f) => {
+      if (f.repairCommit === commit) {
+        return { ...f, status: "unrepaired", statusWhy: `repair rolled back: it introduced ${caused.join(", ")}` };
+      }
+      if (caused.includes(f.id)) return { ...f, status: "rolled_back", statusWhy: `the repair that caused it was reverted (${reverted.detail})` };
+      return f;
+    });
+  }
+
+  const gate = ctx.passedGate(ctx.id, ctx.archetype, passed(), ctx.env);
+  if (!gate.ok) {
+    console.error(`sfo: after rolling back, the built slices no longer pass their gate — ${gate.reason ?? "see the verify output"}`);
+  }
+  return out;
 }

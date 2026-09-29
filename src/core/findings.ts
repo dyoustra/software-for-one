@@ -14,6 +14,7 @@ export const FINDING_STATUSES = [
   "not_reproduced",
   "report_only",
   "dropped",
+  "rolled_back",
 ] as const;
 
 export const FindingSchema = z.object({
@@ -26,6 +27,10 @@ export const FindingSchema = z.object({
   summary: z.string().min(1),
   evidence: z.string(),
   test: z.string().min(1).nullable().default(null),
+  /** Round 2 only: the repaired finding whose repair introduced this one. */
+  causedBy: z.string().nullable().default(null),
+  /** The commit whose repair made this finding's test pass. */
+  repairCommit: z.string().optional(),
   status: z.enum(FINDING_STATUSES).default("open"),
   /** Why the pipeline set the status it did, when that is not self-evident. */
   statusWhy: z.string().optional(),

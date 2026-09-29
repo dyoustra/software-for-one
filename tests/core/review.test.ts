@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -299,3 +299,56 @@ describe("repair", () => {
   });
 });
 
+
+describe("a repair that caused a regression", () => {
+  const regression = (over: object) => (stage: string) => {
+    if (stage === "review-repair") fs.writeFileSync(path.join(dir, "app.py"), "resolution = 'applied'\n");
+    if (stage === "review-2") {
+      fs.appendFileSync(
+        path.join(dir, ".sfo", "FINDINGS.jsonl"),
+        JSON.stringify(finding("R-002", { round: 2, test: null, summary: "the repair broke links", ...over })) + "\n",
+      );
+    }
+  };
+
+  it("is rolled back: the code before it returns, and its finding is open again", async () => {
+    const agent = new Agent(reviewer([finding("R-001")], regression({ causedBy: "R-001" })));
+    await runReview(ctx(agent, { runTests: codeSays((code) => code.includes("applied")) }));
+
+    expect(fs.readFileSync(path.join(dir, "app.py"), "utf8")).toBe("resolution = None\n");
+    const byId = Object.fromEntries(readFindings("p", env).map((f) => [f.id, f]));
+    expect(byId["R-001"]).toMatchObject({ status: "unrepaired", statusWhy: "repair rolled back: it introduced R-002" });
+    expect(byId["R-002"].status).toBe("rolled_back");
+    expect(git("log", "--format=%s", "-1")).toMatch(/^Revert/);
+  });
+
+  it("is left in place when the regression is not high, or names no repair", async () => {
+    const agent = new Agent(reviewer([finding("R-001")], regression({ causedBy: "R-001", severity: "medium" })));
+    await runReview(ctx(agent, { runTests: codeSays((code) => code.includes("applied")) }));
+    expect(fs.readFileSync(path.join(dir, "app.py"), "utf8")).toBe("resolution = 'applied'\n");
+    expect(Object.fromEntries(readFindings("p", env).map((f) => [f.id, f.status]))).toEqual({ "R-001": "repaired", "R-002": "report_only" });
+  });
+
+  it("is reported, not forced, when the revert conflicts with later work", async () => {
+    const agent = new Agent(
+      reviewer([finding("R-001")], (stage) => {
+        regression({ causedBy: "R-001" })(stage);
+        if (stage === "review-2") {
+          // Later work on the same line: a revert of the repair now conflicts.
+          fs.writeFileSync(path.join(dir, "app.py"), "resolution = 'applied, then changed'\n");
+          git("commit", "-q", "-am", "later work");
+        }
+      }),
+    );
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    await runReview(ctx(agent, { runTests: codeSays((code) => code.includes("applied")) }));
+    error.mockRestore();
+
+    expect(fs.readFileSync(path.join(dir, "app.py"), "utf8")).toBe("resolution = 'applied, then changed'\n");
+    const r2 = readFindings("p", env).find((f) => f.id === "R-002");
+    expect(r2?.status).toBe("report_only");
+    expect(r2?.statusWhy).toMatch(/rollback failed — could not revert/);
+    // Nothing half-applied: outside .sfo/, the tree is exactly the last commit.
+    expect(git("status", "--porcelain", "--", ".", ":(exclude).sfo")).toBe("");
+  });
+});
