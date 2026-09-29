@@ -53,7 +53,9 @@ says `visual` or `text`, write a snapshot test for each of its `invocations`:
 run it with its fixed inputs and compare the exact output, ANSI codes included,
 against a golden file under `tests/snapshots/`. Write the golden file yourself,
 from the spec, as what the output must be — it is part of the contract, like
-any assertion. For `none`, write none.
+any assertion. For `none`, write none. If `.sfo/drafts/` holds drafts, the person chose one
+in `.sfo/ANSWERS.json`: the golden output for the main invocation is that
+draft, adjusted only as their answer asked.
 
 **Fakes must be as strict as the real thing.** For every `network` seam in
 `.sfo/SERVICES.jsonl`, the fake you build rejects any input that breaks one of

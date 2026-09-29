@@ -87,6 +87,18 @@ if it calls one.
   job with **fixed inputs** (a pinned date, a bundled fixture) so the output
   does not drift. Empty for `none`.
 
+**Drafts, only when the look is the point.** If it is `visual` *and* the
+person will judge it by eye — a drawing of something real, a layout whose
+feel matters — draw 2 or 3 candidate designs before anything is built, as the
+exact terminal output each would print (ANSI colour codes included), in
+`.sfo/drafts/A.txt`, `.sfo/drafts/B.txt`, and so on. Base them on reference
+material from research: if it depicts something real, look at pictures of the
+real thing. Make them genuinely different, not three shades of one idea. Then
+ask one `blocking` question, "Which of these looks right?", with one option
+per draft, whose `tradeoff` says what distinguishes it. The person sees each
+draft drawn on a light and a dark background. When the look is incidental,
+draw none and ask nothing.
+
 This is a judgement about this tool, not a default: a file converter is
 `none`, and a status line with colour is `visual`. Never hard-code white or
 black text: a colour that matches the person's terminal background makes the

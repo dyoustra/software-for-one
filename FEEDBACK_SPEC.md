@@ -1,6 +1,6 @@
 # Feedback and Drafts — Spec
 
-**Status:** Design approved, pre-implementation
+**Status:** Implemented, 2026-09-29
 **Date:** 2026-09-29
 **Prompted by:** "ut-tower looks nothing like the actual UT Tower", after delivery
 

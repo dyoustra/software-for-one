@@ -192,6 +192,39 @@ draw(text, sys.argv[2], THEMES["light"])
 draw(text, sys.argv[3], THEMES["dark"])
 `;
 
+export const DRAFTS_DIR = "drafts";
+
+/**
+ * Draws each draft spec wrote in `.sfo/drafts/` (`A.txt`, `B.txt`, …) on a
+ * light and a dark background, for the person to choose between at clarify.
+ * Returns the image paths per draft, relative to `.sfo/`.
+ */
+export function drawDrafts(id: string, env: Env = process.env, runWith: Run = run): { draft: string; light?: string; dark?: string; error?: string }[] {
+  const dir = path.join(sfoDir(id, env), DRAFTS_DIR);
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir)
+    .filter((f) => /^[A-Z]\.txt$/.test(f))
+    .sort()
+    .map((f) => {
+      const draft = f.slice(0, -4);
+      const drawn = drawScreenshots(path.join(dir, f), path.join(dir, draft), runWith);
+      return drawn.ok
+        ? { draft, light: `${DRAFTS_DIR}/${draft}-light.png`, dark: `${DRAFTS_DIR}/${draft}-dark.png` }
+        : { draft, error: drawn.detail };
+    });
+}
+
+export function draftImages(id: string, env?: Env): string[] {
+  const dir = path.join(sfoDir(id, env), DRAFTS_DIR);
+  if (!fs.existsSync(dir)) return [];
+  return fs
+    .readdirSync(dir)
+    .filter((f) => f.endsWith(".png"))
+    .sort()
+    .map((f) => path.join(dir, f));
+}
+
 export function readRenders(id: string, env?: Env): Render[] {
   try {
     return JSON.parse(fs.readFileSync(artifactPath(id, RENDERS_FILE, env), "utf8")) as Render[];

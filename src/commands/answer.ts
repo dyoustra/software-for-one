@@ -2,6 +2,8 @@ import readline from "node:readline/promises";
 import { readQuestions, readAnswers, writeAnswers } from "../core/questions.js";
 import { openQuestions } from "../core/openQuestions.js";
 import { readState, writeState } from "../core/state.js";
+import { spawnSync } from "node:child_process";
+import { draftImages } from "../core/presentation.js";
 import type { Env } from "../core/paths.js";
 
 export type Ask = (prompt: string) => Promise<string>;
@@ -35,6 +37,15 @@ export async function promptForAnswers(id: string, env?: Env, ask?: Ask): Promis
   const open = openQuestions(id, env);
   if (open.length === 0) {
     throw new Error(`no open questions for ${id}`);
+  }
+
+  // Drafts are pictures: a question asking which looks right is unanswerable
+  // from the option labels alone.
+  const drafts = draftImages(id, env);
+  if (drafts.length > 0) {
+    console.log("\nDrafts to choose from (light and dark background):");
+    for (const d of drafts) console.log(`  ${d}`);
+    if (!ask && process.platform === "darwin") spawnSync("open", drafts, { stdio: "ignore" });
   }
 
   const reader = ask ? { ask, close: () => {} } : stdinReader();

@@ -37,7 +37,7 @@ import { adjudicate, resumeCriterion, type AdjudicationContext, type Adjudicatio
 import { runSmoke, type SmokeDeps, type SmokeContext } from "./smoke.js";
 import { runReview, type ReviewContext } from "./review.js";
 import { installTool } from "./install.js";
-import { captureRenders } from "./presentation.js";
+import { captureRenders, drawDrafts } from "./presentation.js";
 import { readRetry, clearRetry } from "./retry.js";
 
 /** The artifact a human must produce before a blocking stage can run. */
@@ -75,6 +75,8 @@ export interface AdvanceOptions {
   smoke?: SmokeDeps;
   /** The gate a smoke or review repair must pass. Injected for the same reason as `verify`. */
   passedGate?: PassedGateFn;
+  /** Draws spec's drafts for clarify. Injected for the same reason as `install`. */
+  drawDrafts?: typeof drawDrafts;
   /** Captures and draws the tool's output. Injected for the same reason as `install`. */
   render?: typeof captureRenders;
   /** Puts the built tool on PATH. Injected so tests never install anything. */
@@ -1050,6 +1052,16 @@ export async function advance(
       } catch (err) {
         fail(id, state, upcoming, `cannot freeze the test suite — ${reason(err)}. Re-run \`sfo stage ${id} test-write\`.`, env);
         return;
+      }
+    }
+
+    // Drafts are how a person judges a look before anything is built; they
+    // are drawn now so clarify can show them.
+    if (upcoming === "spec") {
+      try {
+        (opts.drawDrafts ?? drawDrafts)(id, env ?? process.env);
+      } catch (err) {
+        console.error(`sfo: could not draw the drafts — ${reason(err)}`);
       }
     }
 

@@ -70,3 +70,26 @@ describe("captureRenders", () => {
     expect(captureRenders("p", "cli-python", env, run)[0]).toMatchObject({ text: "renders/1.txt", error: "exited 2: boom" });
   });
 });
+
+describe("drawDrafts", () => {
+  it("draws each draft spec wrote, on a light and a dark background", async () => {
+    const { drawDrafts, draftImages } = await import("../../src/core/presentation.js");
+    fs.mkdirSync(path.join(sfo, "drafts"), { recursive: true });
+    fs.writeFileSync(path.join(sfo, "drafts", "A.txt"), "draft a\n");
+    fs.writeFileSync(path.join(sfo, "drafts", "B.txt"), "draft b\n");
+    fs.writeFileSync(path.join(sfo, "drafts", "notes.md"), "not a draft\n");
+    const { run, calls } = fakeRun();
+
+    expect(drawDrafts("p", env, run)).toEqual([
+      { draft: "A", light: "drafts/A-light.png", dark: "drafts/A-dark.png" },
+      { draft: "B", light: "drafts/B-light.png", dark: "drafts/B-dark.png" },
+    ]);
+    expect(calls).toHaveLength(2);
+    expect(draftImages("p", env).map((p) => path.basename(p))).toEqual(["A-dark.png", "A-light.png", "B-dark.png", "B-light.png"]);
+  });
+
+  it("draws nothing when spec judged the look incidental", async () => {
+    const { drawDrafts } = await import("../../src/core/presentation.js");
+    expect(drawDrafts("p", env, fakeRun().run)).toEqual([]);
+  });
+});
