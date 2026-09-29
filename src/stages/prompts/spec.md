@@ -55,9 +55,12 @@ set sfo up, and never asked again. Do not put a question about it in
 `.sfo/QUESTIONS.json`. If what you are specifying calls a language model when it
 runs:
 
-- It authenticates with `anthropic_api_key` (the Anthropic SDK, reading
-  `ANTHROPIC_API_KEY`; the Batch API wherever the work does not need an answer
-  immediately). That is the only backend this pipeline can build today; do not
+- It authenticates with `anthropic_api_key` (the Anthropic SDK; the Batch API
+  wherever the work does not need an answer immediately). It reads
+  `ANTHROPIC_API_KEY`, and when that is unset, the macOS Keychain entry whose
+  service name is `keychainService` in `.sfo/ACCESS.json` (`security
+  find-generic-password -s <service> -w`), so the person can type the command
+  with no key exported and no wrapper. Make that a criterion. That is the only backend this pipeline can build today; do not
   specify one for any other method, even when it is listed.
 - Give it a criterion like any other: with no key available, the tool exits
   before reading or changing anything, and says what it looked for.

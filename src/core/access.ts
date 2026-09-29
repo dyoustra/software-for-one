@@ -55,6 +55,12 @@ export type Profile = z.infer<typeof ProfileSchema>;
 export const AccessSchema = z.object({
   modelAccess: z.array(ModelMethodSchema).min(1),
   sfoPrefers: z.enum(SFO_METHODS),
+  /**
+   * The Keychain service a built tool reads its key from when the environment
+   * has none. A name, not a secret, so it is safe in a committed file; it is
+   * what spares the person a shell function to hand the key over.
+   */
+  keychainService: z.string().min(1).optional(),
 });
 export type Access = z.infer<typeof AccessSchema>;
 
@@ -102,7 +108,11 @@ export function writeAccess(id: string, access: Access, env?: Env): void {
 }
 
 export function accessFromProfile(profile: Profile): Access {
-  return { modelAccess: profile.modelAccess, sfoPrefers: profile.sfoPrefers };
+  return {
+    modelAccess: profile.modelAccess,
+    sfoPrefers: profile.sfoPrefers,
+    ...(profile.apiKey?.source === "keychain" ? { keychainService: profile.apiKey.service } : {}),
+  };
 }
 
 /**

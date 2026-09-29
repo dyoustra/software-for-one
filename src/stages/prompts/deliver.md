@@ -55,6 +55,11 @@ this whole pipeline exists to prevent.
 Then, in order:
 
 1. **What this is and how to run it** — the actual commands, assuming nothing.
+   `.sfo/INSTALL.json` says what sfo put on the person's PATH: each command,
+   whether it was installed and where it resolves from a new terminal, or why
+   not. Lead with the installed command itself (`ut-tower`, not `uv run
+   ut-tower`); where one could not be installed, say why, and give the command
+   that runs it from the project instead.
    If it calls a model, say which credential it needs and where it reads it
    from, and whether that call was ever made against the real service or only
    against a test double. A backend nobody has run is not verified, however

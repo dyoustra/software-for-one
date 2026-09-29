@@ -36,6 +36,7 @@ import { takeContest, contestFor, contestInstructions, type ContestRecord } from
 import { adjudicate, resumeCriterion, type AdjudicationContext, type AdjudicationOutcome } from "./adjudicate.js";
 import { runSmoke, type SmokeDeps, type SmokeContext } from "./smoke.js";
 import { runReview, type ReviewContext } from "./review.js";
+import { installTool } from "./install.js";
 
 /** The artifact a human must produce before a blocking stage can run. */
 const HUMAN_INPUT: Record<string, string> = { clarify: "ANSWERS.json" };
@@ -72,6 +73,8 @@ export interface AdvanceOptions {
   smoke?: SmokeDeps;
   /** The gate a smoke or review repair must pass. Injected for the same reason as `verify`. */
   passedGate?: PassedGateFn;
+  /** Puts the built tool on PATH. Injected so tests never install anything. */
+  install?: typeof installTool;
   /** Runs chosen test files alone: review's reproductions. Injected for the same reason. */
   runTests?: ReviewContext["runTests"];
   /** The pre-lock check on test-repair's output. Injected for the same reason. */
@@ -922,6 +925,16 @@ export async function advance(
       commitStage(id, upcoming, env);
       state = markCompleted(id, upcoming, env);
       continue;
+    }
+
+    // The tool goes on the person's PATH before the summary is written, so the
+    // summary can say how to run it — or plainly why it could not be installed.
+    if (upcoming === "deliver") {
+      try {
+        (opts.install ?? installTool)(id, detectArchetype(id, env), env ?? process.env);
+      } catch (err) {
+        console.error(`sfo: could not install the tool — ${reason(err)}`);
+      }
     }
 
     const criteriaBefore = criterionIds(id, env);

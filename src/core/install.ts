@@ -1,0 +1,148 @@
+import fs from "node:fs";
+import path from "node:path";
+import { spawnSync } from "node:child_process";
+import { artifactPath, projectDir, sfoDir, type Env } from "./paths.js";
+
+export const INSTALL_FILE = "INSTALL.json";
+
+export interface InstalledCommand {
+  name: string;
+  installed: boolean;
+  /** Where it resolves from a fresh shell, or why it is not installed. */
+  detail: string;
+}
+
+export interface InstallRecord {
+  installer: string | null;
+  commands: InstalledCommand[];
+  at: string;
+}
+
+export type Exec = (command: string, args: string[], opts: { cwd?: string; timeoutMs: number }) => { status: number | null; output: string };
+
+export const exec: Exec = (command, args, { cwd, timeoutMs }) => {
+  const r = spawnSync(command, args, { cwd, encoding: "utf8", timeout: timeoutMs });
+  return { status: r.error ? null : r.status, output: `${r.stdout ?? ""}${r.stderr ?? ""}`.trim() };
+};
+
+/** Command names a project declares, read from its manifest without a TOML parser. */
+export function commandNames(dir: string, archetype: string): string[] {
+  try {
+    if (archetype === "cli-node") {
+      const pkg = JSON.parse(fs.readFileSync(path.join(dir, "package.json"), "utf8")) as { name?: string; bin?: string | Record<string, string> };
+      if (typeof pkg.bin === "string") return pkg.name ? [pkg.name.replace(/^@[^/]+\//, "")] : [];
+      return pkg.bin ? Object.keys(pkg.bin) : [];
+    }
+    if (archetype === "cli-python") {
+      const text = fs.readFileSync(path.join(dir, "pyproject.toml"), "utf8");
+      const section = text.split(/^\[project\.scripts\]\s*$/m)[1]?.split(/^\[/m)[0] ?? "";
+      return [...section.matchAll(/^\s*["']?([A-Za-z0-9._-]+)["']?\s*=/gm)].map((m) => m[1]);
+    }
+  } catch {
+    // No manifest: nothing to install.
+  }
+  return [];
+}
+
+function packageName(dir: string, archetype: string): string | null {
+  if (archetype !== "cli-python") return null;
+  try {
+    const text = fs.readFileSync(path.join(dir, "pyproject.toml"), "utf8");
+    const project = text.split(/^\[project\]\s*$/m)[1]?.split(/^\[/m)[0] ?? "";
+    return project.match(/^\s*name\s*=\s*["']([^"']+)["']/m)?.[1] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const SHELL_TIMEOUT_MS = 30_000;
+
+/** What a person's new terminal would find for `name`, and whether it runs. */
+function fromFreshShell(name: string, run: Exec, env: Env): { path: string | null; runs: boolean; output: string } {
+  const shell = env.SHELL || "/bin/zsh";
+  const where = run(shell, ["-lc", `command -v -- ${JSON.stringify(name)}`], { timeoutMs: SHELL_TIMEOUT_MS });
+  if (where.status !== 0 || !where.output) return { path: null, runs: false, output: where.output };
+  const resolved = where.output.split("\n").at(-1) ?? "";
+  const help = run(shell, ["-lc", `${JSON.stringify(name)} --help`], { timeoutMs: SHELL_TIMEOUT_MS });
+  return { path: resolved, runs: help.status === 0, output: help.output };
+}
+
+function realpathOr(p: string): string {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
+/**
+ * Puts the tool on the person's PATH and checks it from a fresh login shell,
+ * which is the only check that means anything: sfo's own command passed every
+ * test and did nothing when typed. Never replaces a command it did not
+ * install; a name already taken is reported, not overwritten.
+ */
+export function installTool(id: string, archetype: string, env: Env = process.env, run: Exec = exec): InstallRecord {
+  const dir = projectDir(id, env);
+  const names = commandNames(dir, archetype);
+  const record: InstallRecord = { installer: null, commands: [], at: new Date().toISOString() };
+  if (names.length === 0) return save(id, record, env);
+
+  // Ours only if it points into this project or this project's own uv tool
+  // environment. Any other uv tool with the same command name is someone
+  // else's, and --force would overwrite it.
+  const pkg = packageName(dir, archetype);
+  const isOurs = (resolved: string): boolean => {
+    const real = realpathOr(resolved);
+    return real.startsWith(`${realpathOr(dir)}/`) || (pkg !== null && real.includes(`/uv/tools/${pkg}/`));
+  };
+  const taken = names.flatMap((name) => {
+    const before = fromFreshShell(name, run, env);
+    return before.path && !isOurs(before.path) ? [{ name, installed: false, detail: `the name is already taken by ${before.path}; not replaced` }] : [];
+  });
+
+  const installer =
+    archetype === "cli-python"
+      ? { command: "uv", args: ["tool", "install", "--editable", "--force", dir] }
+      : archetype === "cli-node"
+        ? { command: "npm", args: ["link"] }
+        : null;
+  if (!installer || taken.length === names.length) {
+    record.commands = taken.length > 0 ? taken : names.map((name) => ({ name, installed: false, detail: `no installer for "${archetype}"` }));
+    return save(id, record, env);
+  }
+
+  record.installer = [installer.command, ...installer.args].join(" ");
+  const done = run(installer.command, installer.args, { cwd: dir, timeoutMs: 300_000 });
+  for (const name of names) {
+    const skipped = taken.find((t) => t.name === name);
+    if (skipped) {
+      record.commands.push(skipped);
+      continue;
+    }
+    if (done.status !== 0) {
+      record.commands.push({ name, installed: false, detail: `the installer failed: ${done.output.split("\n").slice(-3).join(" ")}` });
+      continue;
+    }
+    const after = fromFreshShell(name, run, env);
+    record.commands.push(
+      after.path && after.runs
+        ? { name, installed: true, detail: after.path }
+        : { name, installed: false, detail: after.path ? `${after.path} does not run: ${after.output.split("\n").slice(-2).join(" ")}` : "not found from a new terminal after installing" },
+    );
+  }
+  return save(id, record, env);
+}
+
+function save(id: string, record: InstallRecord, env: Env): InstallRecord {
+  fs.mkdirSync(sfoDir(id, env), { recursive: true });
+  fs.writeFileSync(artifactPath(id, INSTALL_FILE, env), `${JSON.stringify(record, null, 2)}\n`);
+  return record;
+}
+
+export function readInstall(id: string, env?: Env): InstallRecord | null {
+  try {
+    return JSON.parse(fs.readFileSync(artifactPath(id, INSTALL_FILE, env), "utf8")) as InstallRecord;
+  } catch {
+    return null;
+  }
+}
