@@ -57,13 +57,23 @@ function packageName(dir: string, archetype: string): string | null {
 
 const SHELL_TIMEOUT_MS = 30_000;
 
-/** What a person's new terminal would find for `name`, and whether it runs. */
+/**
+ * A command name as a person would type one. Names come from a manifest an
+ * agent wrote, so anything else is refused rather than handed to a shell.
+ */
+export const COMMAND_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
+/**
+ * What a person's new terminal would find for `name`, and whether it runs.
+ * The name reaches the shell only as a positional argument (`$1`), never as
+ * script text: inside a quoted script string `$(…)` would still execute.
+ */
 function fromFreshShell(name: string, run: Exec, env: Env): { path: string | null; runs: boolean; output: string } {
   const shell = env.SHELL || "/bin/zsh";
-  const where = run(shell, ["-lc", `command -v -- ${JSON.stringify(name)}`], { timeoutMs: SHELL_TIMEOUT_MS });
+  const where = run(shell, ["-lc", 'command -v -- "$1"', "sfo", name], { timeoutMs: SHELL_TIMEOUT_MS });
   if (where.status !== 0 || !where.output) return { path: null, runs: false, output: where.output };
   const resolved = where.output.split("\n").at(-1) ?? "";
-  const help = run(shell, ["-lc", `${JSON.stringify(name)} --help`], { timeoutMs: SHELL_TIMEOUT_MS });
+  const help = run(shell, ["-lc", '"$1" --help', "sfo", name], { timeoutMs: SHELL_TIMEOUT_MS });
   return { path: resolved, runs: help.status === 0, output: help.output };
 }
 
@@ -83,8 +93,12 @@ function realpathOr(p: string): string {
  */
 export function installTool(id: string, archetype: string, env: Env = process.env, run: Exec = exec): InstallRecord {
   const dir = projectDir(id, env);
-  const names = commandNames(dir, archetype);
+  const declared = commandNames(dir, archetype);
+  const names = declared.filter((n) => COMMAND_NAME.test(n));
   const record: InstallRecord = { installer: null, commands: [], at: new Date().toISOString() };
+  for (const bad of declared.filter((n) => !COMMAND_NAME.test(n))) {
+    record.commands.push({ name: bad, installed: false, detail: "not a plain command name; refused" });
+  }
   if (names.length === 0) return save(id, record, env);
 
   // Ours only if it points into this project or this project's own uv tool

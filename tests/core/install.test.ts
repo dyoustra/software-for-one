@@ -28,7 +28,7 @@ function shell(opts: { before?: Record<string, string>; after?: Record<string, s
       return { status: installed ? 0 : 1, output: installed ? "Installed" : "error: boom" };
     }
     const script = args[1] ?? "";
-    const name = JSON.parse(script.replace(/^command -v -- /, "").replace(/ --help$/, ""));
+    const name = args[3] ?? "";
     const table = installed ? (opts.after ?? {}) : (opts.before ?? {});
     if (script.startsWith("command -v")) return table[name] ? { status: 0, output: table[name] } : { status: 1, output: "" };
     return { status: opts.runs === false ? 1 : 0, output: "usage" };
@@ -91,4 +91,16 @@ describe("installTool", () => {
     const { run } = shell({ installOk: false });
     expect(installTool("p", "cli-python", env, run).commands[0]).toMatchObject({ installed: false, detail: expect.stringMatching(/installer failed: error: boom/) });
   });
+
+  it("refuses a command name that is not a plain name, and never hands it to a shell", () => {
+    fs.writeFileSync(path.join(dir, "package.json"), JSON.stringify({ bin: { "$(touch pwned)": "x.js", good: "y.js" } }));
+    const { run, calls } = shell({ after: { good: "/usr/local/bin/good" } });
+    const record = installTool("p", "cli-node", env, run);
+
+    expect(record.commands).toContainEqual({ name: "$(touch pwned)", installed: false, detail: "not a plain command name; refused" });
+    expect(calls.join("\n")).not.toContain("pwned");
+    // The name travels as an argument after the script, not inside it.
+    expect(calls.find((c) => c.includes("command -v"))).toBe('/bin/zsh -lc command -v -- "$1" sfo good');
+  });
 });
+
