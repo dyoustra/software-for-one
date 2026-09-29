@@ -8,13 +8,19 @@ import { readLimit, formatLimit } from "../core/limit.js";
 import { readContests } from "../core/contest.js";
 import { readSmokeRecords, latestSmoke } from "../core/smoke.js";
 import { readFindings } from "../core/findings.js";
+import { recoveryHint } from "../core/stages.js";
+import { openQuestions } from "../core/openQuestions.js";
 import { isStopped, readCrash, readFailure } from "../core/stopped.js";
 
-/** A project plus whatever short explanation the listing owes the reader. */
-export type ProjectSummary = ProjectState & { note?: string };
+/**
+ * A project plus whatever short explanation the listing owes the reader, and
+ * the command that acts on it. Kept apart from the note so a long note can be
+ * shortened without cutting off the one part the reader needs whole.
+ */
+export type ProjectSummary = ProjectState & { note?: string; next?: string };
 
 /** Wide enough for a real recommendation, narrow enough to keep the table a table. */
-const NOTE_WIDTH = 64;
+const NOTE_WIDTH = 100;
 
 function noteFor(state: ProjectState, art: PriorArt): string {
   // Only `no_gap` is guaranteed a recommendation by the schema; a marginal
@@ -74,16 +80,21 @@ function criterionNote(state: ProjectState, env: Env | undefined): string | unde
   }
 }
 
-/** A delivered project whose real seams or review findings say it is not all right. Never throws. */
+/** A delivered project whose seams, findings or slices say it is not all right. Never throws. */
 function smokeNote(state: ProjectState, env: Env | undefined): string | undefined {
   if (state.status !== "done") return undefined;
   try {
+    const parts: string[] = [];
     const failed = [...new Set(latestSmoke(readSmokeRecords(state.id, env)).filter((r) => r.level === "failed").map((r) => r.seam))];
-    if (failed.length > 0) return `done, but failed against the real thing: ${failed.join(", ")}`;
-    const unrepaired = readFindings(state.id, env).filter((f) => f.severity === "high" && f.status === "unrepaired");
-    return unrepaired.length > 0
-      ? `done, ${unrepaired.length} high review finding${unrepaired.length === 1 ? "" : "s"} unrepaired`
-      : undefined;
+    if (failed.length > 0) parts.push(`failed against the real thing: ${failed.join(", ")}`);
+    // Round 2 is report-only, so its high findings are never "unrepaired" —
+    // but a regression a repair introduced is exactly what the person must see.
+    const unresolved = readFindings(state.id, env).filter(
+      (f) => f.severity === "high" && (f.status === "unrepaired" || (f.round === 2 && f.status === "report_only")),
+    );
+    if (unresolved.length > 0) parts.push(`${unresolved.length} high review finding${unresolved.length === 1 ? "" : "s"} unresolved`);
+    if (state.slicesFailed.length > 0) parts.push(`${state.slicesFailed.length} slice${state.slicesFailed.length === 1 ? "" : "s"} failed`);
+    return parts.length > 0 ? `done, but ${parts.join("; ")}` : undefined;
   } catch {
     return undefined;
   }
@@ -105,6 +116,7 @@ export function listProjects(env?: Env): ProjectSummary[] {
       const stopped = state.status === "awaiting_human" && isStopped(state.id, env);
       const crash = state.status === "awaiting_human" ? readCrash(state.id, env) : null;
       const failure = state.status === "failed" ? readFailure(state.id, env) : null;
+      const next = nextStepFor(state, env);
       const note = art
         ? noteFor(state, art)
         : failure
@@ -116,7 +128,7 @@ export function listProjects(env?: Env): ProjectSummary[] {
           : limit
           ? formatLimit(state.id, limit)
           : (criterionNote(state, env) ?? budgetNote(state, env) ?? smokeNote(state, env));
-      out.push(note !== undefined ? { ...state, note } : state);
+      out.push({ ...state, ...(note !== undefined ? { note } : {}), ...(next !== undefined ? { next } : {}) });
     } catch {
       // A directory with no readable state is not a project. Skip it silently —
       // `sfo status` must never fail because of unrelated junk in the root.
@@ -124,6 +136,26 @@ export function listProjects(env?: Env): ProjectSummary[] {
     }
   }
   return out;
+}
+
+/**
+ * The one command that moves a project on, when there is one. Parks that name
+ * their own remedy in the note (budget, plan limit, prior art) are left to it.
+ */
+function nextStepFor(state: ProjectState, env: Env | undefined): string | undefined {
+  const id = state.id;
+  if (state.status === "failed") return recoveryHint(id, state.currentStage);
+  if (state.status === "done") {
+    const hasFailures =
+      state.slicesFailed.length > 0 ||
+      smokeNote(state, env) !== undefined;
+    return hasFailures ? `\`sfo retry ${id}\` retries what failed` : undefined;
+  }
+  if (state.status === "awaiting_human") {
+    if (readCrash(id, env) || isStopped(id, env)) return `\`sfo run ${id}\` resumes it`;
+    if (openQuestions(id, env).length > 0) return `\`sfo answer ${id}\``;
+  }
+  return undefined;
 }
 
 export function formatStatus(projects: ProjectSummary[]): string {
@@ -139,7 +171,8 @@ export function formatStatus(projects: ProjectSummary[]): string {
             : p.status === "running" && isStale(p)
               ? "stale (no heartbeat)"
               : p.status;
-      return `${p.id.padEnd(32)} ${p.currentStage.padEnd(10)} ${label}`;
+      const row = `${p.id.padEnd(32)} ${p.currentStage.padEnd(10)} ${label}`;
+      return p.next ? `${row}\n${" ".repeat(44)}→ ${p.next}` : row;
     })
     .join("\n");
 }

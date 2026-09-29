@@ -209,6 +209,35 @@ describe("a delivered project with unrepaired review findings", () => {
       path.join(env.SFO_HOME, "p", ".sfo", "FINDINGS.jsonl"),
       [f("R-001", "high", "unrepaired"), f("R-002", "high", "repaired"), f("R-003", "medium", "unrepaired")].join("\n") + "\n",
     );
-    expect(formatStatus(listProjects(env))).toMatch(/done, 1 high review finding unrepaired$/m);
+    const out = formatStatus(listProjects(env));
+    expect(out).toMatch(/done, but 1 high review finding unresolved$/m);
+    expect(out).toMatch(/→ `sfo retry p` retries what failed/);
+  });
+});
+
+describe("round 2's findings", () => {
+  it("count as unresolved when high, since round 2 repairs nothing", () => {
+    seed("p", "deliver", "done");
+    const f = (id: string, round: number, status: string) =>
+      JSON.stringify({ id, round, severity: "high", kind: "code", summary: "s", evidence: "e", status });
+    fs.writeFileSync(
+      path.join(env.SFO_HOME, "p", ".sfo", "FINDINGS.jsonl"),
+      [f("R-001", 1, "repaired"), f("R-016", 2, "report_only"), f("R-017", 2, "report_only")].join("\n") + "\n",
+    );
+    expect(formatStatus(listProjects(env))).toMatch(/done, but 2 high review findings unresolved/);
+  });
+});
+
+describe("the next step", () => {
+  it("names the command for a failure and for open questions", () => {
+    seed("a", "research", "failed");
+    seed("b", "clarify", "awaiting_human");
+    fs.writeFileSync(
+      path.join(env.SFO_HOME, "b", ".sfo", "QUESTIONS.json"),
+      JSON.stringify({ questions: [{ id: "Q-001", section: "blocking", text: "t", context: "c", options: [{ key: "A", label: "a", tradeoff: "x" }, { key: "B", label: "b", tradeoff: "y" }] }] }),
+    );
+    const out = formatStatus(listProjects(env));
+    expect(out).toMatch(/→ .*sfo stage a research/);
+    expect(out).toMatch(/→ `sfo answer b`/);
   });
 });

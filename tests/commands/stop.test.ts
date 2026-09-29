@@ -100,7 +100,7 @@ describe("notifyOutcome", () => {
     );
     const { sent, notify } = capture();
     notifyOutcome("p", env, notify);
-    expect(sent[0][1]).toBe("done, but failed against the real thing: anthropic-batch");
+    expect(sent[0][1]).toBe("done, but failed against the real thing: anthropic-batch → `sfo retry p` retries what failed");
   });
 
   it("says a human is needed, and how to answer", () => {

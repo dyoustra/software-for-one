@@ -65,8 +65,9 @@ export function notifyOutcome(id: string, env?: Env, notify: Notifier = desktopN
   } catch {
     return;
   }
-  const note = listProjects(env).find((p) => p.id === id)?.note;
-  const message =
+  const summary = listProjects(env).find((p) => p.id === id);
+  const note = summary?.note;
+  const base =
     state.status === "done"
       ? (note ?? "done — SUMMARY.md is ready")
       : state.status === "failed"
@@ -74,6 +75,7 @@ export function notifyOutcome(id: string, env?: Env, notify: Notifier = desktopN
         : state.status === "awaiting_human"
           ? (note ?? `needs you — \`sfo answer ${id}\``)
           : null;
+  const message = base && summary?.next && !base.includes(summary.next) ? `${base} → ${summary.next}` : base;
   if (message) notify(`sfo: ${state.title}`, message);
 }
 
