@@ -14,7 +14,19 @@ export const desktopNotifier: Notifier = (title, message) => {
     if (process.platform === "darwin") {
       execFileSync(
         "osascript",
-        ["-e", "on run argv", "-e", "display notification (item 2 of argv) with title (item 1 of argv)", "-e", "end run", title, message],
+        // With a sound: when Script Editor's notification style is set to
+        // Notification Center only, the banner never appears, and a sound is
+        // what still says it is time to come back.
+        [
+          "-e",
+          "on run argv",
+          "-e",
+          'display notification (item 2 of argv) with title (item 1 of argv) sound name "Glass"',
+          "-e",
+          "end run",
+          title,
+          message,
+        ],
         { stdio: "ignore", timeout: 5000 },
       );
     } else if (process.platform === "linux") {
