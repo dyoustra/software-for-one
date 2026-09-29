@@ -39,6 +39,11 @@ export interface ReviewContext {
   withHeartbeat: <T>(fn: () => Promise<T>) => Promise<T>;
   /** Smoke again, without repair, after a repair changed the code. */
   resmoke: () => Promise<void>;
+  /**
+   * A retry of these findings alone: no first review, since the findings and
+   * their locked tests already exist; just another repair round for them.
+   */
+  retryFindings?: string[];
 }
 
 export type ReviewOutcome =
@@ -196,23 +201,32 @@ export async function runReview(ctx: ReviewContext): Promise<ReviewOutcome> {
   const { id, env, archetype } = ctx;
   const dir = projectDir(id, env);
 
-  const first = await runAgent(ctx, "review", loadPrompt("review"));
-  if (first.limited) {
-    discardPaths(dir, changedPaths(dir));
-    return { outcome: "limit", stage: "review", limit: first.limited };
-  }
-  if (!first.ok) return { outcome: "failed", reason: `the review agent exited ${first.exitCode}` };
+  let findings: Finding[];
+  if (ctx.retryFindings) {
+    const retried = new Set(ctx.retryFindings);
+    findings = findingsOrNone(id, env).map((f) =>
+      retried.has(f.id) && f.test ? { ...f, status: "open" as const, statusWhy: undefined } : f,
+    );
+    writeFindings(id, findings, env);
+  } else {
+    const first = await runAgent(ctx, "review", loadPrompt("review"));
+    if (first.limited) {
+      discardPaths(dir, changedPaths(dir));
+      return { outcome: "limit", stage: "review", limit: first.limited };
+    }
+    if (!first.ok) return { outcome: "failed", reason: `the review agent exited ${first.exitCode}` };
 
-  let findings = triageFindings(ctx, findingsOrNone(id, env));
-  writeFindings(id, findings, env);
+    findings = triageFindings(ctx, findingsOrNone(id, env));
+    writeFindings(id, findings, env);
 
-  const judged = await adjudicateTestFindings(ctx, findings);
-  if ("limit" in judged) {
-    writeFindings(id, judged.findings, env);
-    return { outcome: "limit", stage: judged.limit.stage, limit: judged.limit.limit };
+    const judged = await adjudicateTestFindings(ctx, findings);
+    if ("limit" in judged) {
+      writeFindings(id, judged.findings, env);
+      return { outcome: "limit", stage: judged.limit.stage, limit: judged.limit.limit };
+    }
+    findings = judged.findings;
+    writeFindings(id, findings, env);
   }
-  findings = judged.findings;
-  writeFindings(id, findings, env);
 
   const passed = (): Slice[] => {
     const ids = new Set(readState(id, env).slicesPassed);
@@ -278,6 +292,37 @@ export async function runReview(ctx: ReviewContext): Promise<ReviewOutcome> {
     const fixed = new Set(nowPassing.map((f) => f.id));
     findings = findings.map((f) => (fixed.has(f.id) ? { ...f, status: "repaired", repairCommit } : f));
     writeFindings(id, findings, env);
+  }
+
+  // On a retry, a finding that has now failed its repairs twice may have a
+  // wrong test rather than wrong code; asking again with the same inputs gets
+  // the same answer, so its test goes to the adjudicator instead.
+  if (ctx.retryFindings) {
+    for (const f of openFindings()) {
+      const sliceId = `${REVIEW_CONTEST_ID}-${f.id}`;
+      if (contestFor(id, sliceId, env) || !f.test) continue;
+      const outcome = await adjudicate(
+        adjudicationContext(ctx),
+        { id: sliceId, name: `test for ${f.id}`, criterionIds: [f.criterionId ?? "(none)"], prerequisites: [] },
+        {
+          sliceId,
+          criterionId: f.criterionId ?? "(none)",
+          testFile: f.test,
+          testName: "",
+          claim: "unsatisfiable",
+          why: `Two repair rounds could not make this reproduction test pass. Decide whether the test, not the code, is wrong.\n\n${f.summary}\n\n${f.evidence}`,
+          proposedFix: "",
+        },
+        false,
+      );
+      if (outcome.kind === "limit") {
+        writeFindings(id, findings, env);
+        return { outcome: "limit", stage: outcome.stage, limit: outcome.limit };
+      }
+      if (contestFor(id, sliceId, env)?.ruling === "amend_test" && ctx.runTests(id, archetype, [f.test], env).ok) {
+        findings = findings.map((g) => (g.id === f.id ? { ...g, status: "repaired", statusWhy: "its test was amended by the adjudicator" } : g));
+      }
+    }
   }
 
   findings = findings.map((f) =>

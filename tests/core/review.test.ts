@@ -385,3 +385,36 @@ describe("a finding that says a test is wrong", () => {
     expect(readFindings("p", env)[0]).toMatchObject({ status: "report_only", statusWhy: expect.stringMatching(/upheld tests\/test_s01.py: it is fine/) });
   });
 });
+
+describe("a retry of unrepaired findings", () => {
+  const seedFinding = () => {
+    fs.mkdirSync(path.join(dir, "tests", "review"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "tests/review/test_r001.py"), "def test_it() -> None: assert False\n");
+    lockTests("p", "tests", env);
+    git("add", "-A");
+    git("commit", "-q", "-m", "review tests");
+    fs.writeFileSync(
+      path.join(dir, ".sfo", "FINDINGS.jsonl"),
+      JSON.stringify({ ...finding("R-001"), status: "unrepaired", statusWhy: "still failing after 2 repair attempts" }) + "\n",
+    );
+  };
+
+  it("skips the first review and repairs only what was retried", async () => {
+    seedFinding();
+    const agent = new Agent((stage) => {
+      if (stage === "review-repair") fs.writeFileSync(path.join(dir, "app.py"), "resolution = 'applied'\n");
+    });
+    await runReview(ctx(agent, { retryFindings: ["R-001"], runTests: codeSays((code) => code.includes("applied")) }));
+
+    expect(stages(agent)).toEqual(["review-repair", "review-2"]);
+    expect(statuses()).toEqual({ "R-001": "repaired" });
+  });
+
+  it("sends a test that still cannot be satisfied to the adjudicator instead of repeating itself", async () => {
+    seedFinding();
+    const agent = new Agent(() => {});
+    await runReview(ctx(agent, { retryFindings: ["R-001"] }));
+    expect(stages(agent)).toEqual(["review-repair", "review-repair", "adjudicate-REVIEW-R-001"]);
+    expect(statuses()).toEqual({ "R-001": "unrepaired" });
+  });
+});

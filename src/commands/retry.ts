@@ -1,4 +1,7 @@
 import { readState, writeState } from "../core/state.js";
+import { readSmokeRecords, latestSmoke } from "../core/smoke.js";
+import { readFindings } from "../core/findings.js";
+import { writeRetry } from "../core/retry.js";
 import { readSlices, skippedBy } from "../core/slices.js";
 import type { Env } from "../core/paths.js";
 
@@ -62,3 +65,63 @@ export function retrySlices(id: string, sliceId?: string, env?: Env): string {
 
   return `${targets.join(", ")} will be attempted again${also} — run \`sfo run ${id}\``;
 }
+
+/**
+ * `sfo retry <id>`: redo everything that failed and nothing that passed —
+ * failed slices, seams whose latest check failed, and high findings still
+ * unrepaired that have a test to repair against. The run restarts at the
+ * earliest stage with work to do.
+ */
+export function retryFailed(id: string, env?: Env): string {
+  const state = readState(id, env);
+  let seams: string[] = [];
+  let findings: string[] = [];
+  let notRetryable: string[] = [];
+  try {
+    seams = [...new Set(latestSmoke(readSmokeRecords(id, env)).filter((r) => r.level === "failed").map((r) => r.seam))];
+  } catch {
+    // No readable smoke record: nothing of that kind to retry.
+  }
+  try {
+    const high = readFindings(id, env).filter((f) => f.severity === "high");
+    findings = high.filter((f) => f.status === "unrepaired" && f.test).map((f) => f.id);
+    notRetryable = high
+      .filter((f) => (f.status === "unrepaired" && !f.test) || (f.round === 2 && f.status === "report_only"))
+      .map((f) => f.id);
+  } catch {
+    // Likewise.
+  }
+  const slices = [...state.slicesFailed];
+  if (slices.length + seams.length + findings.length === 0) {
+    return notRetryable.length > 0
+      ? `nothing ${id} can retry: ${notRetryable.join(", ")} have no test to repair against`
+      : `${id} has nothing that failed`;
+  }
+
+  const parts: string[] = [];
+  if (slices.length > 0) {
+    parts.push(retrySlices(id, undefined, env).split(" — ")[0]);
+  } else {
+    // Rewind to just before the earliest stage with work. A stage marked
+    // complete there makes the next run pick the one after it.
+    const before = seams.length > 0 ? "build" : "smoke";
+    writeState(
+      {
+        ...state,
+        currentStage: before,
+        completedStage: before,
+        status: "awaiting_human",
+        pid: null,
+        updatedAt: new Date().toISOString(),
+      },
+      env,
+    );
+  }
+  if (seams.length > 0) parts.push(`seam${seams.length === 1 ? "" : "s"} ${seams.join(", ")} will be checked again`);
+  if (findings.length > 0) parts.push(`${findings.join(", ")} will get another repair round`);
+  writeRetry(id, { slices, seams, findings, at: new Date().toISOString() }, env);
+
+  const skipped = notRetryable.length > 0 ? ` (${notRetryable.join(", ")} have no test to repair against, and stay reported)` : "";
+  return `${parts.join("; ")}${skipped} — run \`sfo run ${id}\``;
+}
+

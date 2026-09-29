@@ -1661,3 +1661,65 @@ describe("a failed stage", () => {
     expect(formatStatus(listProjects(env))).toMatch(/failed at research: the research agent exited 1/);
   });
 });
+
+describe("sfo retry after delivery", () => {
+  it("re-checks only the failed seam, skips review, delivers again, and clears the retry", async () => {
+    const seamRecord = (id: string) => ({
+      id,
+      name: id,
+      kind: "platform",
+      effect: "read_only",
+      testMode: null,
+      credential: null,
+      constraints: [],
+      smoke: { checks: ["c"], maxCostUsd: 0, async: false },
+    });
+    const base = producesArtifacts();
+    const runner = new FakeRunner(true, 0, undefined, (stage) => {
+      base(stage);
+      if (stage === "spec") {
+        fs.writeFileSync(
+          path.join(env.SFO_HOME, "p", ".sfo", "SERVICES.jsonl"),
+          `${JSON.stringify(seamRecord("good"))}\n${JSON.stringify(seamRecord("flaky"))}\n`,
+        );
+      }
+      if (stage === "test-write") {
+        fs.mkdirSync(path.join(env.SFO_HOME, "p", "smoke"), { recursive: true });
+        for (const s of ["good", "flaky"]) fs.writeFileSync(path.join(env.SFO_HOME, "p", "smoke", `test_smoke_${s}.py`), "def test_it(): pass\n");
+      }
+    });
+    let flakyFixed = false;
+    const ran: string[] = [];
+    const smoke = {
+      spawnSeam: async ({ args, env: childEnv }: { args: string[]; env: Record<string, string | undefined> }) => {
+        const file = args.at(-1) ?? "";
+        ran.push(file);
+        const ok = !file.includes("flaky") || flakyFixed;
+        fs.writeFileSync(childEnv.SFO_SMOKE_RESULTS ?? "", JSON.stringify({ seam: "x", check: "c", level: ok ? "completed" : "failed", detail: "" }));
+        return { exitCode: ok ? 0 : 1, output: "", timedOut: false };
+      },
+    };
+    const failGate = () => ({ ok: false, steps: [], tamperedTests: [], reason: "no" });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    seed("capture");
+    await advance("p", runner, env, { verify: PASSES, smoke, passedGate: failGate });
+    fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.json"), '{"answers":[]}');
+    await advance("p", runner, env, { verify: PASSES, smoke, passedGate: failGate });
+    expect(readState("p", env).status).toBe("done");
+
+    const { retryFailed } = await import("../../src/commands/retry.js");
+    const { readRetry } = await import("../../src/core/retry.js");
+    expect(retryFailed("p", env)).toMatch(/seam flaky will be checked again/);
+
+    flakyFixed = true;
+    ran.length = 0;
+    runner.calls.length = 0;
+    await advance("p", runner, env, { verify: PASSES, smoke, passedGate: failGate });
+    error.mockRestore();
+
+    expect(ran).toEqual(["smoke/test_smoke_flaky.py"]);
+    expect(runner.calls.map(stageOf)).toEqual(["deliver"]);
+    expect(readState("p", env).status).toBe("done");
+    expect(readRetry("p", env)).toBeNull();
+  });
+});

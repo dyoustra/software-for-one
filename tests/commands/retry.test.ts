@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { retrySlices } from "../../src/commands/retry.js";
+import { retrySlices, retryFailed } from "../../src/commands/retry.js";
+import { readRetry } from "../../src/core/retry.js";
 import { readState, writeState } from "../../src/core/state.js";
 import { writeSlices } from "../../src/core/slices.js";
 import type { Slice } from "../../src/core/slices.js";
@@ -119,3 +120,51 @@ describe("retrySlices", () => {
     expect(readState("p", env).attempts).toEqual({ build: 1 });
   });
 });
+
+describe("retryFailed", () => {
+  const sfo = (file: string, lines: object[]) =>
+    fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", file), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
+  const smoke = (seam: string, level: string, attempt = 1) => ({ seam, check: "c", level, detail: "", attempt, at: "2026-09-29T00:00:00.000Z" });
+  const finding = (id: string, over: object) => ({ id, round: 1, severity: "high", kind: "code", summary: "s", evidence: "e", status: "unrepaired", ...over });
+
+  it("says so when nothing failed", () => {
+    seed([], {}, { currentStage: "deliver", status: "done" });
+    expect(retryFailed("p", env)).toBe("p has nothing that failed");
+  });
+
+  it("retries only the seams whose latest check failed, rewinding to just after the build", () => {
+    seed([], {}, { currentStage: "deliver", status: "done" });
+    sfo("SMOKE.jsonl", [smoke("rss", "failed"), smoke("rss", "completed", 2), smoke("colour", "failed", 1), smoke("colour", "failed", 2)]);
+    const out = retryFailed("p", env);
+
+    expect(out).toMatch(/seam colour will be checked again/);
+    expect(readRetry("p", env)).toMatchObject({ slices: [], seams: ["colour"], findings: [] });
+    expect(readState("p", env)).toMatchObject({ currentStage: "build", completedStage: "build", status: "awaiting_human" });
+  });
+
+  it("retries findings that have a test, and names the ones that cannot be", () => {
+    seed([], {}, { currentStage: "deliver", status: "done" });
+    sfo("FINDINGS.jsonl", [
+      finding("R-001", { test: "tests/review/test_r001.py" }),
+      finding("R-002", { test: null }),
+      finding("R-016", { round: 2, status: "report_only", test: null }),
+      finding("R-003", { severity: "medium", test: "tests/review/test_r003.py" }),
+    ]);
+    const out = retryFailed("p", env);
+
+    expect(readRetry("p", env)?.findings).toEqual(["R-001"]);
+    expect(out).toMatch(/R-001 will get another repair round \(R-002, R-016 have no test to repair against, and stay reported\)/);
+    expect(readState("p", env)).toMatchObject({ currentStage: "smoke", completedStage: "smoke" });
+  });
+
+  it("reopens the build for failed slices, and records them with the rest", () => {
+    seed(["S-01"], { "S-01": 2 }, { currentStage: "deliver", status: "done" });
+    sfo("SMOKE.jsonl", [smoke("colour", "failed")]);
+    const out = retryFailed("p", env);
+
+    expect(out).toMatch(/^S-01 will be attempted again.*; seam colour will be checked again/);
+    expect(readState("p", env)).toMatchObject({ currentStage: "build", slicesFailed: [] });
+    expect(readRetry("p", env)).toMatchObject({ slices: ["S-01"], seams: ["colour"] });
+  });
+});
+

@@ -37,6 +37,7 @@ import { adjudicate, resumeCriterion, type AdjudicationContext, type Adjudicatio
 import { runSmoke, type SmokeDeps, type SmokeContext } from "./smoke.js";
 import { runReview, type ReviewContext } from "./review.js";
 import { installTool } from "./install.js";
+import { readRetry, clearRetry } from "./retry.js";
 
 /** The artifact a human must produce before a blocking stage can run. */
 const HUMAN_INPUT: Record<string, string> = { clarify: "ANSWERS.json" };
@@ -893,15 +894,27 @@ export async function advance(
         },
         deps: opts.smoke,
       };
+      // A retry redoes only what failed. Rebuilt slices changed the code, so
+      // then every seam and a full review run again; otherwise just the
+      // failed seams, and a repair round for the unrepaired findings — or,
+      // with none of those, no review at all.
+      const retry = readRetry(id, env);
+      const narrow = retry !== null && retry.slices.length === 0;
+      if (upcoming === "review" && narrow && retry.findings.length === 0) {
+        commitStage(id, upcoming, env);
+        state = markCompleted(id, upcoming, env);
+        continue;
+      }
       const ran =
         upcoming === "smoke"
-          ? await runSmoke(smokeCtx)
+          ? await runSmoke({ ...smokeCtx, ...(narrow ? { onlySeams: retry.seams } : {}) })
           : await runReview({
               ...smokeCtx,
               runTests: opts.runTests ?? runTestFiles,
               resmoke: async () => {
                 await runSmoke({ ...smokeCtx, noRepair: true });
               },
+              ...(narrow ? { retryFindings: retry.findings } : {}),
             });
       state = readState(id, env);
 
@@ -1032,6 +1045,7 @@ export async function advance(
     // retry diffs against the last state that was actually good.
     commitStage(id, upcoming, env);
     state = markCompleted(id, upcoming, env);
+    if (upcoming === "deliver") clearRetry(id, env);
   }
 }
 

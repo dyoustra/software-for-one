@@ -284,6 +284,8 @@ export interface SmokeContext {
   passedGate: (id: string, archetype: string, passed: Slice[], env?: Env, extraTests?: string[]) => VerifyResult;
   /** Run the seams and record them, but attempt no repair: the re-check after review repairs. */
   noRepair?: boolean;
+  /** A retry of these seams alone; the rest keep the result they have. */
+  onlySeams?: string[];
   budgetExceeded: () => boolean;
   withHeartbeat: <T>(fn: () => Promise<T>) => Promise<T>;
   deps?: SmokeDeps;
@@ -340,6 +342,7 @@ export async function runSmoke(ctx: SmokeContext): Promise<SmokeOutcome> {
   } catch (err) {
     return { outcome: "failed", reason: `${err instanceof Error ? err.message : String(err)} — re-run \`sfo stage ${id} spec\`` };
   }
+  if (ctx.onlySeams) services = services.filter((s) => ctx.onlySeams?.includes(s.id));
   // A project from before seams were listed has nothing to exercise.
   if (services.length === 0) return { outcome: "complete" };
 
