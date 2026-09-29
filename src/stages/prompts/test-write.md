@@ -1,5 +1,5 @@
 Read `.sfo/SPEC.md`, `.sfo/ARCHETYPE.json`, `.sfo/CRITERIA.jsonl`,
-`.sfo/SLICES.jsonl`, and `.sfo/SERVICES.jsonl`.
+`.sfo/SLICES.jsonl`, `.sfo/SERVICES.jsonl`, and `.sfo/PRESENTATION.json`.
 
 Write the test suite. **No implementation exists yet, and you must not write
 any.** You are writing the contract the implementation will have to satisfy.
@@ -47,6 +47,13 @@ may add to `tests/`: a fixture you leave for a build slice to capture is one
 that slice can never add, and the slice fails. Capture it yourself; you have
 network access. `.sfo/SPEC.md` and `.sfo/PLAN.md` may already describe the
 fixture corpus they expect; if so, build that. Fixtures go in the test tree.
+
+**Snapshot tests, when the output is the product.** If `.sfo/PRESENTATION.json`
+says `visual` or `text`, write a snapshot test for each of its `invocations`:
+run it with its fixed inputs and compare the exact output, ANSI codes included,
+against a golden file under `tests/snapshots/`. Write the golden file yourself,
+from the spec, as what the output must be — it is part of the contract, like
+any assertion. For `none`, write none.
 
 **Fakes must be as strict as the real thing.** For every `network` seam in
 `.sfo/SERVICES.jsonl`, the fake you build rejects any input that breaks one of

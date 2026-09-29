@@ -59,7 +59,10 @@ Then, in order:
    whether it was installed and where it resolves from a new terminal, or why
    not. Lead with the installed command itself (`ut-tower`, not `uv run
    ut-tower`); where one could not be installed, say why, and give the command
-   that runs it from the project instead.
+   that runs it from the project instead. If `.sfo/RENDERS.json` exists, show
+   what the tool looks like: the captured output of its first invocation in a
+   code block (escape codes stripped), and links to the light and dark
+   screenshots when there are any.
    If it calls a model, say which credential it needs and where it reads it
    from, and whether that call was ever made against the real service or only
    against a test double. A backend nobody has run is not verified, however

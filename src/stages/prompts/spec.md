@@ -74,6 +74,25 @@ If `.sfo/ACCESS.json` does not exist, the project predates it: ask one
 `blocking` question about how the tool will authenticate to a model, and only
 if it calls one.
 
+**Decide how this tool presents itself.** Write `.sfo/PRESENTATION.json`:
+
+    {"kind":"visual","why":"the answer is a coloured drawing of the Tower",
+     "invocations":[["ut-tower","--now","2026-09-26T21:30:00-05:00"]]}
+
+- `visual` — the look is the product: art, colour, layout. Its output will be
+  screenshotted on a light and a dark terminal background and looked at.
+- `text` — plain output where what it says matters and how it looks does not.
+- `none` — the output is a file, a side effect, or nothing to see.
+- `invocations` are up to six runs, command first, that show it doing its main
+  job with **fixed inputs** (a pinned date, a bundled fixture) so the output
+  does not drift. Empty for `none`.
+
+This is a judgement about this tool, not a default: a file converter is
+`none`, and a status line with colour is `visual`. Never hard-code white or
+black text: a colour that matches the person's terminal background makes the
+output vanish, and the terminal's default foreground is the one colour that
+never does.
+
 **Settle the real seams.** Rewrite `.sfo/SERVICES.jsonl` so it lists exactly
 the services and platform APIs *this design* uses — add what research missed,
 remove what the design does not touch — one object per line in the format
@@ -144,7 +163,8 @@ no trailing commas, no comments, and one complete object per line in the
 `.jsonl` files.
 
 Write only `.sfo/SPEC.md`, `.sfo/ARCHETYPE.json`, `.sfo/CRITERIA.jsonl`,
-`.sfo/SERVICES.jsonl`, `.sfo/QUESTIONS.json`, and `.sfo/DECISIONS.jsonl`.
+`.sfo/SERVICES.jsonl`, `.sfo/PRESENTATION.json`, `.sfo/QUESTIONS.json`, and
+`.sfo/DECISIONS.jsonl`.
 
 Once you have chosen the stack, rewrite the project's root `.gitignore` for it —
 dependency directories, build output, caches, virtual environments, and anything

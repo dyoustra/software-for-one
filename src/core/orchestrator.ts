@@ -37,6 +37,7 @@ import { adjudicate, resumeCriterion, type AdjudicationContext, type Adjudicatio
 import { runSmoke, type SmokeDeps, type SmokeContext } from "./smoke.js";
 import { runReview, type ReviewContext } from "./review.js";
 import { installTool } from "./install.js";
+import { captureRenders } from "./presentation.js";
 import { readRetry, clearRetry } from "./retry.js";
 
 /** The artifact a human must produce before a blocking stage can run. */
@@ -74,6 +75,8 @@ export interface AdvanceOptions {
   smoke?: SmokeDeps;
   /** The gate a smoke or review repair must pass. Injected for the same reason as `verify`. */
   passedGate?: PassedGateFn;
+  /** Captures and draws the tool's output. Injected for the same reason as `install`. */
+  render?: typeof captureRenders;
   /** Puts the built tool on PATH. Injected so tests never install anything. */
   install?: typeof installTool;
   /** Runs chosen test files alone: review's reproductions. Injected for the same reason. */
@@ -934,6 +937,15 @@ export async function advance(
       if (park) {
         applyPark(id, { ...state, currentStage: previousStage }, park, env);
         return;
+      }
+      // What the tool looks like, for review to see and the summary to show.
+      // After smoke, because the code is final for the seams by then.
+      if (upcoming === "smoke") {
+        try {
+          (opts.render ?? captureRenders)(id, archetype, env ?? process.env);
+        } catch (err) {
+          console.error(`sfo: could not capture the tool's output — ${reason(err)}`);
+        }
       }
       commitStage(id, upcoming, env);
       state = markCompleted(id, upcoming, env);

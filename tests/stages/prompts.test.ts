@@ -8,6 +8,8 @@ import { CONTESTS_FILE, CONTEST_FILE, RULING_FILE } from "../../src/core/contest
 import { SERVICES_FILE, CREDENTIALS_FILE, smokeTestFile } from "../../src/core/services.js";
 import { SMOKE_FILE } from "../../src/core/smoke.js";
 import { FINDINGS_FILE, REVIEW_TEST_DIR } from "../../src/core/findings.js";
+import { PRESENTATION_FILE, RENDERS_FILE } from "../../src/core/presentation.js";
+import { INSTALL_FILE } from "../../src/core/install.js";
 import { SMOKE_DIR } from "../../src/core/archetype.js";
 
 describe("loadPrompt", () => {
@@ -91,5 +93,13 @@ describe("prompts and the artifacts they are graded on", () => {
     expect(review).toContain(`${REVIEW_TEST_DIR}/test_r001_`);
     expect(loadPrompt("deliver")).toContain(`.sfo/${FINDINGS_FILE}`);
     expect(loadPrompt("review-repair").length).toBeGreaterThan(100);
+  });
+
+  it("carries presentation from spec to test-write, and renders to review and deliver", () => {
+    expect(loadPrompt("spec")).toContain(`.sfo/${PRESENTATION_FILE}`);
+    expect(loadPrompt("test-write")).toContain(`.sfo/${PRESENTATION_FILE}`);
+    expect(loadPrompt("review")).toContain(`.sfo/${RENDERS_FILE}`);
+    expect(loadPrompt("deliver")).toContain(`.sfo/${RENDERS_FILE}`);
+    expect(loadPrompt("deliver")).toContain(`.sfo/${INSTALL_FILE}`);
   });
 });

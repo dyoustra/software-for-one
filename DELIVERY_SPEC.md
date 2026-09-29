@@ -1,6 +1,6 @@
 # Delivery and Aftercare — Spec
 
-**Status:** Design approved, pre-implementation
+**Status:** Implemented, 2026-09-29
 **Date:** 2026-09-29
 **Depends on:** `SMOKE_SPEC.md`, `REVIEW_REPAIR_SPEC.md`, `CONTEST_SPEC.md`
 **Prompted by:** the second real run, `ut-tower`
@@ -148,3 +148,29 @@ resolved by a rollback.
 5. Retry what failed.
 6. Presentation: `PRESENTATION.json`, snapshot tests, captures, PNGs, review
    and SUMMARY.
+
+## 9. As built
+
+- **Screenshots use sfo's own renderer, not `freeze`.** A small Pillow script,
+  run with `uv run --no-project --with pillow`, so nothing gets installed
+  system-wide. Drawing it ourselves means "default foreground" is dark on the
+  light background and light on the dark one, which is exactly the
+  distinction that hid the white Tower. Verified on ut-tower: after the fix,
+  tonight's white Tower is visible on light, and the orange top shows on
+  dark. The dark render of the 26th also shows R-016's mid-path URL wrap at a
+  glance.
+- **Captures run through `script -q /dev/null …` with stdin closed.** `script`
+  rejects a pipe for its own input, and echoes a literal `^D` and two
+  backspaces first, which are stripped.
+- **Installed commands are checked positionally.** A command name reaches the
+  shell only as `$1`, and a name that isn't a plain command name is refused.
+  That came from a security review of the first version, which spliced names
+  into a double-quoted shell script.
+- **Rollback reverses only code outside `.sfo/`,** applied as one reverse
+  patch, all or nothing. A `git revert` of a `commitStage` commit would also
+  roll back sfo's own state and findings, and refuses to run while they're
+  being written.
+- **Retry scope:** a retry that rebuilds slices re-checks every seam and
+  reviews in full, because the code changed. Otherwise smoke checks only the
+  failed seams, and review runs only a repair round for the retried
+  findings, or doesn't run at all if there are none.

@@ -1,5 +1,6 @@
 Read `.sfo/SPEC.md`, `.sfo/CRITERIA.jsonl`, `.sfo/SERVICES.jsonl`,
-`.sfo/DECISIONS.jsonl`, the test suite, and the source. You have not seen how
+`.sfo/DECISIONS.jsonl`, `.sfo/RENDERS.json` if it exists, the test suite, and
+the source. You have not seen how
 any of it was built, and that is the point: you are the adversarial review.
 
 The gate has already checked that every slice's tests pass. Your job is what
@@ -20,6 +21,14 @@ Look for:
   that the corresponding fake does not enforce.
 - **A smoke test that looks irreversible** — one whose calls send, post,
   charge, or delete, for a seam whose `effect` says otherwise. Lead with it.
+
+**Look at it.** `.sfo/RENDERS.json` lists what the tool printed on a real
+terminal for each of its presentation's invocations: the raw capture (`text`)
+and, for a `visual` tool, screenshots on a light and a dark background (`light`,
+`dark`), all relative to `.sfo/`. Open the screenshots and look. Output that
+vanishes on one background, is cut off, wraps where it should not, or does not
+look like what the spec describes is a `code` finding like any other — a
+reproduction test for it can assert on the captured escape codes and text.
 
 **Decisions.** A decision in `.sfo/DECISIONS.jsonl` with `"decided_by":"human"`
 is the spec: the person chose it, so it is never a finding. One made by an agent
