@@ -91,7 +91,7 @@ export interface AdvanceOptions {
  * 120s window, and a healthy long run would therefore read as dead to
  * `sfo status` and to the already-running guard in `sfo run`.
  */
-function startHeartbeat(id: string, env: Env | undefined, intervalMs: number): () => void {
+export function startHeartbeat(id: string, env: Env | undefined, intervalMs: number): () => void {
   const timer = setInterval(() => {
     try {
       const current = readState(id, env);

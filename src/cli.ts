@@ -129,6 +129,35 @@ export function buildProgram(): Command {
     }));
 
   program
+    .command("feedback")
+    .description("Ask for a change to a finished project, in your own words")
+    .argument("<id>", "project id")
+    .argument("[text]", "the feedback; omit to write it in $EDITOR or pipe it in")
+    .option("--attach", "apply it in this terminal instead of in the background")
+    .option("--entry <n>", "apply an already-recorded entry (used by the background run)")
+    .action(guarded(async (id: string, text: string | undefined, opts: { attach?: boolean; entry?: string }) => {
+      const { recordFeedback, runFeedbackAttached, startFeedbackDetached } = await import("./commands/feedback.js");
+      let n: number;
+      if (opts.entry) {
+        n = Number(opts.entry);
+      } else {
+        const { readIdea, editInEditor, readAllStdin } = await import("./commands/new.js");
+        const words = await readIdea(text, {
+          isTTY: Boolean(process.stdin.isTTY),
+          readStdin: readAllStdin,
+          edit: () => editInEditor("\n# What should change? Lines starting with # are ignored.\n"),
+        });
+        n = recordFeedback(id, words);
+      }
+      if (opts.attach) {
+        const outcome = await runFeedbackAttached(id, n);
+        console.log(outcome.outcome === "done" ? `applied: ${outcome.summary}` : JSON.stringify(outcome));
+      } else {
+        console.log(`feedback ${n} recorded; applying it (pid ${startFeedbackDetached(id, n)}) — you'll get a notification`);
+      }
+    }));
+
+  program
     .command("stop")
     .description("Stop a running project, leaving everything it made in place")
     .argument("<id>", "project id")

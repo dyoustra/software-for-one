@@ -364,6 +364,7 @@ export function agentToolsForStage(id: string, stage: string, env?: Env): string
     stage.startsWith("build-") ||
     stage.startsWith("adjudicate-") ||
     stage === "smoke-repair" ||
+    stage.startsWith("feedback-") ||
     stage.startsWith("review-")
       ? "build"
       : stage;
