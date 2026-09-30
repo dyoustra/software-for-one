@@ -124,7 +124,7 @@ describe("retrySlices", () => {
 describe("retryFailed", () => {
   const sfo = (file: string, lines: object[]) =>
     fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", file), lines.map((l) => JSON.stringify(l)).join("\n") + "\n");
-  const smoke = (seam: string, level: string, attempt = 1) => ({ seam, check: "c", level, detail: "", attempt, at: "2026-09-29T00:00:00.000Z" });
+  const smoke = (seam: string, level: string, attempt = 1) => ({ seam, check: "c", level, detail: "", attempt, at: `2026-09-29T00:0${attempt}:00.000Z` });
   const finding = (id: string, over: object) => ({ id, round: 1, severity: "high", kind: "code", summary: "s", evidence: "e", status: "unrepaired", ...over });
 
   it("says so when nothing failed", () => {

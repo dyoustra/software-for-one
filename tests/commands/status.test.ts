@@ -186,7 +186,7 @@ describe("a delivered project whose seams failed", () => {
   it("says which, instead of plain done", () => {
     seed("p", "deliver", "done");
     const line = (seam: string, level: string, attempt: number) =>
-      JSON.stringify({ seam, check: "c", level, detail: "", attempt, at: "2026-09-27T00:00:00.000Z" });
+      JSON.stringify({ seam, check: "c", level, detail: "", attempt, at: `2026-09-27T00:0${attempt}:00.000Z` });
     fs.writeFileSync(
       path.join(env.SFO_HOME, "p", ".sfo", "SMOKE.jsonl"),
       [

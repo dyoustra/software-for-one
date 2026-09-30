@@ -432,12 +432,21 @@ describe("more than one seam still failing", () => {
 });
 
 describe("latestSmoke", () => {
-  it("keeps each seam's most recent attempt, even when the check names differ", () => {
-    const r = (seam: string, check: string, attempt: number, level: "failed" | "completed") => ({ seam, check, level, detail: "", attempt, at: "" });
-    const crashed = r("s", "(smoke test)", 1, "failed");
-    const fixed = r("s", "submit", 2, "completed");
-    const other = r("t", "read", 1, "completed");
+  const r = (seam: string, check: string, attempt: number, level: "failed" | "completed", at: string) => ({ seam, check, level, detail: "", attempt, at });
+
+  it("keeps each seam's most recent result, even when the check names differ", () => {
+    const crashed = r("s", "(smoke test)", 1, "failed", "2026-09-30T10:00:00Z");
+    const fixed = r("s", "submit", 2, "completed", "2026-09-30T10:05:00Z");
+    const other = r("t", "read", 1, "completed", "2026-09-30T10:00:00Z");
     expect(latestSmoke([crashed, other, fixed])).toEqual([other, fixed]);
+  });
+
+  it("goes by time, since attempt numbers restart with every smoke run", () => {
+    // ut-tower: the last run's attempt 4 failed; this run passed at attempt 4, then re-checked at 1.
+    const oldRun = r("colour", "c", 4, "failed", "2026-09-29T17:00:00Z");
+    const thisRun = r("colour", "c", 4, "completed", "2026-09-30T16:07:00Z");
+    const recheck = r("colour", "c", 1, "completed", "2026-09-30T16:31:00Z");
+    expect(latestSmoke([oldRun, thisRun, recheck])).toEqual([recheck]);
   });
 });
 

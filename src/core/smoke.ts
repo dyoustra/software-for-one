@@ -58,14 +58,17 @@ export function readSmokeRecords(id: string, env?: Env): SmokeRecord[] {
 }
 
 /**
- * Each seam's most recent attempt: what the project delivered with. By seam
- * rather than by check, because a test that crashed reports under a placeholder
- * check, and keying by check would let that failure outlive the fix.
+ * Each seam's most recent result: what the project delivered with. By the
+ * time it was recorded, not the attempt number, which restarts with every
+ * smoke run in a file that keeps them all — ut-tower's status reported an old
+ * run's failure over the newer pass. By seam rather than by check, because a
+ * crashed test reports under a placeholder check. One recording writes all of
+ * a seam's lines with one timestamp, so that timestamp is the unit.
  */
 export function latestSmoke(records: SmokeRecord[]): SmokeRecord[] {
-  const lastAttempt = new Map<string, number>();
-  for (const r of records) lastAttempt.set(r.seam, Math.max(lastAttempt.get(r.seam) ?? 0, r.attempt));
-  return records.filter((r) => r.attempt === lastAttempt.get(r.seam));
+  const latest = new Map<string, string>();
+  for (const r of records) if ((latest.get(r.seam) ?? "") < r.at) latest.set(r.seam, r.at);
+  return records.filter((r) => r.at === latest.get(r.seam));
 }
 
 /** Spawns one smoke file. Injectable so tests never make a real call. */
