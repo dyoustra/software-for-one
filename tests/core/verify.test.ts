@@ -328,3 +328,26 @@ describe("agentToolsForStage", () => {
     expect(tools).toContain("Bash(ls *)");
   });
 });
+
+describe("runPassedGate and a follow-up's new tests", () => {
+  it("excuses the new test files it was given, and nothing else", async () => {
+    const { runPassedGate } = await import("../../src/core/verify.js");
+    const { lockTests } = await import("../../src/core/testlock.js");
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "sfo-gate-extra-"));
+    const e = { SFO_HOME: home };
+    const dir = path.join(home, "p");
+    fs.mkdirSync(path.join(dir, "tests"), { recursive: true });
+    fs.mkdirSync(path.join(dir, ".sfo"), { recursive: true });
+    fs.writeFileSync(path.join(dir, "tests", "test_s01.py"), "def test_a(): pass\n");
+    lockTests("p", "tests", e);
+
+    // The real gate, on an archetype with no recipe: past the lock check it
+    // stops at "no gates", so the reason says whether the lock let it through.
+    fs.writeFileSync(path.join(dir, "tests", "test_feedback_x.py"), "def test_b(): pass\n");
+    expect(runPassedGate("p", "unknown", [], e, ["tests/test_feedback_x.py"]).reason).toMatch(/no gates available/);
+    expect(runPassedGate("p", "unknown", [], e, []).reason).toMatch(/changed since it was locked: tests\/test_feedback_x.py/);
+
+    fs.writeFileSync(path.join(dir, "tests", "test_s01.py"), "def test_a(): assert 1\n");
+    expect(runPassedGate("p", "unknown", [], e, ["tests/test_s01.py"]).reason).toMatch(/changed since it was locked: .*tests\/test_s01.py/);
+  });
+});

@@ -315,7 +315,13 @@ export function runPassedGate(
   /** Tests outside any slice that the change must also keep passing. */
   extraTests: string[] = [],
 ): VerifyResult {
-  const tamperedTests = verifyTestLock(id, TEST_DIR, env);
+  // The extra tests are new files by design — a follow-up's own tests, not
+  // yet locked. Only they are excused: any other change to the suite,
+  // including an edit to one already locked, is still tampering.
+  const locked = readTestLock(id, env);
+  const tamperedTests = verifyTestLock(id, TEST_DIR, env).filter(
+    (p) => !(extraTests.includes(p) && !(p in locked)),
+  );
   if (tamperedTests.length > 0) {
     return {
       ok: false,
