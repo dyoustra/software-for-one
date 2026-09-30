@@ -166,3 +166,67 @@ Both recorded in the project's `DECISIONS.jsonl`.
   transports, the Spotlight probe. `SUMMARY.md` leads with this.
 - `review` found real coverage gaps (e.g. `--resolution` never tied to the bytes sent).
   Nothing acts on them.
+
+---
+
+# Run 2: `ut-tower`, the second real idea (2026-09-27 to 09-30)
+
+"Why is the UT Tower orange tonight?", as a CLI. It was the first run with
+contests, model access, smoke, review→repair, install, presentation, retry and
+feedback in place, and each of them met a real case. Total: **$247.49**
+API-equivalent on the Max plan, **$0.00 billed**, across one build, two
+retries and two feedback runs.
+
+## Outcome
+
+- **14 of 14 slices pass.** That took two retries. S-13 was blocked first by
+  the lock, then by a broken test helper.
+- **Every seam passes live** against tower.utexas.edu, the IANA timezone
+  data, the local cache, the system clock and a real pseudo-terminal.
+- **Review found and repaired real bugs:** the next fixture's date recorded
+  as a lighting night, and real announcements dropped. One high finding
+  (R-009) is left for feedback.
+- **Installed as `ut-tower`,** with light and dark screenshots.
+- **Feedback 2 redrew the Tower** ($3.72, one session). The person's verdict
+  is that it still doesn't look like the Tower, because ASCII is the wrong
+  medium (see below).
+
+## What each new mechanism did, for real
+
+| Mechanism | What happened |
+|---|---|
+| Contest | The S-09 fixture announced the wrong night, and was amended. S-13 raised a criterion defect, and **the person answered mid-build**, and AC-102 was rewritten. |
+| Adjudicator, filed by sfo | The RSS smoke test asserted conditional GET, which UT's server doesn't implement, and was amended. The colour smoke test read its pty after closing it, and was amended. S-13's `build_artifacts` helper globbed uv's `dist/.gitignore`, and was amended on retry. |
+| Smoke | Found 4 real bugs against the live site that the fakes had hidden, including a 404 past the archive's end. Three were fixed by the repair loop. |
+| Review → repair | Round 1 found R-001 and R-002, both reproduced and repaired. Round 2 caught regressions a repair had introduced (URLs wrapped mid-path). |
+| Sandbox | Chained commands run, writes outside the project are refused by the OS, and uv works once mach lookups are allowed. |
+| Feedback | The first run failed on sfo's gate bug. The second passed first time. |
+
+## Defects the run found in sfo, all fixed
+
+| Defect | Effect | Fix |
+|---|---|---|
+| `recommendation: null` failed the prior-art schema | the run died after research, and state stayed `running` | nullish, plus `CRASH.json` (`d2f4a08`) |
+| Resume went to the stage *after* an interrupted one | a crash mid-stage would skip that stage | `completedStage` (`d2f4a08`) |
+| Allowlist refused chained commands and let `uv run python -c` through | 12 wasted turns in research alone | Bash sandbox (`f35bff1`) |
+| uv panics under the sandbox | every build step would have failed | `allowMachLookup` (`f35bff1`) |
+| A slice was given work under the locked `tests/` | S-13 captured 262 fixtures, which read as tampering | plan and test-write rules; drift discarded before the build commit (`b716f9f`) |
+| Failures recorded no reason | "failed", with nothing to act on | `FAILURE.json`, and a next step in status (`b716f9f`, `370cbb1`) |
+| Review round numbered 3 failed to parse; the fallback emptied the file | ten findings lost, two of them high | per-line reading, and archiving before a full review (`1b5b527`) |
+| One smoke contest per project | the colour seam never got a ruling | per seam (`1b5b527`) |
+| Retried slice failed identically, with no second opinion | S-13 failed three runs in a row | adjudicator on retry (`1b5b527`) |
+| Latest smoke result picked by attempt number | status said a passing seam had failed | by time (`19ba099`) |
+| Feedback gate rejected the feedback's own new test | first feedback discarded, $6.87 | extra tests excused (`2ed8f74`) |
+| `sfo` itself: no shebang, and entry check by name | ran as a shell script and recursed, then did nothing | `effe1f1` |
+| Installer spliced manifest names into shell text | command injection via `package.json` bin | positional args (`9b0df65`) |
+
+## Lessons
+
+- **Every "tested" mechanism broke on first real contact** through a fake
+  that was kinder than reality: a fake transport, a fixture's dummy key, a
+  fake gate, an untried install path. The rule now: a mechanism isn't done
+  until it has had one real run.
+- **The look of a visual tool has to be judged before the build.** Spec chose
+  ASCII outlines for a building people know by sight. Drafts at clarify, now
+  comparing media such as half-block pixel art, inline images and ASCII,
+  would have put that choice in front of the person at the start.
