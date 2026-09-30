@@ -18,8 +18,9 @@ the change, prove it with tests, and do not break anything that worked.
   still does. If one contradicts the feedback, contest it (described below)
   rather than working around it.
 - If the tool has a look (`.sfo/PRESENTATION.json` says `visual`), make it look
-  right on both a light and a dark terminal background, and use the terminal's
-  default foreground rather than hard-coded white or black.
+  right on both a light and a dark terminal background: use the terminal's
+  default foreground rather than hard-coded white or black, or paint your own
+  background behind what you draw.
 
 If this is **too big for one session** — it needs a new external service, or
 rewrites most of the code — do not attempt it. Say so, and why, and change

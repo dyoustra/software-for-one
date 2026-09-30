@@ -93,7 +93,13 @@ feel matters — draw 2 or 3 candidate designs before anything is built, as the
 exact terminal output each would print (ANSI colour codes included), in
 `.sfo/drafts/A.txt`, `.sfo/drafts/B.txt`, and so on. Base them on reference
 material from research: if it depicts something real, look at pictures of the
-real thing. Make them genuinely different, not three shades of one idea. Then
+real thing. Make them genuinely different, not three shades of one idea —
+and **compare media, not just layouts**: a terminal can draw far more than
+ASCII outlines. Unicode half-blocks (`▀▄█`) in 24-bit colour are, in effect, a
+pixel image at twice the vertical resolution of text; braille characters give
+finer line art; iTerm2 and Kitty can show a real image inline. When the thing
+depicted has a likeness to live up to, at least one draft should be the
+highest-fidelity medium the terminal allows. Then
 ask one `blocking` question, "Which of these looks right?", with one option
 per draft, whose `tradeoff` says what distinguishes it. The person sees each
 draft drawn on a light and a dark background. When the look is incidental,
@@ -101,9 +107,10 @@ draw none and ask nothing.
 
 This is a judgement about this tool, not a default: a file converter is
 `none`, and a status line with colour is `visual`. Never hard-code white or
-black text: a colour that matches the person's terminal background makes the
-output vanish, and the terminal's default foreground is the one colour that
-never does.
+black text on the person's own background: a colour that matches it makes the
+output vanish. Either draw in the terminal's default foreground, or paint your
+own background behind what you draw (a dark canvas for a lit subject, say),
+which also makes every colour on it exact.
 
 **Settle the real seams.** Rewrite `.sfo/SERVICES.jsonl` so it lists exactly
 the services and platform APIs *this design* uses — add what research missed,
