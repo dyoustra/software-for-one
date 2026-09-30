@@ -34,7 +34,10 @@ reproduction test for it can assert on the captured escape codes and text.
 is the spec: the person chose it, so it is never a finding. One made by an agent
 may be challenged — name it in `decisionId` and say why it is wrong.
 
-Write `.sfo/FINDINGS.jsonl`, one object per line:
+Write `.sfo/FINDINGS.jsonl`, one object per line. It starts empty for this
+review: number from `R-001`, and every finding is `"round":1`. Earlier reviews'
+findings, if any, are in `.sfo/findings-history/` — read them for context, and
+report again anything still true.
 
     {"id":"R-001","round":1,"severity":"high","kind":"code","criterionId":"AC-031","decisionId":null,
      "summary":"--resolution is never applied to the image bytes sent",

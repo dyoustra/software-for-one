@@ -1,5 +1,7 @@
 import { z } from "zod";
-import { artifactPath, type Env } from "./paths.js";
+import fs from "node:fs";
+import path from "node:path";
+import { artifactPath, sfoDir, type Env } from "./paths.js";
 import { readRecords, writeRecords } from "./jsonl.js";
 
 export const FINDINGS_FILE = "FINDINGS.jsonl";
@@ -41,6 +43,50 @@ export type Finding = z.infer<typeof FindingSchema>;
 
 export function readFindings(id: string, env?: Env): Finding[] {
   return readRecords(artifactPath(id, FINDINGS_FILE, env), FindingSchema);
+}
+
+/**
+ * Every finding that parses, and the lines that did not. One bad field used to
+ * fail the whole file, and the fallback then wrote it back empty: a review of
+ * ut-tower numbered its findings round 3, and all ten of them were lost.
+ */
+export function readFindingsLenient(id: string, env?: Env): { findings: Finding[]; rejected: string[] } {
+  const file = artifactPath(id, FINDINGS_FILE, env);
+  if (!fs.existsSync(file)) return { findings: [], rejected: [] };
+  const findings: Finding[] = [];
+  const rejected: string[] = [];
+  for (const line of fs.readFileSync(file, "utf8").split("\n")) {
+    if (line.trim() === "") continue;
+    try {
+      const parsed = FindingSchema.safeParse(JSON.parse(line));
+      if (parsed.success) findings.push(parsed.data);
+      else rejected.push(`${line.slice(0, 80)} — ${parsed.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+    } catch {
+      rejected.push(`${line.slice(0, 80)} — not JSON`);
+    }
+  }
+  if (rejected.length > 0) {
+    // Kept as written, so nothing a reviewer paid for is lost to a bad field.
+    fs.copyFileSync(file, artifactPath(id, `FINDINGS.rejected-${Date.now()}.jsonl`, env));
+  }
+  return { findings, rejected };
+}
+
+export const FINDINGS_HISTORY_DIR = "findings-history";
+
+/**
+ * Starts a new review with an empty file, keeping the last one. A second full
+ * review that sees the first one's findings continues their numbering, and
+ * rounds past 2 are not a thing this pipeline has.
+ */
+export function archiveFindings(id: string, env?: Env): string | null {
+  const file = artifactPath(id, FINDINGS_FILE, env);
+  if (!fs.existsSync(file) || fs.readFileSync(file, "utf8").trim() === "") return null;
+  const dir = path.join(sfoDir(id, env), FINDINGS_HISTORY_DIR);
+  fs.mkdirSync(dir, { recursive: true });
+  const target = path.join(dir, `findings-${fs.readdirSync(dir).length + 1}.jsonl`);
+  fs.renameSync(file, target);
+  return target;
 }
 
 export function writeFindings(id: string, findings: Finding[], env?: Env): void {

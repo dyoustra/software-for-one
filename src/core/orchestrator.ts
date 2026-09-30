@@ -766,7 +766,61 @@ async function runSlices(
       },
       env,
     );
+
+    // Failing again on a retry: the same inputs got the same answer, so the
+    // test, not the code, may be what is wrong. ut-tower's S-13 failed three
+    // runs in a row on a helper review had twice called broken.
+    if (attempts >= MAX_SLICE_ATTEMPTS && readRetry(id, env)?.slices.includes(slice.id)) {
+      const second = await secondOpinion(ctx, slice, verdict, id, env);
+      if (typeof second === "object") return { outcome: "parked", park: { park: "limit", stage: second.stage, limit: second.limit } };
+      if (second === "amended") {
+        const now = readState(id, env);
+        const sliceAttempts = { ...now.sliceAttempts };
+        delete sliceAttempts[slice.id];
+        writeState({ ...now, slicesFailed: now.slicesFailed.filter((s) => s !== slice.id), sliceAttempts, updatedAt: new Date().toISOString() }, env);
+      }
+    }
   }
+}
+
+/** The first test file a failed gate names, as pytest or vitest prints it. */
+function failingTestFile(verdict: VerifyResult): string | null {
+  const output = verdict.steps.map((s) => s.output).join("\n");
+  return output.match(/FAILED ([^\s:]+)::/)?.[1] ?? output.match(/FAIL\s+([^\s>]+\.test\.[cm]?[jt]s)/)?.[1] ?? null;
+}
+
+/**
+ * Sends a retried slice's failing test to the adjudicator, once. The whole
+ * test tree is in view there, helpers included, which is where ut-tower's
+ * defect lived.
+ */
+async function secondOpinion(
+  ctx: AdjudicationContext,
+  slice: Slice,
+  verdict: VerifyResult,
+  id: string,
+  env: Env | undefined,
+): Promise<"amended" | "upheld" | "none" | { stage: string; limit: UsageLimit }> {
+  const contestId = `${slice.id}-retry`;
+  const testFile = failingTestFile(verdict) ?? sliceTestFiles(id, slice, env)[0];
+  if (!testFile || contestFor(id, contestId, env)) return "none";
+  const detail = verdict.steps.find((s) => !s.ok)?.output.trim().split("\n").slice(-40).join("\n") ?? verdict.reason ?? "";
+  const outcome = await adjudicate(
+    ctx,
+    { ...slice, id: contestId },
+    {
+      sliceId: contestId,
+      criterionId: slice.criterionIds[0] ?? "(none)",
+      testFile,
+      testName: "",
+      claim: "unsatisfiable",
+      why: `${slice.id} failed its gate on a retry exactly as it had before. Decide whether this test, or a helper it uses, rather than the code, is wrong.\n\n${detail}`,
+      proposedFix: "",
+    },
+    false,
+  );
+  if (outcome.kind === "limit") return { stage: outcome.stage, limit: outcome.limit };
+  return contestFor(id, contestId, env)?.ruling === "amend_test" ? "amended" : "upheld";
 }
 
 export async function advance(

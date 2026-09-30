@@ -446,19 +446,24 @@ export async function runSmoke(ctx: SmokeContext): Promise<SmokeOutcome> {
   // Still failing after its repairs: the smoke test itself may be what is
   // wrong, and nothing but the adjudicator may change a locked test. Filed on
   // the repair agent's behalf if it never contested.
-  if (failing.length > 0 && !contestFor(id, SMOKE_CONTEST_ID, env)) {
-    const seam = failing[0].seam;
+  // One per seam: a project-wide contest spent on the first failing seam left
+  // ut-tower's broken colour test with no one to rule on it.
+  for (const seam of [...new Set(failing.map((f) => f.seam))]) {
+    const contestId = `${SMOKE_CONTEST_ID}-${seam}`;
     const planned = plan.run.find((p) => p.service.id === seam);
-    if (planned) {
+    // A test already ruled on — by the repair agent's own contest — is not
+    // asked about again: the same question gets the same answer.
+    const agentContest = contestFor(id, SMOKE_CONTEST_ID, env);
+    if (planned && !contestFor(id, contestId, env) && agentContest?.testFile !== planned.file) {
       const evidence = failing
         .filter((f) => f.seam === seam)
         .map((f) => `${f.check}: ${f.detail}`)
         .join("\n");
       const adjudicated = await adjudicate(
         { id, env, runner: ctx.runner, archetype, slices: readSlices(id, env), verify: ctx.verify, suiteCheck: ctx.suiteCheck, withHeartbeat: ctx.withHeartbeat },
-        smokeSlice,
+        { ...smokeSlice, id: contestId },
         {
-          sliceId: SMOKE_CONTEST_ID,
+          sliceId: contestId,
           criterionId: "(smoke)",
           testFile: planned.file,
           testName: "",
@@ -471,7 +476,7 @@ export async function runSmoke(ctx: SmokeContext): Promise<SmokeOutcome> {
         false,
       );
       if (adjudicated.kind === "limit") return { outcome: "limit", stage: adjudicated.stage, limit: adjudicated.limit };
-      if (contestFor(id, SMOKE_CONTEST_ID, env)?.ruling === "amend_test") {
+      if (contestFor(id, contestId, env)?.ruling === "amend_test") {
         attempt++;
         const again = await ctx.withHeartbeat(() => runSeams([planned]));
         record(id, again, attempt, env);

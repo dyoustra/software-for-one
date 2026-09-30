@@ -418,3 +418,33 @@ describe("a retry of unrepaired findings", () => {
     expect(statuses()).toEqual({ "R-001": "unrepaired" });
   });
 });
+
+describe("findings a reviewer wrote that do not all parse", () => {
+  it("keeps every good line, sets the bad ones aside, and never empties the file", async () => {
+    const agent = new Agent((stage) => {
+      if (stage !== "review") return;
+      fs.writeFileSync(
+        path.join(dir, ".sfo", "FINDINGS.jsonl"),
+        [JSON.stringify(finding("R-001", { severity: "medium", test: null })), JSON.stringify(finding("R-002", { round: 3, test: null }))].join("\n") + "\n",
+      );
+    });
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    await runReview(ctx(agent));
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/1 review finding line\(s\) could not be read and were kept aside/));
+    error.mockRestore();
+
+    expect(readFindings("p", env).map((f) => f.id)).toEqual(["R-001"]);
+    expect(fs.readdirSync(path.join(dir, ".sfo")).some((f) => f.startsWith("FINDINGS.rejected-"))).toBe(true);
+  });
+
+  it("starts a new full review with an empty file, keeping the last one", async () => {
+    fs.writeFileSync(path.join(dir, ".sfo", "FINDINGS.jsonl"), JSON.stringify({ ...finding("R-001"), status: "unrepaired" }) + "\n");
+    let sawFile = true;
+    const agent = new Agent((stage) => {
+      if (stage === "review") sawFile = fs.existsSync(path.join(dir, ".sfo", "FINDINGS.jsonl"));
+    });
+    await runReview(ctx(agent));
+    expect(sawFile).toBe(false);
+    expect(fs.readFileSync(path.join(dir, ".sfo", "findings-history", "findings-1.jsonl"), "utf8")).toContain("R-001");
+  });
+});

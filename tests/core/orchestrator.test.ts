@@ -1723,3 +1723,38 @@ describe("sfo retry after delivery", () => {
     expect(readRetry("p", env)).toBeNull();
   });
 });
+
+describe("a slice that fails again on a retry", () => {
+  it("sends its failing test to the adjudicator, and is built again if the test is amended", async () => {
+    let amended = false;
+    const base = producesArtifacts();
+    const runner = new FakeRunner(true, 0, undefined, (stage) => {
+      base(stage);
+      if (stage === "adjudicate-S-03-retry") {
+        amended = true;
+        fs.writeFileSync(path.join(env.SFO_HOME, "p", "tests", "test_s03.py"), "def test_s03(): assert 1\n");
+        fs.writeFileSync(
+          path.join(env.SFO_HOME, "p", ".sfo", "RULING.json"),
+          JSON.stringify({ ruling: "amend_test", why: "the helper globbed a .gitignore", changedFiles: [], question: null }),
+        );
+      }
+    });
+    const verify: VerifyFn = (_id, _a, slice) =>
+      slice.id === "S-03" && !amended
+        ? { ok: false, steps: [{ name: "test", ok: false, exitCode: 1, output: "FAILED tests/test_s03.py::test_s03 - ReadError" }], tamperedTests: [] }
+        : { ok: true, steps: [], tamperedTests: [] };
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    await runPipeline(runner, { verify });
+    expect(readState("p", env).slicesFailed).toEqual(["S-03"]);
+
+    const { retryFailed } = await import("../../src/commands/retry.js");
+    retryFailed("p", env);
+    await advance("p", runner, env, { verify });
+    error.mockRestore();
+
+    const { readContests } = await import("../../src/core/contest.js");
+    expect(readContests("p", env).find((c) => c.sliceId === "S-03-retry")).toMatchObject({ testFile: "tests/test_s03.py", ruling: "amend_test" });
+    expect(readState("p", env)).toMatchObject({ slicesFailed: [], status: "done" });
+    expect(readState("p", env).slicesPassed).toContain("S-03");
+  });
+});

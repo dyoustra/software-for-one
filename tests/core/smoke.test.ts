@@ -299,7 +299,7 @@ describe("runSmoke", () => {
 
     expect(fs.readFileSync(path.join(dir, "src.py"), "utf8")).toBe("x = 1\n");
     // Two repairs, then the smoke test itself goes to the adjudicator.
-    expect(runner.calls.map((c) => path.basename(c.logPath, ".log"))).toEqual(["smoke-repair", "smoke-repair", "adjudicate-SMOKE"]);
+    expect(runner.calls.map((c) => path.basename(c.logPath, ".log"))).toEqual(["smoke-repair", "smoke-repair", "adjudicate-SMOKE-anthropic-batch"]);
     expect(runner.calls[1].prompt).toMatch(/previous repair failed the gate[\s\S]*FAILED tests\/test_s01.py/);
   });
 
@@ -308,7 +308,7 @@ describe("runSmoke", () => {
     const runner = new RepairRunner();
     const out = await runSmoke(context(runner, seams({ "anthropic-batch": () => ({ lines: [], exit: 1 }) })));
     expect(out).toEqual({ outcome: "complete" });
-    expect(runner.calls.map((c) => path.basename(c.logPath, ".log"))).toEqual(["smoke-repair", "smoke-repair", "adjudicate-SMOKE"]);
+    expect(runner.calls.map((c) => path.basename(c.logPath, ".log"))).toEqual(["smoke-repair", "smoke-repair", "adjudicate-SMOKE-anthropic-batch"]);
     expect(latestSmoke(readSmokeRecords("p", env))[0].level).toBe("failed");
   });
 
@@ -401,7 +401,7 @@ describe("a smoke test that is itself wrong", () => {
     project([seam()]);
     let amended = false;
     const runner = new RepairRunner((stage) => {
-      if (stage === "adjudicate-SMOKE") {
+      if (stage.startsWith("adjudicate-SMOKE")) {
         amended = true;
         fs.writeFileSync(path.join(dir, "smoke/test_smoke_anthropic_batch.py"), "def test_it(): assert 1\n");
         fs.writeFileSync(
@@ -414,10 +414,20 @@ describe("a smoke test that is itself wrong", () => {
     await runSmoke(context(runner, spawn));
 
     const { readContests } = await import("../../src/core/contest.js");
-    expect(readContests("p", env)[0]).toMatchObject({ sliceId: "SMOKE", ruling: "amend_test" });
+    expect(readContests("p", env)[0]).toMatchObject({ sliceId: "SMOKE-anthropic-batch", ruling: "amend_test" });
     const records = readSmokeRecords("p", env);
     expect(Math.max(...records.map((r) => r.attempt))).toBe(4);
     expect(latestSmoke(records).every((r) => r.level === "completed")).toBe(true);
+  });
+});
+
+describe("more than one seam still failing", () => {
+  it("sends each seam's own test to the adjudicator, not just the first", async () => {
+    project([seam(), OCR]);
+    const runner = new RepairRunner();
+    await runSmoke(context(runner, seams({ "anthropic-batch": () => ({ lines: [], exit: 1 }), "vision-ocr": () => ({ lines: [], exit: 1 }) })));
+    const stages = runner.calls.map((c) => path.basename(c.logPath, ".log"));
+    expect(stages.filter((s) => s.startsWith("adjudicate-"))).toEqual(["adjudicate-SMOKE-anthropic-batch", "adjudicate-SMOKE-vision-ocr"]);
   });
 });
 

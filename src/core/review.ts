@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import {
-  readFindings,
+  readFindingsLenient,
+  archiveFindings,
   writeFindings,
   isRepairable,
   REVIEW_TEST_DIR,
@@ -72,12 +73,11 @@ async function runAgent(ctx: ReviewContext, stage: string, prompt: string): Prom
 
 /** A malformed findings file loses the findings, not the build. */
 function findingsOrNone(id: string, env: Env | undefined): Finding[] {
-  try {
-    return readFindings(id, env);
-  } catch (err) {
-    console.error(`sfo: review's findings could not be read, so none will be repaired — ${err instanceof Error ? err.message : String(err)}`);
-    return [];
+  const { findings, rejected } = readFindingsLenient(id, env);
+  if (rejected.length > 0) {
+    console.error(`sfo: ${rejected.length} review finding line(s) could not be read and were kept aside: ${rejected[0]}`);
   }
+  return findings;
 }
 
 function humanDecisionIds(id: string, env: Env | undefined): Set<string> {
@@ -209,6 +209,7 @@ export async function runReview(ctx: ReviewContext): Promise<ReviewOutcome> {
     );
     writeFindings(id, findings, env);
   } else {
+    archiveFindings(id, env);
     const first = await runAgent(ctx, "review", loadPrompt("review"));
     if (first.limited) {
       discardPaths(dir, changedPaths(dir));
