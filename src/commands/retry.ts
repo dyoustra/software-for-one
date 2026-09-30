@@ -72,7 +72,17 @@ export function retrySlices(id: string, sliceId?: string, env?: Env): string {
  * unrepaired that have a test to repair against. The run restarts at the
  * earliest stage with work to do.
  */
-export function retryFailed(id: string, env?: Env): string {
+export interface Failures {
+  slices: string[];
+  seams: string[];
+  /** High findings still unrepaired that have a test to repair against. */
+  findings: string[];
+  /** High findings with no test: only a person's feedback can act on these. */
+  notRetryable: string[];
+}
+
+/** What failed, sorted by whether a retry can act on it. */
+export function failures(id: string, env?: Env): Failures {
   const state = readState(id, env);
   let seams: string[] = [];
   let findings: string[] = [];
@@ -91,7 +101,12 @@ export function retryFailed(id: string, env?: Env): string {
   } catch {
     // Likewise.
   }
-  const slices = [...state.slicesFailed];
+  return { slices: [...state.slicesFailed], seams, findings, notRetryable };
+}
+
+export function retryFailed(id: string, env?: Env): string {
+  const state = readState(id, env);
+  const { slices, seams, findings, notRetryable } = failures(id, env);
   if (slices.length + seams.length + findings.length === 0) {
     return notRetryable.length > 0
       ? `nothing ${id} can retry: ${notRetryable.join(", ")} have no test to repair against`

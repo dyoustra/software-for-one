@@ -9,6 +9,7 @@ import { readContests } from "../core/contest.js";
 import { readSmokeRecords, latestSmoke } from "../core/smoke.js";
 import { readFindings } from "../core/findings.js";
 import { recoveryHint } from "../core/stages.js";
+import { failures } from "./retry.js";
 import { openQuestions } from "../core/openQuestions.js";
 import { isStopped, readCrash, readFailure } from "../core/stopped.js";
 
@@ -146,10 +147,14 @@ function nextStepFor(state: ProjectState, env: Env | undefined): string | undefi
   const id = state.id;
   if (state.status === "failed") return recoveryHint(id, state.currentStage);
   if (state.status === "done") {
-    const hasFailures =
-      state.slicesFailed.length > 0 ||
-      smokeNote(state, env) !== undefined;
-    return hasFailures ? `\`sfo retry ${id}\` retries what failed` : undefined;
+    if (smokeNote(state, env) === undefined) return undefined;
+    const f = failures(id, env);
+    if (f.slices.length + f.seams.length + f.findings.length > 0) return `\`sfo retry ${id}\` retries what failed`;
+    // Nothing a retry can act on: a finding with no test is a change the
+    // person asks for, which is what feedback is.
+    return f.notRetryable.length > 0
+      ? `\`sfo feedback ${id} "…"\` to fix ${f.notRetryable.join(", ")} (see .sfo/REVIEW.md)`
+      : undefined;
   }
   if (state.status === "awaiting_human") {
     if (readCrash(id, env) || isStopped(id, env)) return `\`sfo run ${id}\` resumes it`;

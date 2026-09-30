@@ -204,7 +204,7 @@ describe("a delivered project with unrepaired review findings", () => {
   it("counts the high ones that are still true", () => {
     seed("p", "deliver", "done");
     const f = (id: string, severity: string, status: string) =>
-      JSON.stringify({ id, round: 1, severity, kind: "code", summary: "s", evidence: "e", status });
+      JSON.stringify({ id, round: 1, severity, kind: "code", summary: "s", evidence: "e", status, test: `tests/review/test_${id}.py` });
     fs.writeFileSync(
       path.join(env.SFO_HOME, "p", ".sfo", "FINDINGS.jsonl"),
       [f("R-001", "high", "unrepaired"), f("R-002", "high", "repaired"), f("R-003", "medium", "unrepaired")].join("\n") + "\n",
@@ -241,3 +241,17 @@ describe("the next step", () => {
     expect(out).toMatch(/→ `sfo answer b`/);
   });
 });
+
+describe("a finding only feedback can fix", () => {
+  it("points at sfo feedback, not a retry that could do nothing", () => {
+    seed("p", "deliver", "done");
+    fs.writeFileSync(
+      path.join(env.SFO_HOME, "p", ".sfo", "FINDINGS.jsonl"),
+      JSON.stringify({ id: "R-009", round: 2, severity: "high", kind: "code", summary: "s", evidence: "e", status: "report_only" }) + "\n",
+    );
+    const out = formatStatus(listProjects(env));
+    expect(out).toMatch(/→ `sfo feedback p "…"` to fix R-009/);
+    expect(out).not.toMatch(/sfo retry/);
+  });
+});
+
