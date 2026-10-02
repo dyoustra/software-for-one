@@ -172,3 +172,30 @@ describe("declared renders", () => {
     expect(fs.existsSync(path.join(dir, ".sfo", "renders", "1-home-dark.png"))).toBe(true);
   });
 });
+
+describe("red before the build", () => {
+  const slices = (ids: string[]) =>
+    fs.writeFileSync(
+      path.join(dir, ".sfo", "SLICES.jsonl"),
+      ids.map((id) => JSON.stringify({ id, name: id, criterionIds: ["AC-1"], prerequisites: [] })).join("\n") + "\n",
+    );
+
+  it("catches a gate that passes on nothing, for every slice", async () => {
+    const { checkRedBeforeBuild } = await import("../../src/core/verify.js");
+    slices(["S-01", "S-02"]);
+    contract({ gate: [{ name: "unit", run: node("process.exit(0)"), files: "tests/{slice}-*.test.ts" }] });
+    write("tests/s01-a.test.ts", "");
+    write("tests/s02-a.test.ts", "");
+    expect(checkRedBeforeBuild("p", env)).toEqual({ greenOnSkeleton: ["S-01", "S-02"], checked: ["S-01", "S-02"] });
+  });
+
+  it("is satisfied when a slice's tests fail against the skeleton", async () => {
+    const { checkRedBeforeBuild } = await import("../../src/core/verify.js");
+    slices(["S-01", "S-02"]);
+    // Fails for S-01's file, passes for S-02's: the one the skeleton already satisfies.
+    contract({ gate: [{ name: "unit", run: node("process.exit(process.argv.some(a => a.includes('s01')) ? 1 : 0)"), files: "tests/{slice}-*.test.ts" }] });
+    write("tests/s01-a.test.ts", "");
+    write("tests/s02-a.test.ts", "");
+    expect(checkRedBeforeBuild("p", env)).toEqual({ greenOnSkeleton: ["S-02"], checked: ["S-01", "S-02"] });
+  });
+});

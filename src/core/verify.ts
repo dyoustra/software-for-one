@@ -8,7 +8,7 @@ import { verifyTestLock, readTestLock, walkTestTree } from "./testlock.js";
 import { scanAddedLines, formatHits } from "./gaming.js";
 import { projectDir, type Env } from "./paths.js";
 import { PIPELINE_STAGES } from "./stages.js";
-import type { Slice } from "./slices.js";
+import { readSlices, type Slice } from "./slices.js";
 
 /**
  * The tree the suite lives in. Not yet a property of the archetype: neither
@@ -385,6 +385,33 @@ export function runTestFiles(id: string, archetype: string, files: string[], env
     return { ok: false, steps: [], tamperedTests: [], reason: `no gate step runs ${files.join(", ") || "these files"} ("${archetype}")` };
   }
   return runRecipe(projectDir(id, env), scoped, (step) => files.filter((f) => stepCovers(step, f)));
+}
+
+export interface RedResult {
+  /** Slices whose every scoped step already passes against the skeleton. */
+  greenOnSkeleton: string[];
+  /** Slices that had any scoped files to run. */
+  checked: string[];
+}
+
+/**
+ * Red before the build: each slice's own tests, run against the skeleton
+ * test-repair left, should fail — nothing implements them yet. This is what
+ * makes a gate the project declared for itself trustworthy: one that passes
+ * on nothing (`echo ok`, a test command that collects no tests and exits 0)
+ * passes here for every slice, and is refused before anything is spent.
+ */
+export function checkRedBeforeBuild(id: string, env?: Env): RedResult {
+  const dir = projectDir(id, env);
+  const scoped = gateFor(id, env).filter((s) => s.scopeable);
+  const result: RedResult = { greenOnSkeleton: [], checked: [] };
+  for (const slice of readSlices(id, env)) {
+    const runs = scoped.map((step) => ({ step, files: filesFor(id, step, slice.id, env) })).filter((r) => r.files.length > 0);
+    if (runs.length === 0) continue;
+    result.checked.push(slice.id);
+    if (runs.every(({ step, files }) => runRecipe(dir, [step], files).ok)) result.greenOnSkeleton.push(slice.id);
+  }
+  return result;
 }
 
 /** Stages from here on write or check code, and need to be able to run it. */

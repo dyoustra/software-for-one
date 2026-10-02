@@ -16,6 +16,7 @@ import { filesFor } from "./contracts.js";
 import {
   runVerify,
   gateFor,
+  checkRedBeforeBuild,
   runPassedGate,
   runTestFiles,
   agentToolsForStage,
@@ -80,6 +81,8 @@ export interface AdvanceOptions {
   drawDrafts?: typeof drawDrafts;
   /** Captures and draws the tool's output. Injected for the same reason as `install`. */
   render?: typeof captureRenders;
+  /** Red before the build. Injected for the same reason as `suiteCheck`. */
+  redCheck?: typeof checkRedBeforeBuild;
   /** Puts the built tool on PATH. Injected so tests never install anything. */
   install?: typeof installTool;
   /** Runs chosen test files alone: review's reproductions. Injected for the same reason. */
@@ -1104,6 +1107,22 @@ export async function advance(
         );
         return;
       }
+      const red = (opts.redCheck ?? checkRedBeforeBuild)(id, env);
+      if (red.checked.length > 0 && red.greenOnSkeleton.length === red.checked.length) {
+        fail(
+          id,
+          state,
+          upcoming,
+          `the gate passes on the unbuilt skeleton for every slice (${red.checked.join(", ")}), so it tests nothing — ` +
+            `check the scoped steps in .sfo/CONTRACTS.json and re-run \`sfo stage ${id} test-repair\``,
+          env,
+        );
+        return;
+      }
+      if (red.greenOnSkeleton.length > 0) {
+        console.error(`sfo: ${red.greenOnSkeleton.join(", ")} already pass against the skeleton; building anyway`);
+      }
+
       try {
         lockTests(id, TEST_DIR, env);
       } catch (err) {

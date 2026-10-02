@@ -30,6 +30,8 @@ vi.mock("../../src/core/verify.js", async (importOriginal) => {
   return {
     ...real,
     checkSuiteBeforeLock: () => ({ ok: true, steps: [], tamperedTests: [] }),
+    // Likewise red before the build: the fixtures' suites are never run for real.
+    checkRedBeforeBuild: () => ({ greenOnSkeleton: [], checked: [] }),
   };
 });
 
@@ -583,7 +585,7 @@ describe("budget ceiling", () => {
 });
 
 /** Drives the real pipeline from capture, through the human gate, into the build. */
-async function runPipeline(runner: Runner, opts: { verify?: VerifyFn } = {}): Promise<void> {
+async function runPipeline(runner: Runner, opts: Parameters<typeof advance>[3] = {}): Promise<void> {
   seed("capture");
   await advance("p", runner, env, opts);
   fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.json"), '{"answers":[]}');
@@ -1756,5 +1758,32 @@ describe("a slice that fails again on a retry", () => {
     expect(readContests("p", env).find((c) => c.sliceId === "S-03-retry")).toMatchObject({ testFile: "tests/test_s03.py", ruling: "amend_test" });
     expect(readState("p", env)).toMatchObject({ slicesFailed: [], status: "done" });
     expect(readState("p", env).slicesPassed).toContain("S-03");
+  });
+});
+
+describe("red before the build, in the pipeline", () => {
+  it("fails test-repair when the gate passes on the skeleton for every slice", async () => {
+    const runner = pipelineRunner();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    seed("capture");
+    const red = () => ({ greenOnSkeleton: ["S-01", "S-02", "S-03"], checked: ["S-01", "S-02", "S-03"] });
+    await advance("p", runner, env, { verify: PASSES, redCheck: red });
+    fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.json"), '{"answers":[]}');
+    await advance("p", runner, env, { verify: PASSES, redCheck: red });
+    error.mockRestore();
+
+    expect(readState("p", env)).toMatchObject({ status: "failed", currentStage: "test-repair" });
+    expect(formatStatus(listProjects(env))).toMatch(/passes on the unbuilt skeleton for every slice/);
+    expect(sliceStages(runner)).toEqual([]);
+  });
+
+  it("builds anyway, saying so, when only some slices are already green", async () => {
+    const runner = pipelineRunner();
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    const red = () => ({ greenOnSkeleton: ["S-03"], checked: ["S-01", "S-02", "S-03"] });
+    await runPipeline(runner, { verify: PASSES, redCheck: red });
+    expect(error).toHaveBeenCalledWith(expect.stringMatching(/S-03 already pass against the skeleton/));
+    error.mockRestore();
+    expect(readState("p", env).status).toBe("done");
   });
 });
