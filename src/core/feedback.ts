@@ -8,8 +8,8 @@ import { readCriteria, writeCriteria, type Criterion } from "./criteria.js";
 import { recordCost } from "./cost.js";
 import { appendDecision } from "./decisions.js";
 import { lockTests, readTestLock, verifyTestLock } from "./testlock.js";
-import { TEST_DIR, agentToolsForStage, type VerifyResult } from "./verify.js";
-import { SMOKE_DIR, verifyRecipeFor } from "./archetype.js";
+import { TEST_DIR, agentToolsForStage, gateFor, type VerifyResult } from "./verify.js";
+import { SMOKE_DIR } from "./archetype.js";
 import { changedPaths, commitStage, discardPaths } from "./repo.js";
 import { takeContest, contestFor, contestInstructions } from "./contest.js";
 import { adjudicate, type AdjudicationContext } from "./adjudicate.js";
@@ -180,7 +180,7 @@ export async function runFeedback(ctx: FeedbackContext, n: number): Promise<Feed
     const ids = new Set(readState(id, env).slicesPassed);
     return readSlices(id, env).filter((s) => ids.has(s.id));
   };
-  const gateCommands = verifyRecipeFor(archetype).map((s) => [s.command, ...s.args].join(" "));
+  const gateCommands = gateFor(id, env, archetype).map((s) => [s.command, ...s.args].join(" "));
   const giveUp = (reason: string): FeedbackOutcome => {
     discardPaths(dir, changedPaths(dir));
     writeCriteria(id, criteriaBefore, env);

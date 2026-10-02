@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { verifyRecipeFor, agentToolsFor, type VerifyStep } from "./archetype.js";
+import { verifyRecipeFor, agentToolsFor, agentToolsForCommands, type VerifyStep } from "./archetype.js";
+import { CONTRACTS_FILE, readContractFile, gateSteps, filesFor, stepCovers, contractCommands } from "./contracts.js";
 import { readStack } from "./stack.js";
 import { verifyTestLock, readTestLock, walkTestTree } from "./testlock.js";
 import { scanAddedLines, formatHits } from "./gaming.js";
@@ -79,10 +80,6 @@ export function detectArchetype(id: string, env?: Env): string {
  * tests passes it without ever running its own — a false green, which is the
  * one outcome this whole gate exists to prevent.
  */
-function testFilePattern(sliceId: string): RegExp {
-  const runs = sliceId.toLowerCase().match(/[a-z0-9]+/g) ?? [];
-  return new RegExp(`${runs.join("[^a-z0-9]*")}(?![0-9])`);
-}
 
 /**
  * Every test file belonging to this slice, relative to the project root. Empty
@@ -117,10 +114,13 @@ function requiredNpmScripts(recipe: VerifyStep[]): string[] {
  * build, the gate was never able to run.
  */
 export function verifiabilityProblem(id: string, archetype: string, env?: Env): string | null {
-  const recipe = verifyRecipeFor(archetype);
+  const recipe = gateFor(id, env, archetype);
   if (recipe.length === 0) {
-    return `no verification recipe for archetype "${archetype}" — nothing could be checked`;
+    return `no verification recipe: nothing is declared in .sfo/${CONTRACTS_FILE}, and "${archetype}" has no built-in one — nothing could be checked`;
   }
+  // A declared contract is the project's own word on what it needs; the
+  // checks below are what the built-in recipes needed to exist.
+  if (readContractFile(id, env)) return null;
 
   const dir = projectDir(id, env);
   const manifest = MANIFEST[archetype];
@@ -147,15 +147,33 @@ export function verifiabilityProblem(id: string, archetype: string, env?: Env): 
   return null;
 }
 
-export function sliceTestFiles(id: string, slice: Slice, env?: Env): string[] {
-  const pattern = testFilePattern(slice.id);
-  // The lock's walk, not a copy of it: an unfiltered copy matched
-  // tests/__pycache__/test_s01_*.pyc for S-01 and handed pytest a .pyc as a
-  // test path, which failed a whole build attempt with exit 4.
-  return walkTestTree(path.join(projectDir(id, env), TEST_DIR))
-    .filter((rel) => pattern.test(path.basename(rel).toLowerCase()))
-    .map((rel) => `${TEST_DIR}/${rel}`);
+/**
+ * The gate this project is graded by: its own locked contract, or for a
+ * project made before contracts, the recipe its archetype used to have.
+ */
+export function gateFor(id: string, env?: Env, archetype?: string): VerifyStep[] {
+  const contract = readContractFile(id, env);
+  if (contract) return gateSteps(contract);
+  try {
+    return verifyRecipeFor(archetype ?? detectArchetype(id, env));
+  } catch {
+    return [];
+  }
 }
+
+/**
+ * Every test file of this slice, across every scoped gate step. Walked with
+ * the lock's own filtered walk: an unfiltered one handed pytest a .pyc as a
+ * test path, and failed a whole build attempt with exit 4.
+ */
+export function sliceTestFiles(id: string, slice: Slice, env?: Env): string[] {
+  const scoped = gateFor(id, env).filter((step) => step.scopeable);
+  // Before a gate exists, the convention test-write is told to follow.
+  const steps = scoped.length > 0 ? scoped : [DEFAULT_SCOPED_STEP];
+  return [...new Set(steps.flatMap((step) => filesFor(id, step, slice.id, env)))];
+}
+
+const DEFAULT_SCOPED_STEP: VerifyStep = { name: "test", command: "", args: [], scopeable: true, files: `${TEST_DIR}/**/*{slice}*` };
 
 /**
  * Slices whose tests cannot be located, in plan order.
@@ -199,10 +217,20 @@ function runStep(cwd: string, step: VerifyStep, testPaths: string[]): VerifyStep
  * Exported so the step machinery can be tested against commands that exist,
  * rather than against whichever toolchain happens to be on the machine.
  */
-export function runRecipe(cwd: string, recipe: VerifyStep[], testPaths: string[]): VerifyResult {
+export function runRecipe(
+  cwd: string,
+  recipe: VerifyStep[],
+  /** The same paths for every scoped step, or each step's own. */
+  testPaths: string[] | ((step: VerifyStep) => string[]),
+): VerifyResult {
   const steps: VerifyStepResult[] = [];
   for (const step of recipe) {
-    const result = runStep(cwd, step, testPaths);
+    const paths = typeof testPaths === "function" ? testPaths(step) : testPaths;
+    // A scoped step given no paths would run unscoped — every slice's tests,
+    // most of them for code that does not exist yet. A slice with no browser
+    // tests simply has no browser step.
+    if (step.scopeable && typeof testPaths === "function" && paths.length === 0) continue;
+    const result = runStep(cwd, step, paths);
     steps.push(result);
     if (!result.ok) {
       return { ok: false, steps, tamperedTests: [], reason: `${step.name} failed` };
@@ -234,7 +262,7 @@ export function checkSuiteBeforeLock(id: string, env?: Env): VerifyResult {
   const problem = verifiabilityProblem(id, archetype, env);
   if (problem) return { ok: false, steps: [], tamperedTests: [], reason: problem };
 
-  const steps = verifyRecipeFor(archetype).filter((step) => step.name !== "test");
+  const steps = gateFor(id, env, archetype).filter((step) => !step.scopeable);
   return runRecipe(projectDir(id, env), steps, []);
 }
 
@@ -258,13 +286,13 @@ export function runVerify(id: string, archetype: string, slice: Slice, env?: Env
     };
   }
 
-  const recipe = verifyRecipeFor(archetype);
+  const recipe = gateFor(id, env, archetype);
   if (recipe.length === 0) {
     return {
       ok: false,
       steps: [],
       tamperedTests: [],
-      reason: `no gates available for archetype "${archetype}" — nothing about ${slice.id} was verified`,
+      reason: `no gates available: nothing is declared for this project ("${archetype}"), so nothing about ${slice.id} was verified`,
     };
   }
 
@@ -282,7 +310,10 @@ export function runVerify(id: string, archetype: string, slice: Slice, env?: Env
     };
   }
 
-  return withGamingScan(projectDir(id, env), runRecipe(projectDir(id, env), recipe, testPaths));
+  return withGamingScan(
+    projectDir(id, env),
+    runRecipe(projectDir(id, env), recipe, (step) => filesFor(id, step, slice.id, env)),
+  );
 }
 
 /**
@@ -330,14 +361,17 @@ export function runPassedGate(
       reason: `the test suite changed since it was locked: ${tamperedTests.join(", ")}`,
     };
   }
-  const recipe = verifyRecipeFor(archetype);
+  const recipe = gateFor(id, env, archetype);
   if (recipe.length === 0) {
-    return { ok: false, steps: [], tamperedTests: [], reason: `no gates available for archetype "${archetype}"` };
+    return { ok: false, steps: [], tamperedTests: [], reason: `no gates available: nothing is declared for this project ("${archetype}")` };
   }
-  const testPaths = [...new Set([...passed.flatMap((s) => sliceTestFiles(id, s, env)), ...extraTests])];
-  // A scoped step given no paths runs unscoped, which is the suite this avoids.
-  const steps = testPaths.length > 0 ? recipe : recipe.filter((step) => !step.scopeable);
-  return withGamingScan(projectDir(id, env), runRecipe(projectDir(id, env), steps, testPaths));
+  const pathsFor = (step: VerifyStep): string[] => [
+    ...new Set([
+      ...passed.flatMap((s) => filesFor(id, step, s.id, env)),
+      ...extraTests.filter((f) => stepCovers(step, f)),
+    ]),
+  ];
+  return withGamingScan(projectDir(id, env), runRecipe(projectDir(id, env), recipe, pathsFor));
 }
 
 /**
@@ -346,11 +380,11 @@ export function runPassedGate(
  * answer different ones.
  */
 export function runTestFiles(id: string, archetype: string, files: string[], env?: Env): VerifyResult {
-  const step = verifyRecipeFor(archetype).find((s) => s.name === "test");
-  if (!step || files.length === 0) {
-    return { ok: false, steps: [], tamperedTests: [], reason: `no test step for "${archetype}"` };
+  const scoped = gateFor(id, env, archetype).filter((s) => s.scopeable && files.some((f) => stepCovers(s, f)));
+  if (scoped.length === 0 || files.length === 0) {
+    return { ok: false, steps: [], tamperedTests: [], reason: `no gate step runs ${files.join(", ") || "these files"} ("${archetype}")` };
   }
-  return runRecipe(projectDir(id, env), [step], files);
+  return runRecipe(projectDir(id, env), scoped, (step) => files.filter((f) => stepCovers(step, f)));
 }
 
 /** Stages from here on write or check code, and need to be able to run it. */
@@ -375,6 +409,14 @@ export function agentToolsForStage(id: string, stage: string, env?: Env): string
       ? "build"
       : stage;
   const runsCode = order.indexOf(base) >= order.indexOf(FIRST_CODE_STAGE);
+  if (runsCode) {
+    try {
+      const contract = readContractFile(id, env);
+      if (contract) return agentToolsForCommands(contractCommands(contract));
+    } catch {
+      // A malformed contract grants nothing it would have implied.
+    }
+  }
   let archetype = "unknown";
   if (runsCode) {
     try {

@@ -3,7 +3,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { readStack, writeStack, ARCHETYPE_FILE } from "../../src/core/stack.js";
-import { ARCHETYPE_NAMES } from "../../src/core/archetype.js";
 
 let env: Record<string, string>;
 let sfo: string;
@@ -30,13 +29,11 @@ describe("readStack", () => {
     expect(readStack("p", env)).toBeNull();
   });
 
-  it("rejects an archetype no recipe exists for, rather than passing it through", () => {
-    // The failure this guards: "cli-rust" has no verify recipe, so accepting it
-    // makes every slice report "no gates available" and fail twice over.
-    specStageWrites('{"archetype":"cli-rust","why":"rust is fast"}');
-
-    expect(() => readStack("p", env)).toThrow(/ARCHETYPE\.json/);
-    expect(() => readStack("p", env)).toThrow(/cli-python/);
+  it("accepts whatever the spec says it is building, in its own words", () => {
+    // How it is verified lives in the project's contract now, not in a list of
+    // names sfo knows; a project with neither is refused at build start.
+    specStageWrites('{"archetype":"firmware for an Adafruit MagTag","why":"an e-ink weather display"}');
+    expect(readStack("p", env)?.archetype).toBe("firmware for an Adafruit MagTag");
   });
 
   it("rejects a stack with no reason recorded", () => {
@@ -49,12 +46,6 @@ describe("readStack", () => {
     expect(() => readStack("p", env)).toThrow(/not valid JSON/);
   });
 
-  it("names every archetype the registry knows, so the error is actionable", () => {
-    specStageWrites('{"archetype":"nope","why":"x"}');
-    for (const name of ARCHETYPE_NAMES) {
-      expect(() => readStack("p", env)).toThrow(new RegExp(name));
-    }
-  });
 });
 
 describe("writeStack", () => {
@@ -63,12 +54,8 @@ describe("writeStack", () => {
     expect(readStack("p", env)).toEqual({ archetype: "cli-node", why: "TypeScript CLI" });
   });
 
-  it("refuses to write an archetype the registry does not know", () => {
-    expect(() =>
-      // Cast because the type already rejects this — the check exists for the
-      // JSON path, where nothing is typed.
-      writeStack("p", { archetype: "cli-rust" as "cli-node", why: "x" }, env),
-    ).toThrow(/ARCHETYPE\.json/);
+  it("refuses a description that is empty", () => {
+    expect(() => writeStack("p", { archetype: "", why: "x" }, env)).toThrow(/ARCHETYPE\.json/);
     expect(fs.existsSync(path.join(sfo, ARCHETYPE_FILE))).toBe(false);
   });
 });

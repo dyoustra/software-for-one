@@ -211,14 +211,14 @@ describe("detectArchetype", () => {
     expect(detectArchetype("p", env)).toBe("cli-python");
   });
 
-  it("refuses an archetype nobody registered instead of quietly sniffing past it", () => {
-    // Falling back here would grade the project as whatever its manifest looks
-    // like — an archetype nobody chose — or as "unknown", which reports "no
-    // gates available" on every slice without ever naming the real cause.
+  it("keeps what the spec recorded rather than sniffing past it", () => {
+    // Falling back to the manifest would grade the project as something nobody
+    // chose. A description sfo has no recipe for is refused at build start
+    // unless the project declared its own contract.
     recordArchetype('{"archetype":"cli-rust","why":"rust is fast"}');
     fs.writeFileSync(path.join(dir, "pyproject.toml"), "[project]\n");
 
-    expect(() => detectArchetype("p", env)).toThrow(/ARCHETYPE\.json/);
+    expect(detectArchetype("p", env)).toBe("cli-rust");
   });
 
   it("reads the python archetype off its manifest", () => {

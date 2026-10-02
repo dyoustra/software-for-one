@@ -1,18 +1,16 @@
 import fs from "node:fs";
 import { z } from "zod";
-import { ARCHETYPE_NAMES } from "./archetype.js";
 import { artifactPath, sfoDir, type Env } from "./paths.js";
 
 /**
- * The stack the spec stage chose, written down where a machine can read it.
- *
- * `archetype` is constrained to the registry rather than left free text. An
- * unregistered name has no verify recipe, so accepting one would produce a
- * build in which every slice reports "no gates available" — the same silent
- * collapse as no record at all, with the added insult of looking deliberate.
+ * What the spec stage decided to build, in its own words: "web app, Vite and
+ * React", "firmware for an Adafruit MagTag". Free text, because what a
+ * project is verified by now lives in its own contract (CONTRACTS.json); a
+ * name sfo has a built-in recipe for (`cli-python`, `cli-node`) still works
+ * without one, and a project with neither is refused before the build starts.
  */
 export const StackSchema = z.object({
-  archetype: z.enum(ARCHETYPE_NAMES),
+  archetype: z.string().min(1),
   why: z.string().min(1),
 });
 
@@ -44,7 +42,7 @@ export function readStack(id: string, env?: Env): Stack | null {
   const parsed = StackSchema.safeParse(raw);
   if (!parsed.success) {
     throw new Error(
-      `invalid ${ARCHETYPE_FILE}: ${parsed.error.message} — archetype must be one of ${ARCHETYPE_NAMES.join(", ")}`,
+      `invalid ${ARCHETYPE_FILE}: ${parsed.error.message}`,
     );
   }
   return parsed.data;

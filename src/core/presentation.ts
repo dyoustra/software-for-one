@@ -4,6 +4,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { z } from "zod";
 import { artifactPath, projectDir, sfoDir, type Env } from "./paths.js";
+import { readContractFile, type Contract } from "./contracts.js";
 
 export const PRESENTATION_FILE = "PRESENTATION.json";
 export const RENDERS_FILE = "RENDERS.json";
@@ -30,6 +31,10 @@ export function readPresentation(id: string, env?: Env): Presentation | null {
 
 export interface Render {
   invocation: string[];
+  /** Files a declared render produced, kept under `.sfo/renders/`. */
+  images?: string[];
+  /** What it needs that the run did not have, when it was left for later. */
+  deferred?: string[];
   /** The raw capture, ANSI included, relative to `.sfo/`. */
   text?: string;
   /** Screenshots on a light and a dark terminal background, relative to `.sfo/`. */
@@ -74,6 +79,8 @@ export function cleanCapture(raw: Buffer): string {
  * byte and still invisible.
  */
 export function captureRenders(id: string, archetype: string, env: Env = process.env, runWith: Run = run): Render[] {
+  const declared = readContractFile(id, env)?.render ?? [];
+  if (declared.length > 0) return captureDeclared(id, declared, env, runWith);
   const presentation = readPresentation(id, env);
   if (!presentation || presentation.kind === "none") return [];
   const dir = projectDir(id, env);
@@ -106,6 +113,42 @@ export function captureRenders(id: string, archetype: string, env: Env = process
       }
     }
     renders.push(render);
+  });
+  fs.writeFileSync(artifactPath(id, RENDERS_FILE, env), `${JSON.stringify(renders, null, 2)}\n`);
+  return renders;
+}
+
+/**
+ * The project's own renders: commands that produce something to look at —
+ * screenshots from a browser, a capture of a terminal, a photo from a board.
+ * What a command prints is kept as text; the files it says it produces are
+ * copied beside it for review to open and the summary to show.
+ */
+function captureDeclared(id: string, declared: Contract["render"], env: Env, runWith: Run): Render[] {
+  const dir = projectDir(id, env);
+  const outDir = path.join(sfoDir(id, env), RENDERS_DIR);
+  fs.mkdirSync(outDir, { recursive: true });
+  const renders = declared.map((entry, i): Render => {
+    const n = i + 1;
+    const render: Render = { invocation: entry.run };
+    if (entry.needs.length > 0) return { ...render, deferred: entry.needs };
+    const r = runWith(entry.run[0], entry.run.slice(1), { cwd: dir, env: process.env, timeoutMs: 300_000 });
+    fs.writeFileSync(path.join(outDir, `${n}.txt`), r.stdout);
+    render.text = `${RENDERS_DIR}/${n}.txt`;
+    if (r.status !== 0) render.error = `exited ${r.status ?? "abnormally"}${r.stderr ? `: ${r.stderr.split("\n")[0]}` : ""}`;
+    const images: string[] = [];
+    for (const produced of entry.produces) {
+      const source = path.join(dir, produced);
+      if (!fs.existsSync(source)) {
+        render.error = [render.error, `${produced} was not produced`].filter(Boolean).join("; ");
+        continue;
+      }
+      const name = `${n}-${path.basename(produced)}`;
+      fs.copyFileSync(source, path.join(outDir, name));
+      images.push(`${RENDERS_DIR}/${name}`);
+    }
+    if (images.length > 0) render.images = images;
+    return render;
   });
   fs.writeFileSync(artifactPath(id, RENDERS_FILE, env), `${JSON.stringify(renders, null, 2)}\n`);
   return renders;

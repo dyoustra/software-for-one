@@ -1065,9 +1065,9 @@ describe("what the build refuses to start on", () => {
     expect(sliceStages(runner)).toEqual(["build-S-01", "build-S-02", "build-S-03"]);
   });
 
-  it("stops before spending anything on an archetype nobody registered", async () => {
-    // "cli-rust" has no recipe, so every slice would report "no gates
-    // available" and fail twice before anyone learned the stack was the problem.
+  it("stops before spending anything on a project with no contract and no built-in recipe", async () => {
+    // "cli-rust" declared no contract and sfo has no recipe for it, so every
+    // slice would fail twice before anyone learned the gate was the problem.
     const runner = pipelineRunner("cli-rust");
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
 
@@ -1075,8 +1075,8 @@ describe("what the build refuses to start on", () => {
 
     expect(sliceStages(runner)).toEqual([]);
     expect(readState("p", env).status).toBe("failed");
-    expect(error).toHaveBeenCalledWith(expect.stringContaining("ARCHETYPE.json"));
-    expect(error).toHaveBeenCalledWith(expect.stringContaining("cli-python"));
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("CONTRACTS.json"));
+    expect(error).toHaveBeenCalledWith(expect.stringContaining("cli-rust"));
     error.mockRestore();
   });
 });

@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { artifactPath, projectDir, sfoDir, type Env } from "./paths.js";
+import { readContractFile, type Contract } from "./contracts.js";
 
 export const INSTALL_FILE = "INSTALL.json";
 
@@ -15,6 +16,8 @@ export interface InstalledCommand {
 export interface InstallRecord {
   installer: string | null;
   commands: InstalledCommand[];
+  /** What the install needs that the run did not have, when it was left for later. */
+  deferred?: string[];
   at: string;
 }
 
@@ -93,6 +96,8 @@ function realpathOr(p: string): string {
  */
 export function installTool(id: string, archetype: string, env: Env = process.env, run: Exec = exec): InstallRecord {
   const dir = projectDir(id, env);
+  const contracted = readContractFile(id, env)?.install;
+  if (contracted) return installDeclared(id, dir, contracted, env, run);
   const declared = commandNames(dir, archetype);
   const names = declared.filter((n) => COMMAND_NAME.test(n));
   const record: InstallRecord = { installer: null, commands: [], at: new Date().toISOString() };
@@ -143,6 +148,38 @@ export function installTool(id: string, archetype: string, env: Env = process.en
         ? { name, installed: true, detail: after.path }
         : { name, installed: false, detail: after.path ? `${after.path} does not run: ${after.output.split("\n").slice(-2).join(" ")}` : "not found from a new terminal after installing" },
     );
+  }
+  return save(id, record, env);
+}
+
+/**
+ * The project's own install: whatever "where the person uses it" means for it
+ * — a command on PATH, an unpacked extension, firmware on a board. Each check
+ * runs from a fresh login shell, with its arguments passed as data.
+ */
+function installDeclared(
+  id: string,
+  dir: string,
+  declared: NonNullable<Contract["install"]>,
+  env: Env,
+  run: Exec,
+): InstallRecord {
+  const record: InstallRecord = { installer: declared.run.join(" "), commands: [], at: new Date().toISOString() };
+  if (declared.needs.length > 0) return save(id, { ...record, deferred: declared.needs }, env);
+
+  const done = run(declared.run[0], declared.run.slice(1), { cwd: dir, timeoutMs: 300_000 });
+  if (done.status !== 0) {
+    record.commands.push({ name: declared.run.join(" "), installed: false, detail: `the install failed: ${done.output.split("\n").slice(-3).join(" ")}` });
+    return save(id, record, env);
+  }
+  const shell = env.SHELL || "/bin/zsh";
+  for (const check of declared.check) {
+    const r = run(shell, ["-lc", '"$@"', "sfo", ...check], { timeoutMs: SHELL_TIMEOUT_MS });
+    record.commands.push({
+      name: check.join(" "),
+      installed: r.status === 0,
+      detail: r.status === 0 ? "runs from a new terminal" : `exited ${r.status ?? "abnormally"}: ${r.output.split("\n").slice(-2).join(" ")}`,
+    });
   }
   return save(id, record, env);
 }

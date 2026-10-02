@@ -12,9 +12,10 @@ import { readDecisions, appendDecision } from "./decisions.js";
 import { commitStage, discardPaths } from "./repo.js";
 import { readPriorArt, blocksPipeline } from "./priorart.js";
 import { lockTests, verifyTestLock } from "./testlock.js";
-import { verifyRecipeFor } from "./archetype.js";
+import { filesFor } from "./contracts.js";
 import {
   runVerify,
+  gateFor,
   runPassedGate,
   runTestFiles,
   agentToolsForStage,
@@ -449,10 +450,12 @@ function buildPromptFor(
 
 /** The commands the gate will run for this slice, as a person would type them. */
 function gateCommands(id: string, archetype: string, slice: Slice, env: Env | undefined): string[] {
-  const scoped = sliceTestFiles(id, slice, env);
-  return verifyRecipeFor(archetype).map((step) =>
-    [step.command, ...step.args, ...(step.scopeable ? scoped : [])].join(" "),
-  );
+  return gateFor(id, env, archetype).flatMap((step) => {
+    if (!step.scopeable) return [[step.command, ...step.args].join(" ")];
+    const files = filesFor(id, step, slice.id, env);
+    // Skipped by the gate when the slice has none, so not shown either.
+    return files.length > 0 ? [[step.command, ...step.args, ...files].join(" ")] : [];
+  });
 }
 
 /** Lines of the last failed gate run given to a retry: enough to act on. */

@@ -14,8 +14,7 @@ import { readState } from "./state.js";
 import { readSlices, type Slice } from "./slices.js";
 import { recordCost } from "./cost.js";
 import { lockTests, verifyTestLock, TEST_LOCK_FILE } from "./testlock.js";
-import { TEST_DIR, agentToolsForStage, type VerifyResult } from "./verify.js";
-import { verifyRecipeFor } from "./archetype.js";
+import { TEST_DIR, agentToolsForStage, gateFor, type VerifyResult } from "./verify.js";
 import { changedPaths, commitPaths, commitStage, discardPaths, headCommit, revertCommit } from "./repo.js";
 import { takeContest, contestFor, contestInstructions } from "./contest.js";
 import { adjudicate, type AdjudicationContext } from "./adjudicate.js";
@@ -246,7 +245,7 @@ export async function runReview(ctx: ReviewContext): Promise<ReviewOutcome> {
       return { outcome: "budget", stage: "review-repair" };
     }
     const repaired = findings.filter((f) => f.status === "repaired").map((f) => f.test as string);
-    const gate = verifyRecipeFor(archetype).map((s) => [s.command, ...s.args].join(" "));
+    const gate = gateFor(id, env, archetype).map((s) => [s.command, ...s.args].join(" "));
     const result = await runAgent(ctx, "review-repair", repairPrompt(openFindings(), gate, previous, contestFor(id, REVIEW_CONTEST_ID, env)));
     if (result.limited) {
       discardPaths(dir, changedPaths(dir));

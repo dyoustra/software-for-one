@@ -64,6 +64,8 @@ export interface VerifyStep {
   args: string[];
   /** Whether the runner may append a path to scope this step to one slice. */
   scopeable: boolean;
+  /** For a scoped step: which files are a slice's, as a `{slice}` glob (see contracts.ts). */
+  files?: string;
 }
 
 /**
@@ -85,13 +87,13 @@ const RECIPES: Record<ArchetypeName, VerifyStep[]> = {
     { name: "install", command: "uv", args: ["sync"], scopeable: false },
     { name: "lint", command: "uv", args: ["run", "ruff", "check", "."], scopeable: false },
     { name: "typecheck", command: "uv", args: ["run", "mypy", "--strict", "."], scopeable: false },
-    { name: "test", command: "uv", args: ["run", "pytest", "-q", `--ignore=${SMOKE_DIR}`], scopeable: true },
+    { name: "test", command: "uv", args: ["run", "pytest", "-q", `--ignore=${SMOKE_DIR}`], scopeable: true, files: "tests/**/*{slice}*" },
   ],
   "cli-node": [
     { name: "install", command: "npm", args: ["ci"], scopeable: false },
     { name: "lint", command: "npm", args: ["run", "lint"], scopeable: false },
     { name: "typecheck", command: "npm", args: ["run", "typecheck"], scopeable: false },
-    { name: "test", command: "npx", args: ["vitest", "run", "--exclude", `${SMOKE_DIR}/**`], scopeable: true },
+    { name: "test", command: "npx", args: ["vitest", "run", "--exclude", `${SMOKE_DIR}/**`], scopeable: true, files: "tests/**/*{slice}*" },
   ],
 };
 
@@ -139,9 +141,11 @@ const NETWORK_COMMANDS = ["curl"];
  * pytest, ruff and mypy, and wrote code it could not run.
  */
 export function agentToolsFor(archetype: string, runsCode: boolean): string[] {
-  const toolchain = runsCode
-    ? [...new Set(verifyRecipeFor(archetype).map((step) => step.command))]
-    : [];
-  const commands = [...toolchain, ...READ_ONLY_COMMANDS, ...NETWORK_COMMANDS];
+  return agentToolsForCommands(runsCode ? verifyRecipeFor(archetype).map((step) => step.command) : []);
+}
+
+/** The same, for a toolchain a project declared itself. */
+export function agentToolsForCommands(toolchain: string[]): string[] {
+  const commands = [...new Set([...toolchain, ...READ_ONLY_COMMANDS, ...NETWORK_COMMANDS])];
   return [...commands.map((c) => `Bash(${c} *)`), "WebFetch", "WebSearch"];
 }

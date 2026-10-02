@@ -86,6 +86,10 @@ function hashTree(dir: string, testDir: string): TestLock {
   for (const rel of collectionHooks(dir, testDir)) {
     lock[rel] = sha256(path.join(dir, rel));
   }
+  // The project's declared gate is as much the contract as the tests it runs:
+  // an agent that could edit it could drop the step it keeps failing.
+  const contract = path.join(dir, ".sfo", "CONTRACTS.json");
+  if (fs.existsSync(contract)) lock[".sfo/CONTRACTS.json"] = sha256(contract);
   return lock;
 }
 

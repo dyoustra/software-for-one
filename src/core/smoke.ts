@@ -7,14 +7,15 @@ import { artifactPath, projectDir, logPath, type Env } from "./paths.js";
 import { readRecords, appendRecord } from "./jsonl.js";
 import { readServices, readCredentials, smokeTestFile, type Service, type Credentials } from "./services.js";
 import { readProfile, readKey, describeKeyRef, DEFAULT_KEY_REF, type KeyReader, type Profile } from "./access.js";
-import { smokeRunnerFor, verifyRecipeFor } from "./archetype.js";
+import { smokeRunnerFor } from "./archetype.js";
+import { readContractFile } from "./contracts.js";
 import { readSmokeCap } from "./budget.js";
 import { recordCost } from "./cost.js";
 import { readState } from "./state.js";
 import { readSlices, type Slice } from "./slices.js";
 import { commitStage, changedPaths, discardPaths } from "./repo.js";
 import { verifyTestLock } from "./testlock.js";
-import { TEST_DIR, agentToolsForStage, type VerifyResult } from "./verify.js";
+import { TEST_DIR, agentToolsForStage, gateFor, type VerifyResult } from "./verify.js";
 import { takeContest, contestFor, contestInstructions } from "./contest.js";
 import { adjudicate, type AdjudicationContext } from "./adjudicate.js";
 import { loadPrompt } from "../stages/prompts.js";
@@ -152,7 +153,7 @@ export function resolveSeamCredential(
 }
 
 interface Planned {
-  run: { service: Service; file: string; credential: Record<string, string> }[];
+  run: { service: Service; file: string; credential: Record<string, string>; command?: string[] }[];
   skipped: SmokeLine[];
 }
 
@@ -163,6 +164,8 @@ export function planSmoke(
   dir: string,
   capUsd: number,
   resolve: (service: Service) => Resolved,
+  /** The contract's smoke commands, by seam id: a declared command needs no smoke file. */
+  declared: Map<string, string[]> = new Map(),
 ): Planned {
   const planned: Planned = { run: [], skipped: [] };
   let committed = 0;
@@ -178,8 +181,8 @@ export function planSmoke(
       continue;
     }
     const file = smokeTestFile(service, archetype);
-    if (!fs.existsSync(path.join(dir, file))) {
-      skip(service, `no smoke test was written for this seam (${file})`);
+    if (!declared.has(service.id) && !fs.existsSync(path.join(dir, file))) {
+      skip(service, `no smoke test was written for this seam: none is declared, and there is no ${file}`);
       continue;
     }
     const credential = resolve(service);
@@ -192,7 +195,8 @@ export function planSmoke(
       continue;
     }
     committed += service.smoke.maxCostUsd;
-    planned.run.push({ service, file, credential: credential.env });
+    const command = declared.get(service.id);
+    planned.run.push({ service, file, credential: credential.env, ...(command ? { command } : {}) });
   }
   return planned;
 }
@@ -215,7 +219,9 @@ async function runSeam(
   env: Env | undefined,
 ): Promise<{ lines: SmokeLine[]; output: string }> {
   const { service, file, credential } = planned;
-  const runner = smokeRunnerFor(archetype, file);
+  const runner = planned.command
+    ? { command: planned.command[0], args: planned.command.slice(1) }
+    : smokeRunnerFor(archetype, file);
   if (!runner) {
     return { lines: [{ seam: service.id, check: "(any)", level: "skipped", detail: `no smoke runner for "${archetype}"` }], output: "" };
   }
@@ -357,8 +363,14 @@ export async function runSmoke(ctx: SmokeContext): Promise<SmokeOutcome> {
   }
 
   const profile = readProfile(env);
-  const plan = planSmoke(services, archetype, dir, readSmokeCap(id, env), (s) =>
-    resolveSeamCredential(s, profile, credentials, process.env, reader),
+  const declared = new Map((readContractFile(id, env)?.smoke ?? []).map((e) => [e.name, e.run]));
+  const plan = planSmoke(
+    services,
+    archetype,
+    dir,
+    readSmokeCap(id, env),
+    (s) => resolveSeamCredential(s, profile, credentials, process.env, reader),
+    declared,
   );
 
   const outputs = new Map<string, string>();
@@ -402,7 +414,7 @@ export async function runSmoke(ctx: SmokeContext): Promise<SmokeOutcome> {
   while (failing.length > 0 && repairs < MAX_SMOKE_REPAIRS) {
     if (ctx.budgetExceeded()) return { outcome: "budget", stage: "smoke-repair" };
 
-    const gate = verifyRecipeFor(archetype).map((s) => [s.command, ...s.args].join(" "));
+    const gate = gateFor(id, env, archetype).map((s) => [s.command, ...s.args].join(" "));
     const result = await ctx.withHeartbeat(() =>
       ctx.runner.runStage({
         workdir: dir,
