@@ -10,6 +10,11 @@ The build stage runs one slice at a time and finds that slice's tests by
 matching the slice id against the file name, ignoring case and separators, so
 this naming is what makes slicing work.
 
+Tests that need a different runner — a browser, a device simulator — go in
+their own folder under `tests/`, named the same way: `tests/e2e/s01-home.spec.ts`.
+Everything lives under `tests/`, whatever the toolchain's habit; the next stage
+configures the tools to look there.
+
 Get it wrong and the build refuses to start: it checks before spending anything
 that every slice in `.sfo/SLICES.jsonl` has a file named for it, and stops with
 the ones it could not find. `S-01` is matched by `test_s01_*`, `s01-*`,
@@ -29,8 +34,8 @@ be consistent across slices — the build stage has to produce exactly what you
 import.
 
 **Keep the dependencies small and real.** Prefer the standard library and the
-archetype's own test runner — `pytest` for `cli-python`, `vitest` for
-`cli-node`. Every third-party package you import has to be a real, installable
+stack's usual test runner — `pytest` for Python, `vitest` for TypeScript,
+Playwright for what only a browser can check. Every third-party package you import has to be a real, installable
 one: the next stage writes the project manifest from what your tests actually
 import, and it cannot declare a library you invented. Do not import the test
 runner's plugins unless a criterion genuinely needs them.
@@ -72,12 +77,12 @@ beside `tests/`, not inside it. These run later, against the real service or
 platform API, and the slice gate never runs them. They live outside `tests/`
 because the suite's own fixtures exist to fake exactly what a smoke test needs
 real: a suite-wide fixture that sets a dummy API key would replace the real one.
-For `cli-python` they also run with `--noconftest`, so they must not rely on
+Python ones also run with `--noconftest`, so they must not rely on
 any `conftest.py`; put shared helpers in an ordinary module under `smoke/`.
 
 - Name each file for its seam id, dashes as underscores:
   `smoke/test_smoke_anthropic_batch.py`, or `smoke/smoke_anthropic_batch.test.ts`
-  for `cli-node`. A seam with no file is reported as never checked.
+  in TypeScript. A seam with no file is reported as never checked.
 - Each file performs that seam's `smoke.checks` through **production wiring**
   — the real client, not a fake — using the same interface the rest of your
   suite imports.

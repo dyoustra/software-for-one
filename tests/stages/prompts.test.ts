@@ -29,21 +29,18 @@ describe("prompts and the artifacts they are graded on", () => {
     expect(loadPrompt("spec")).toContain(ARCHETYPE_FILE);
   });
 
-  it("names every archetype the registry can actually verify", () => {
-    // A name the registry does not know produces an empty recipe, so the prompt
-    // has to offer exactly the registered ones — and adding an archetype
-    // without offering it means the spec stage can never choose it.
-    const spec = loadPrompt("spec");
-    for (const name of ARCHETYPE_NAMES) expect(spec).toContain(name);
-  });
-
-  it("tells test-repair to create the manifest each archetype's gate needs", () => {
-    // `uv sync` needs a pyproject.toml and `npm ci` needs a lockfile. Nothing
-    // else in the pipeline writes either.
+  it("lets spec describe what it builds freely, and test-repair declare how it is verified", () => {
+    // No list of kinds: an archetype name sfo does not know is fine, because
+    // the project's own contract says how it is checked.
+    expect(loadPrompt("spec")).not.toMatch(/must be \*\*exactly one\*\*/);
+    expect(loadPrompt("spec")).toContain(".sfo/PREFERENCES.md");
     const repair = loadPrompt("test-repair");
-    expect(repair).toContain("pyproject.toml");
-    expect(repair).toContain("package.json");
-    expect(repair).toContain("package-lock.json");
+    expect(repair).toContain(".sfo/CONTRACTS.json");
+    // Worked examples for both built-in stacks, a web app and a board.
+    for (const example of ['"uv", "sync"', '"npm", "ci"', '"playwright", "test"', '"pio", "test"']) expect(repair).toContain(example);
+    // The rules the red check and the schema enforce, stated where the contract is written.
+    expect(repair).toMatch(/must fail against your skeleton/);
+    expect(repair).toMatch(/A gate step cannot declare `needs`/);
   });
 
   it("points deliver at an artifact that exists", () => {

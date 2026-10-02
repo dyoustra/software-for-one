@@ -72,6 +72,8 @@ export function buildProgram(): Command {
         access,
       );
       console.log(`captured: ${id}`);
+      const { snapshotPreferences } = await import("./core/preferences.js");
+      snapshotPreferences(id);
 
       if (ceiling !== null) {
         const { writeBudget } = await import("./core/budget.js");
@@ -155,6 +157,25 @@ export function buildProgram(): Command {
       } else {
         console.log(`feedback ${n} recorded; applying it (pid ${startFeedbackDetached(id, n)}) — you'll get a notification`);
       }
+    }));
+
+  program
+    .command("preferences")
+    .description("Edit your standing preferences: stacks, storage, delivery — guidance every new project reads")
+    .option("--show", "print them instead of opening the editor")
+    .action(guarded(async (opts: { show?: boolean }) => {
+      const fs = await import("node:fs");
+      const { preferencesPath, readPreferences, PREFERENCES_TEMPLATE } = await import("./core/preferences.js");
+      const file = preferencesPath();
+      if (opts.show) {
+        console.log(readPreferences() ?? "no preferences yet — `sfo preferences` to write some");
+        return;
+      }
+      if (!fs.existsSync(file)) fs.writeFileSync(file, PREFERENCES_TEMPLATE);
+      const { spawnSync } = await import("node:child_process");
+      const editor = process.env.VISUAL || process.env.EDITOR || "vi";
+      spawnSync(`${editor} "$SFO_PREFS"`, { shell: true, stdio: "inherit", env: { ...process.env, SFO_PREFS: file } });
+      console.log(`saved ${file}`);
     }));
 
   program

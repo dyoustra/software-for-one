@@ -1,4 +1,4 @@
-Read `.sfo/IDEA.md`, `.sfo/RESEARCH.md`, `.sfo/SERVICES.jsonl`, and `.sfo/ACCESS.json`. Produce a specification.
+Read `.sfo/IDEA.md`, `.sfo/RESEARCH.md`, `.sfo/SERVICES.jsonl`, `.sfo/ACCESS.json`, and `.sfo/PREFERENCES.md` if it exists. Produce a specification.
 
 **Write each file as you finish it, not all at the end.** Write `.sfo/SPEC.md` first and save it, then `.sfo/ARCHETYPE.json`, then `.sfo/CRITERIA.jsonl`, then `.sfo/SERVICES.jsonl`, then `.sfo/QUESTIONS.json`, then append to `.sfo/DECISIONS.jsonl`. Stages get killed mid-run; partial output that a re-run can build on beats losing twenty minutes of work to a dropped connection.
 
@@ -9,7 +9,7 @@ Write `.sfo/SPEC.md` containing:
 - **Out of scope** — what this deliberately does not do.
 
 Treat numbers and specifics in the idea as a sense of scale, not a spec. Design for the general case and make scale a parameter; if the architecture genuinely hinges on it, ask rather than assume.
-- **Stack** — the archetype and slot choices, with a one-line reason for any deviation from the defaults.
+- **Stack** — what this is built as and with, and why; where it departs from the person's preferences, why that was necessary.
 
 Write `.sfo/CRITERIA.jsonl` — one JSON object per line, no wrapping array:
 
@@ -24,27 +24,30 @@ group heading.
 `.sfo/SPEC.md` keeps the prose and refers to criteria by id rather than
 restating them.
 
-Write `.sfo/ARCHETYPE.json` — the same stack choice, machine-readable:
+**Decide what you are building, in your own words.** The idea decides the kind
+of thing — a command-line tool, a web app, a browser extension, firmware for a
+board, anything — and the stack. If the idea could reasonably be more than one
+kind and does not say, that is a `blocking` question; do not guess. Read
+`.sfo/PREFERENCES.md` if it exists: the person's standing preferences ("web
+apps in Vite and React", "Python over Node"). Follow them unless this idea
+needs something they rule out, and when it does, deviate, and record a
+`structural` decision saying why.
 
-    {"archetype":"cli-python","why":"one line: why this stack for this idea"}
+Write `.sfo/ARCHETYPE.json`:
 
-`archetype` must be **exactly one** of these strings:
+    {"archetype":"a web app: Vite, React and TypeScript, data in IndexedDB","why":"one line: why this, for this idea"}
 
-- `cli-python` — a Python command-line tool. Verified by `uv sync`,
-  `uv run ruff check .`, `uv run mypy --strict .`, `uv run pytest -q`.
-- `cli-node` — a Node/TypeScript command-line tool. Verified by `npm ci`,
-  `npm run lint`, `npm run typecheck`, `npx vitest run`.
+`archetype` is free text, for every later stage to read. How the project is
+verified is not decided here: the test-repair stage declares that, once the
+toolchain exists. The **Stack** section of `.sfo/SPEC.md` says the same thing
+at more length.
 
-Nothing else is accepted. `cli-rust`, `web-python`, `python`, or any other
-plausible-looking string is rejected and the build refuses to start — these two
-are the only stacks that have verification recipes, so an unregistered name
-means nothing about the build could ever be checked. If neither fits the idea,
-pick the closer of the two and say so in the **Stack** section of
-`.sfo/SPEC.md`; do not invent a third name.
-
-The **Stack** section of `.sfo/SPEC.md` must name the same archetype. This file
-is what every later stage reads to know what it is building and what will grade
-it — the prose is for the human.
+**Say up front what will have to wait for the person.** Some real checks
+cannot run unattended: a board that has to be plugged in, a phone, someone who
+has to look. List each in `.sfo/SPEC.md` under **Checks that need you**, with
+what it needs, so the person knows before the build which checks will wait for
+them. Everything else must be checkable without them: host-side tests, a
+simulator, fakes as strict as the real thing.
 
 **Model access is already decided.** Read `.sfo/ACCESS.json`:
 

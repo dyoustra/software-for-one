@@ -56,3 +56,11 @@ describe("isEntryPoint", () => {
     expect(isEntryPoint(undefined, pathToFileURL(real).href)).toBe(false);
   });
 });
+
+describe("contract commands", () => {
+  it("registers check and preferences", () => {
+    const names = buildProgram().commands.map((c) => c.name());
+    expect(names).toEqual(expect.arrayContaining(["check", "preferences"]));
+  });
+});
+

@@ -30,7 +30,7 @@ record nothing and add a follow-up question asking where it is stored instead.
 An answer of "skip" records nothing: that seam's smoke check reports it was
 skipped for want of a credential.
 
-If an answer changes the stack, rewrite `.sfo/ARCHETYPE.json` to match — `{"archetype":"cli-python","why":"..."}`, where `archetype` is exactly `cli-python` or `cli-node` and nothing else. A stale record grades the whole build against the wrong toolchain. If the stack is unchanged, leave the file alone.
+If an answer changes what is being built or with what, rewrite `.sfo/ARCHETYPE.json` to match — `{"archetype":"<what it is, in words>","why":"..."}` — and the **Stack** section of `.sfo/SPEC.md`. If it is unchanged, leave the file alone.
 
 If an answer opens a genuinely new ambiguity that would change the architecture, add a question to `.sfo/QUESTIONS.json` and stop. Never add one about how the person pays for model calls — `.sfo/ACCESS.json` already answers that. Otherwise leave `.sfo/QUESTIONS.json` alone.
 

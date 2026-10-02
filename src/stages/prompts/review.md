@@ -58,7 +58,7 @@ report again anything still true.
 
 **Every `high` + `code` finding must come with a test that reproduces it**,
 under `tests/review/`, named for the finding — `tests/review/test_r001_*.py`,
-or `tests/review/r001-*.test.ts` for `cli-node` — and named in `test`. It must
+or `tests/review/r001-*.test.ts` in TypeScript — and named in `test`. It must
 **fail against the code as it is now** and pass once the finding is fixed.
 These are the only findings that get repaired, and your test is the whole of
 how "fixed" is judged, so make it exact: assert what the criterion requires,

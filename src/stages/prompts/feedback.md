@@ -9,7 +9,8 @@ the change, prove it with tests, and do not break anything that worked.
 
 - **Change the code** to do what the feedback asks.
 - **Add tests** for the new behaviour, as new files: `tests/test_feedback_*.py`,
-  or `tests/feedback-*.test.ts` for `cli-node`. Make them check what the person
+  or `tests/feedback-*.test.ts` in TypeScript — named so a gate step's `files`
+  in `.sfo/CONTRACTS.json` covers them. Make them check what the person
   asked for, not your implementation of it.
 - **Update the criteria** the feedback changes. Reword, add, or drop lines in
   `.sfo/CRITERIA.jsonl` — keep ids of reworded criteria, and give new ones fresh
