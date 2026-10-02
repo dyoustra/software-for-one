@@ -158,6 +158,15 @@ export function buildProgram(): Command {
     }));
 
   program
+    .command("check")
+    .description("Run the checks that were waiting for hardware, a device, or you")
+    .argument("<id>", "project id")
+    .action(guarded(async (id: string) => {
+      const { runChecks } = await import("./commands/check.js");
+      console.log(await runChecks(id));
+    }));
+
+  program
     .command("stop")
     .description("Stop a running project, leaving everything it made in place")
     .argument("<id>", "project id")

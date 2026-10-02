@@ -13,7 +13,12 @@ const Argv = z.array(z.string().min(1)).min(1);
 /** Anything a check needs that an unattended run may not have: "hardware: MagTag on USB". */
 const Needs = z.array(z.string().min(1)).default([]);
 
-const GateStepSchema = z.object({
+/**
+ * Strict: the gate must run anywhere, unattended, so a step that `needs`
+ * hardware or a person is refused here rather than silently dropped. Such a
+ * check belongs in `smoke`, and the gate in host-side tests or a simulator.
+ */
+const GateStepSchema = z.strictObject({
   name: z.string().min(1),
   run: Argv,
   /**

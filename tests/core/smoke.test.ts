@@ -459,3 +459,17 @@ describe("credentials for uncovered seams", () => {
     expect(readSmokeRecords("p", env)[0]).toMatchObject({ level: "skipped", detail: "GITHUB_TOKEN not found at env:SFO_TEST_NO_GH" });
   });
 });
+
+describe("a smoke check that needs hardware", () => {
+  it("is deferred in an unattended run, and planned when the person says it is there", () => {
+    fs.mkdirSync(path.join(dir, "smoke"), { recursive: true });
+    const magtag = seam({ id: "magtag", kind: "platform", credential: null });
+    const declared = new Map([["magtag", { run: ["pio", "test"], needs: ["hardware: MagTag on USB"] }]]);
+    const unattended = planSmoke([magtag], "firmware", dir, 2, () => ({ ok: true, env: {} }), declared);
+    expect(unattended.run).toEqual([]);
+    expect(unattended.skipped[0]).toMatchObject({ level: "deferred", detail: "waiting for: hardware: MagTag on USB" });
+
+    const withBoard = planSmoke([magtag], "firmware", dir, 2, () => ({ ok: true, env: {} }), declared, true);
+    expect(withBoard.run[0]).toMatchObject({ command: ["pio", "test"] });
+  });
+});

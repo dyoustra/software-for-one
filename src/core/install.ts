@@ -94,10 +94,17 @@ function realpathOr(p: string): string {
  * test and did nothing when typed. Never replaces a command it did not
  * install; a name already taken is reported, not overwritten.
  */
-export function installTool(id: string, archetype: string, env: Env = process.env, run: Exec = exec): InstallRecord {
+export function installTool(
+  id: string,
+  archetype: string,
+  env: Env = process.env,
+  run: Exec = exec,
+  /** `sfo check`: the person confirmed what a deferred install needs is here. */
+  needsMet = false,
+): InstallRecord {
   const dir = projectDir(id, env);
   const contracted = readContractFile(id, env)?.install;
-  if (contracted) return installDeclared(id, dir, contracted, env, run);
+  if (contracted) return installDeclared(id, dir, contracted, env, run, needsMet);
   const declared = commandNames(dir, archetype);
   const names = declared.filter((n) => COMMAND_NAME.test(n));
   const record: InstallRecord = { installer: null, commands: [], at: new Date().toISOString() };
@@ -163,9 +170,10 @@ function installDeclared(
   declared: NonNullable<Contract["install"]>,
   env: Env,
   run: Exec,
+  needsMet: boolean,
 ): InstallRecord {
   const record: InstallRecord = { installer: declared.run.join(" "), commands: [], at: new Date().toISOString() };
-  if (declared.needs.length > 0) return save(id, { ...record, deferred: declared.needs }, env);
+  if (declared.needs.length > 0 && !needsMet) return save(id, { ...record, deferred: declared.needs }, env);
 
   const done = run(declared.run[0], declared.run.slice(1), { cwd: dir, timeoutMs: 300_000 });
   if (done.status !== 0) {

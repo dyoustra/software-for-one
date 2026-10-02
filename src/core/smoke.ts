@@ -34,7 +34,7 @@ export const MAX_SMOKE_REPAIRS = 2;
 /** The contest id for the smoke suite, which belongs to no slice. */
 export const SMOKE_CONTEST_ID = "SMOKE";
 
-export const SMOKE_LEVELS = ["completed", "accepted", "failed", "skipped"] as const;
+export const SMOKE_LEVELS = ["completed", "accepted", "failed", "skipped", "deferred"] as const;
 export type SmokeLevel = (typeof SMOKE_LEVELS)[number];
 
 /** What a smoke test writes: one line per check to `$SFO_SMOKE_RESULTS`. */
@@ -165,7 +165,9 @@ export function planSmoke(
   capUsd: number,
   resolve: (service: Service) => Resolved,
   /** The contract's smoke commands, by seam id: a declared command needs no smoke file. */
-  declared: Map<string, string[]> = new Map(),
+  declared: Map<string, { run: string[]; needs: string[] }> = new Map(),
+  /** Run by `sfo check`, where the person has confirmed every need is met. */
+  needsMet = false,
 ): Planned {
   const planned: Planned = { run: [], skipped: [] };
   let committed = 0;
@@ -178,6 +180,13 @@ export function planSmoke(
   for (const service of services) {
     if (service.effect === "irreversible" && !service.testMode) {
       skip(service, "irreversible, and the service has no test mode — not run unattended");
+      continue;
+    }
+    const entry = declared.get(service.id);
+    if (entry && entry.needs.length > 0 && !needsMet) {
+      for (const check of service.smoke.checks.length > 0 ? service.smoke.checks : ["(any)"]) {
+        planned.skipped.push({ seam: service.id, check, level: "deferred", detail: `waiting for: ${entry.needs.join("; ")}` });
+      }
       continue;
     }
     const file = smokeTestFile(service, archetype);
@@ -195,7 +204,7 @@ export function planSmoke(
       continue;
     }
     committed += service.smoke.maxCostUsd;
-    const command = declared.get(service.id);
+    const command = declared.get(service.id)?.run;
     planned.run.push({ service, file, credential: credential.env, ...(command ? { command } : {}) });
   }
   return planned;
@@ -295,6 +304,8 @@ export interface SmokeContext {
   noRepair?: boolean;
   /** A retry of these seams alone; the rest keep the result they have. */
   onlySeams?: string[];
+  /** `sfo check`: the person confirmed what deferred checks need is here. */
+  needsMet?: boolean;
   budgetExceeded: () => boolean;
   withHeartbeat: <T>(fn: () => Promise<T>) => Promise<T>;
   deps?: SmokeDeps;
@@ -363,7 +374,7 @@ export async function runSmoke(ctx: SmokeContext): Promise<SmokeOutcome> {
   }
 
   const profile = readProfile(env);
-  const declared = new Map((readContractFile(id, env)?.smoke ?? []).map((e) => [e.name, e.run]));
+  const declared = new Map((readContractFile(id, env)?.smoke ?? []).map((e) => [e.name, { run: e.run, needs: e.needs }]));
   const plan = planSmoke(
     services,
     archetype,
@@ -371,6 +382,7 @@ export async function runSmoke(ctx: SmokeContext): Promise<SmokeOutcome> {
     readSmokeCap(id, env),
     (s) => resolveSeamCredential(s, profile, credentials, process.env, reader),
     declared,
+    ctx.needsMet ?? false,
   );
 
   const outputs = new Map<string, string>();

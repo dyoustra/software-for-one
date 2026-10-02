@@ -10,6 +10,7 @@ import { readSmokeRecords, latestSmoke } from "../core/smoke.js";
 import { readFindings } from "../core/findings.js";
 import { recoveryHint } from "../core/stages.js";
 import { failures } from "./retry.js";
+import { deferredWork, hasDeferred } from "../core/deferred.js";
 import { openQuestions } from "../core/openQuestions.js";
 import { isStopped, readCrash, readFailure } from "../core/stopped.js";
 
@@ -95,6 +96,8 @@ function smokeNote(state: ProjectState, env: Env | undefined): string | undefine
     );
     if (unresolved.length > 0) parts.push(`${unresolved.length} high review finding${unresolved.length === 1 ? "" : "s"} unresolved`);
     if (state.slicesFailed.length > 0) parts.push(`${state.slicesFailed.length} slice${state.slicesFailed.length === 1 ? "" : "s"} failed`);
+    const waiting = deferredWork(state.id, env);
+    if (hasDeferred(waiting)) parts.push(`checks waiting for ${waiting.needs.join("; ")}`);
     return parts.length > 0 ? `done, but ${parts.join("; ")}` : undefined;
   } catch {
     return undefined;
@@ -150,6 +153,8 @@ function nextStepFor(state: ProjectState, env: Env | undefined): string | undefi
     if (smokeNote(state, env) === undefined) return undefined;
     const f = failures(id, env);
     if (f.slices.length + f.seams.length + f.findings.length > 0) return `\`sfo retry ${id}\` retries what failed`;
+    const waiting = deferredWork(id, env);
+    if (hasDeferred(waiting)) return `\`sfo check ${id}\` once you have: ${waiting.needs.join("; ")}`;
     // Nothing a retry can act on: a finding with no test is a change the
     // person asks for, which is what feedback is.
     return f.notRetryable.length > 0

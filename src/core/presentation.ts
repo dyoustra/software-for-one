@@ -78,9 +78,16 @@ export function cleanCapture(raw: Buffer): string {
  * cannot make, since a colour that vanishes on one background is right to the
  * byte and still invisible.
  */
-export function captureRenders(id: string, archetype: string, env: Env = process.env, runWith: Run = run): Render[] {
+export function captureRenders(
+  id: string,
+  archetype: string,
+  env: Env = process.env,
+  runWith: Run = run,
+  /** `sfo check`: the person confirmed what deferred renders need is here. */
+  needsMet = false,
+): Render[] {
   const declared = readContractFile(id, env)?.render ?? [];
-  if (declared.length > 0) return captureDeclared(id, declared, env, runWith);
+  if (declared.length > 0) return captureDeclared(id, declared, env, runWith, needsMet);
   const presentation = readPresentation(id, env);
   if (!presentation || presentation.kind === "none") return [];
   const dir = projectDir(id, env);
@@ -124,14 +131,14 @@ export function captureRenders(id: string, archetype: string, env: Env = process
  * What a command prints is kept as text; the files it says it produces are
  * copied beside it for review to open and the summary to show.
  */
-function captureDeclared(id: string, declared: Contract["render"], env: Env, runWith: Run): Render[] {
+function captureDeclared(id: string, declared: Contract["render"], env: Env, runWith: Run, needsMet: boolean): Render[] {
   const dir = projectDir(id, env);
   const outDir = path.join(sfoDir(id, env), RENDERS_DIR);
   fs.mkdirSync(outDir, { recursive: true });
   const renders = declared.map((entry, i): Render => {
     const n = i + 1;
     const render: Render = { invocation: entry.run };
-    if (entry.needs.length > 0) return { ...render, deferred: entry.needs };
+    if (entry.needs.length > 0 && !needsMet) return { ...render, deferred: entry.needs };
     const r = runWith(entry.run[0], entry.run.slice(1), { cwd: dir, env: process.env, timeoutMs: 300_000 });
     fs.writeFileSync(path.join(outDir, `${n}.txt`), r.stdout);
     render.text = `${RENDERS_DIR}/${n}.txt`;
