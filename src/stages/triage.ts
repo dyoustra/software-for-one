@@ -158,7 +158,7 @@ export const runTriageSdk: TriageSdkImpl = async (input) => {
 
   const startedAt = Date.now();
   const response = await client.messages.create({
-    model: "claude-opus-5",
+    model: "claude-opus-5-5",
     max_tokens: 16000,
     system: input.system,
     output_config: { format: { type: "json_schema", schema: input.schema } },

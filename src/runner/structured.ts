@@ -1,7 +1,6 @@
 import { spawn } from "node:child_process";
 import os from "node:os";
 import type { StageUsage } from "./types.js";
-import { DEFAULT_MODEL } from "./claude-code.js";
 
 export interface StructuredRunOptions {
   prompt: string;
@@ -83,8 +82,7 @@ export function runStructured(opts: StructuredRunOptions): Promise<StructuredRun
     "--print",
     "--output-format",
     "json",
-    "--model",
-    opts.model ?? DEFAULT_MODEL,
+    ...(opts.model ? ["--model", opts.model] : []),
     "--json-schema",
     JSON.stringify(opts.schema),
   ];

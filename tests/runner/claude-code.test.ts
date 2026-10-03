@@ -26,7 +26,7 @@ describe("ClaudeCodeRunner", () => {
     const out = fs.readFileSync(log, "utf8");
     expect(out).toContain("--print");
     expect(out).toContain("--output-format stream-json");
-    expect(out).toContain("claude-opus-5");
+    expect(out).not.toContain("--model");
     expect(out).toContain("hello");
   });
 
@@ -45,8 +45,8 @@ describe("ClaudeCodeRunner", () => {
     const tools = out.indexOf("--allowedTools");
     expect(tools).toBeGreaterThan(-1);
     expect(out.indexOf("Bash(uv *)")).toBeGreaterThan(tools);
-    expect(out.indexOf("--model")).toBeGreaterThan(out.indexOf("WebFetch"));
-    expect(out.indexOf("THE-PROMPT")).toBeGreaterThan(out.indexOf("--model"));
+    expect(out.indexOf("--setting-sources")).toBeGreaterThan(out.indexOf("WebFetch"));
+    expect(out.indexOf("THE-PROMPT")).toBeGreaterThan(out.indexOf("--setting-sources"));
   });
 
   it("loads project and local settings only, never the user's", async () => {

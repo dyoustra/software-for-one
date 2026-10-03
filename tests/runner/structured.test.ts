@@ -88,7 +88,7 @@ describe("runStructured", () => {
     const args = recordedArgs();
     expect(args).toContain("--print");
     expect(args[args.indexOf("--output-format") + 1]).toBe("json");
-    expect(args[args.indexOf("--model") + 1]).toBe("claude-opus-5");
+    expect(args).not.toContain("--model");
     // One argument, not a splatted object: JSON.parse must round-trip it.
     expect(JSON.parse(args[args.indexOf("--json-schema") + 1])).toEqual(SCHEMA);
     // The prompt is last, so a schema with a leading dash cannot shadow it.

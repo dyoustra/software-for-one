@@ -4,8 +4,6 @@ import path from "node:path";
 import type { Runner, RunStageInput, StageResult, StageUsage, UsageLimit } from "./types.js";
 import { billingFor, childEnv, type Billing, type ResolvedAccess } from "../core/access.js";
 
-export const DEFAULT_MODEL = "claude-opus-5";
-
 export interface ClaudeCodeRunnerOptions {
   bin?: string;
   env?: Record<string, string>;
@@ -213,6 +211,9 @@ export class ClaudeCodeRunner implements Runner {
       // built on it allowed python3, xargs (which runs anything) and `gh api`
       // (writes to GitHub as the user), and every stage inherited them. What a
       // stage may run is decided by sfo, per stage, in --allowedTools.
+      // Variadic, so it must be followed by a flag that is always passed:
+      // anywhere later, it would swallow the prompt as one more tool name.
+      ...(input.allowedTools?.length ? ["--allowedTools", ...input.allowedTools] : []),
       "--setting-sources",
       "project,local",
       "--permission-mode",
@@ -220,11 +221,8 @@ export class ClaudeCodeRunner implements Runner {
       // anywhere in the person's home, sandbox or not: a probe wrote to ~.
       this.confinement === "vm" ? "bypassPermissions" : "acceptEdits",
       ...(this.confinement === "sandbox" ? ["--settings", JSON.stringify(SANDBOX_SETTINGS)] : []),
-      // Variadic, so it must be followed by another flag: placed last, it
-      // would swallow the prompt as one more tool name.
-      ...(input.allowedTools?.length ? ["--allowedTools", ...input.allowedTools] : []),
-      "--model",
-      input.model ?? DEFAULT_MODEL,
+      // No model named means Claude Code's own default, which moves with it.
+      ...(input.model ? ["--model", input.model] : []),
     ];
     if (this.maxBudgetUsd !== undefined) {
       args.push("--max-budget-usd", String(this.maxBudgetUsd));
