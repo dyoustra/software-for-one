@@ -41,7 +41,7 @@ export function addFeedback(id: string, text: string, env?: Env): FeedbackEntry 
   return entry;
 }
 
-function updateFeedback(id: string, n: number, patch: Partial<FeedbackEntry>, env?: Env): void {
+export function updateFeedback(id: string, n: number, patch: Partial<FeedbackEntry>, env?: Env): void {
   const entries = readFeedback(id, env).map((e) => (e.n === n ? { ...e, ...patch } : e));
   writeRecords(artifactPath(id, FEEDBACK_FILE, env), FeedbackEntrySchema, entries);
 }

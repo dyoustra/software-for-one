@@ -151,14 +151,20 @@ export function buildProgram(): Command {
           readStdin: readAllStdin,
           edit: () => editInEditor("\n# What should change? Lines starting with # are ignored.\n"),
         });
-        n = recordFeedback(id, words);
+        const recorded = recordFeedback(id, words);
+        if (recorded.queued) {
+          console.log(`feedback ${recorded.n} queued — it is applied after the feedback already in progress, and you'll get a notification for each`);
+          return;
+        }
+        n = recorded.n;
       }
       if (opts.attach) {
-        const outcome = await runFeedbackAttached(id, n);
-        console.log(outcome.outcome === "done" ? `applied: ${outcome.summary}` : JSON.stringify(outcome));
+        for (const outcome of await runFeedbackAttached(id, n)) {
+          console.log(outcome.outcome === "done" ? `applied: ${outcome.summary}` : JSON.stringify(outcome));
+        }
       } else {
         const { localHost } = await import("./core/host.js");
-        console.log(`feedback ${n} recorded; applying it (${localHost().start(id, { kind: "feedback", entry: n })}) — you'll get a notification`);
+        console.log(`feedback ${n} recorded; applying it (${localHost().start(id, { kind: "feedback", entry: n })}) — add more with \`sfo feedback ${id}\` and it queues; you'll get a notification for each`);
       }
     }));
 
