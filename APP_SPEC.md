@@ -60,6 +60,19 @@ unchanged in spirit, inside a microVM.
   can't reach another project or the control plane. Claude Code's own Bash
   sandbox still applies inside.
 
+**Permissions follow the host.** On a worker, the microVM is the boundary:
+stages run with `--permission-mode bypassPermissions` and without Claude
+Code's Bash sandbox, so no command stalls waiting for an approval nobody can
+give. The worst an agent can do is damage its own run. On the Mac, stages
+keep `acceptEdits` and the sandbox: a probe showed `bypassPermissions` lets
+both Bash and the Write tool change files anywhere in the person's home.
+
+What the VM does not contain is what is handed to it, so every credential a
+worker holds is scoped to that run: a GitHub App installation token for the
+project's repo alone (an hour long, refreshed by the control plane), a
+control-plane token valid only for that run, and the model credential the
+stage needs anyway.
+
 **Logs, renders and drafts** go to object storage (Fly's Tigris, which is
 S3-compatible), so the app can show screenshots and logs without a worker
 running.
