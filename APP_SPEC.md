@@ -134,9 +134,12 @@ fresh machine and volume, clone the repo, and go.
 ## 5. Delivery
 
 - **CLIs:** the repo, plus `sfo install <id>` on any machine with sfo.
-- **Web apps:** a contract `install` that deploys to **Cloudflare Pages** (free,
-  static, public URL). The URL is the delivered result, and the app's
-  results screen links to it. This replaces the local launcher for
+- **Web apps:** a contract `install` that deploys to the person's preferred
+  host, read from `PREFERENCES.md`; the default is **Vercel**, to the
+  person's own account through a token in Settings. A public URL anyone with
+  the link can open. sfo has no host built in, so Cloudflare Workers or
+  anything else is a one-line preference change. The URL is the delivered
+  result, and the app's results screen links to it. This replaces the local launcher for
   cloud-built web apps; the launcher stays for Mac-run ones.
 - **Expo apps** (when sfo builds one): **EAS Build**, installed through Expo Go
   or TestFlight.
