@@ -19,22 +19,22 @@ feedback. Everything sfo does today, from anywhere.
 
 | | Decision |
 |---|---|
-| Builds run | in the cloud, **one Fly.io Machine (Firecracker microVM) per project run** |
+| Builds run | in the cloud, **one Fly.io Sprite (a persistent Firecracker VM) per project** |
 | App | **Expo**: iOS, Android and web from one codebase. Its web target gives agents a browser-checkable feedback loop, and Expo Go gives fast testing on the phone |
 | First version | **everything sfo does now**: capture, clarify (with drafts), status, push, results, feedback, retry, check |
 | Users | **just you, built multi-user-ready**: every record carries a user id from day one |
 | Sign-in | **Sign in with Apple** |
 | Paying for models | **your profile's choice**, as on the Mac: subscription token or API key, preference and fallback. Long term sfo is model- and harness-agnostic, so nothing below may assume Claude beyond the existing `Runner` implementation |
-| Project home | the run's **own volume**, plus a **private GitHub repo** pushed after every stage |
+| Project home | the **Sprite's own disk**, plus a **private GitHub repo** pushed after every stage |
 | Delivery | **repo plus a one-command install** for CLIs; web apps **deployed to a public URL** (anyone with the link); Expo apps through EAS |
 | The Mac | **an optional runner**: same sfo, used for hardware checks, macOS-only toolchains, or by choice |
 
 ## 2. The pieces
 
 ```
- phone (Expo app) ──HTTPS──▶ control plane ──Fly Machines API──▶ worker (microVM per run)
+ phone (Expo app) ──HTTPS──▶ control plane ──Sprites API──▶ worker (Sprite per project)
         ▲                     (always reachable)                     │ sfo + Claude Code + toolchains
-        └──── Expo push ◀──────────┘ ◀──────── events / state ───────┘ │ volume: the project
+        └──── Expo push ◀──────────┘ ◀──────── events / state ───────┘ │ disk: the project  
                                                                        └──▶ GitHub (push per stage)
 ```
 
@@ -53,14 +53,16 @@ on the next request. It:
 
 **Workers** each run one project run: the existing `sfo run` orchestrator,
 unchanged in spirit, inside a microVM.
-- **The image:** Node, Python, uv, git, the Claude Code CLI, Playwright's
-  Chromium, and sfo. The same image serves every project, and a project's
-  `CONTRACTS.json` decides what runs inside it.
-- **Isolation:** each run is its own microVM, so an agent's arbitrary Bash
+- **The environment:** Sprites take no custom image. Their base (Ubuntu)
+  already has Node, Python, uv, git and gh; a setup step adds sfo, Claude
+  Code from its own installer (the Sprite's bundled copy lags and cannot
+  update itself), and Playwright's Chromium when a contract needs it. A
+  project's `CONTRACTS.json` decides what runs inside it.
+- **Isolation:** each project is its own VM, so an agent's arbitrary Bash
   can't reach another project or the control plane. Claude Code's own Bash
   sandbox still applies inside.
 
-**Permissions follow the host.** On a worker, the microVM is the boundary:
+**Permissions follow the host.** On a worker, the VM is the boundary:
 stages run with `--permission-mode bypassPermissions` and without Claude
 Code's Bash sandbox, so no command stalls waiting for an approval nobody can
 give. The worst an agent can do is damage its own run. On the Mac, stages
@@ -77,51 +79,51 @@ stage needs anyway.
 S3-compatible), so the app can show screenshots and logs without a worker
 running.
 
-## 3. Worker lifecycle (from the design doc, corrected)
+## 3. Worker lifecycle: Sprites
 
-As in `docs/CLOUD_RUNNER_DESIGN.md`: create a machine for a run, run the
-stages on its local disk, **stop** it while waiting for a person (which
-stops compute billing), **start** it when they answer, push and **destroy**
-it after delivery, and a sweeper for anything stopped more than 48 hours.
+`docs/CLOUD_RUNNER_DESIGN.md` planned Fly Machines: create one per run, stop
+it while waiting for a person, start it on an answer, destroy it after
+delivery, and sweep anything stopped over 48 hours. A Machine's root
+filesystem is reset on restart, so that plan also needed a Fly Volume per run.
+**Fly Sprites do all of that themselves**, and are what sfo uses:
 
-**Correction 1: storage.** By default a Fly Machine's root filesystem is
-**reset on every restart**. Fly's docs: *"Stopped Machines that are restarted
-are completely reset to their original state."* So the project can't live on
-the root disk across a stop and start:
-- Each run gets a **Fly Volume**, mounted at `/work`, holding the project,
-  `SFO_HOME`, and the uv, npm and Playwright caches. Volumes persist across a
-  stop and start.
+- **One Sprite per project**, created at `sfo new`. Its disk persists across
+  every pause: no volume to attach, no stop or start to call.
+- **It pauses itself** about 30 seconds after the last activity it
+  recognises, and wakes on the next request. A stage's outgoing model calls
+  are not activity it recognises, so **every sfo heartbeat renews a
+  five-minute Sprite task** (`holdAwake`). A run that parks or dies stops
+  renewing, and the Sprite pauses within five minutes: no stop call, and no
+  stuck worker billing for hours.
+- **Paused, a Sprite costs only its disk** (about $0.02 per GB per month).
+  Running, it bills the CPU actually used, which suits builds that spend most
+  of their time waiting on a model.
 - **After every stage the worker pushes to the project's private GitHub
-  repo.** sfo already commits after each stage. A volume lives on one
-  physical host, so if that host is gone, the control plane starts a new
-  machine with a new volume, clones the repo, and resumes. That's the
-  existing crash-resume (`completedStage`), losing at most one stage.
-- At delivery the volume is destroyed along with the machine. The repo
-  remains.
+  repo.** The Sprite's disk is the working copy; the repo is the backup, and
+  what later runs and `sfo install` clone.
+- **Checkpoints** (about a second, copy-on-write) are available for rolling
+  a project back; sfo does not use them yet.
+- **After delivery** the Sprite stays, paused, for `feedback`, `retry` and
+  `check`, and is destroyed after 30 idle days (a sweep by the control
+  plane). Its repo remains.
 
-**Correction 2: durations and cost.** Builds take **hours**, not 5–25
-minutes: ut-tower's build was about 6 hours of compute across its stages.
-Health checks and timeouts are sized for hours, and the worker heartbeats to
-the control plane, much as `state.json` heartbeats today. A worker is a few
-cents an hour while running. A stopped run costs only its volume, about
-$0.15 per GB per month.
-
-**Later runs on a delivered project** (`feedback`, `retry`, `check`) start a
-fresh machine and volume, clone the repo, and go.
+Builds take **hours**, not the design doc's 5–25 minutes: ut-tower's build
+was about 6 hours of compute across its stages.
 
 ## 4. sfo changes
 
 1. **Where a run executes becomes an interface.**
    `RunHost { start(project, command), stop, resume, destroy, status }`, with
-   `LocalHost` (today's detached process on the Mac) and `FlyHost`. The CLI's
+   `LocalHost` (today's detached process on the Mac) and `SpriteHost`. The CLI's
    `sfo run`, `retry`, `feedback` and `check` go through it.
 2. **The worker reports events.** State changes, parks, questions, renders
    and failures go to the control plane, which keeps them as the project's
    status and sends a push. That's the same information `sfo status` and the
    notification text already compute.
-3. **A worker stops itself on a park** (clarify, criterion question, budget,
-   plan limit, deferred checks) once it has pushed, and the control plane
-   records why. Answering triggers `start`.
+3. **A worker parks by finishing** (clarify, criterion question, budget,
+   plan limit, deferred checks) once it has pushed: it stops renewing its
+   task and the Sprite pauses. The control plane records why, and an answer
+   wakes the Sprite with the next `sfo run`.
 4. **The repo is a remote.** Each project gets a private GitHub repo at
    creation, and the commit after each stage is followed by a push. The
    commit guard (secrets and large files) matters even more once the repo is
@@ -167,32 +169,54 @@ There's no sign-up page, billing, or quotas: an allowlist holds one Apple
 id, yours. Adding people later is adding to the allowlist, then the
 features that need it.
 
+**Model access for other people is not the same as yours.** Anthropic's
+consumer terms (enforced since January 2026) allow a Pro or Max login only
+in Claude Code and claude.ai for the person's own use; a product routing
+other people's work through their subscription breaks them, however the
+login is collected. Google bans the same thing and suspends accounts for it.
+So for anyone but you:
+- **an API key in Settings** is the default;
+- **a runner they own** (their computer, or a Sprite on their own Fly
+  account, signed in to Claude Code themselves) is how they use a
+  subscription; the app and control plane only coordinate;
+- **OpenAI's "Sign in with ChatGPT"** (DevDay, September 2026) is the one
+  sanctioned way for a third-party app to spend a person's plan: self-serve
+  for open-source and locally run apps, by application for hosted ones. It
+  needs a non-Claude `Runner`.
+
 ## 8. Out of scope for this release
 
-Quotas and billing for other users, teams and shared projects, a non-Fly
-`RunHost`, a non-Claude `Runner`, and native (non-Expo) app projects.
+Quotas and billing for other users, teams and shared projects, a
+`RunHost` beyond the Mac and Sprites, a non-Claude `Runner`, and native (non-Expo) app projects.
 
 ## 9. Build order
 
 1. **`RunHost` locally:** extract `LocalHost` from today's detached runs,
    with no behaviour change.
-2. **The worker image,** and **`FlyHost`** with a volume per run, push per
-   stage, stop on park, start on answer, destroy on delivery, and the sweeper.
-   Proven by running one project from the CLI in the cloud.
+2. **Sprites by hand:** sfo on a Sprite with VM confinement and
+   `holdAwake`, one real project run from the CLI to delivery. Then
+   **`SpriteHost`**: create and set up a Sprite per project, push per stage,
+   wake on answer, and the 30-day sweep.
 3. **The control plane:** API, Postgres, Sign in with Apple, worker events,
    Expo push.
 4. **The app:** projects, project detail, capture, questions with drafts,
    then actions.
-5. **Delivery:** GitHub repos, `sfo install`, Cloudflare Pages deploys for
-   web projects.
+5. **Delivery:** GitHub repos, `sfo install`, deploys to the preferred host
+   for web projects.
 6. **One idea captured on the phone, built in the cloud with the laptop shut,
    answered from the phone, delivered** before this counts as done.
 
-## 10. Sources for the Fly.io facts used here
+## 10. Sources
 
-- [Fly Volumes overview](https://fly.io/docs/volumes/overview/): volumes
-  persist across restarts.
-- [Restart apps or Machines](https://fly.io/docs/apps/restart/), and
-  [`persist_rootfs`](https://community.fly.io/t/your-rootfs-reboot-resistant-try-persist-rootfs/26146):
-  the root filesystem is reset by default, and persisting it isn't
-  recommended for critical data.
+- [Sprites](https://fly.io/sprites/), [lifecycle and
+  persistence](https://docs.fly.io/sprites/concepts/lifecycle), [keeping a
+  Sprite running](https://docs.fly.io/sprites/keeping-sprites-running)
+- [Fly Volumes overview](https://fly.io/docs/volumes/overview/) and
+  [`persist_rootfs`](https://community.fly.io/t/your-rootfs-reboot-resistant-try-persist-rootfs/26146),
+  for why Machines alone were not enough
+- Anthropic's third-party subscription terms:
+  [GIGAZINE](https://gigazine.net/gsc_news/en/20260220-anthropic-third-party-block/)
+- Google's Gemini CLI enforcement:
+  [discussion #20632](https://github.com/google-gemini/gemini-cli/discussions/20632)
+- OpenAI's Sign in with ChatGPT for third-party apps:
+  [XenoSpectrum](https://xenospectrum.com/en/chatgpt-sign-in-subscription-apps/)
