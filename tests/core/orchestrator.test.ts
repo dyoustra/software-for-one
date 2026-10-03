@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
+import { runSingleStage } from "../../src/commands/stage.js";
 import { advance, type VerifyFn, type SuiteCheckFn } from "../../src/core/orchestrator.js";
 import { writeState, readState, type ProjectState } from "../../src/core/state.js";
 import { writeCriteria } from "../../src/core/criteria.js";
@@ -1034,6 +1035,32 @@ describe("what the build refuses to start on", () => {
       expect.stringMatching(/no test file under tests\/ is named for S-01, S-02, S-03/),
     );
     expect(error).toHaveBeenCalledWith(expect.stringContaining("test-write"));
+    error.mockRestore();
+  });
+
+  it("refuses to build on a suite that was never locked, instead of grading against nothing", async () => {
+    // The incident: test-repair failed, was re-run by hand without the checks
+    // and lock that follow it in a run, and the build then failed every slice
+    // against an unlocked suite and carried on into review.
+    const base = pipelineRunner();
+    let failRepair = true;
+    const runner: Runner = {
+      runStage: async (input) => {
+        const r = await base.runStage(input);
+        return stageOf(input) === "test-repair" && failRepair ? { ...r, ok: false, exitCode: 1 } : r;
+      },
+    };
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    await runPipeline(runner, { verify: PASSES }).catch(() => {});
+    expect(readState("p", env).status).toBe("failed");
+
+    failRepair = false;
+    await runSingleStage("p", "test-repair", env, runner, () => null);
+    await advance("p", runner, env, { verify: PASSES });
+
+    expect(sliceStages(base)).toEqual([]);
+    expect(readState("p", env)).toMatchObject({ status: "failed", currentStage: "build" });
+    expect(error.mock.calls.map((c) => String(c[0])).join("\n")).toMatch(/the test suite was never locked/);
     error.mockRestore();
   });
 

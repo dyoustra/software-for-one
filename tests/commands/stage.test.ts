@@ -79,6 +79,33 @@ describe("runSingleStage", () => {
     expect(after.currentStage).toBe("research");
   });
 
+  it("seals the suite after test-repair, as a run would, before clearing a failure", async () => {
+    // Re-run by hand, test-repair once skipped the checks and the lock that
+    // follow it in a run, and the whole build was graded against nothing.
+    seed("failed", "test-repair");
+    const sealed: string[] = [];
+    await runSingleStage("p", "test-repair", env, new FakeRunner(true), (id) => (sealed.push(id), null));
+
+    expect(sealed).toEqual(["p"]);
+    expect(readState("p", env).status).toBe("awaiting_human");
+  });
+
+  it("stays failed, and says why, when the suite cannot be sealed", async () => {
+    seed("failed", "test-repair");
+    await runSingleStage("p", "test-repair", env, new FakeRunner(true), () => "the gate passes on the unbuilt skeleton");
+
+    expect(readState("p", env)).toMatchObject({ status: "failed", currentStage: "test-repair" });
+    const failure = JSON.parse(fs.readFileSync(path.join(env.SFO_HOME, "p", ".sfo", "FAILURE.json"), "utf8"));
+    expect(failure).toMatchObject({ stage: "test-repair", reason: "the gate passes on the unbuilt skeleton" });
+  });
+
+  it("seals nothing after any other stage", async () => {
+    seed("awaiting_human", "clarify");
+    await runSingleStage("p", "spec", env, new FakeRunner(true), () => {
+      throw new Error("sealed after spec");
+    });
+  });
+
   it("leaves a failed status alone when the re-run also fails", async () => {
     seed("failed");
     await runSingleStage("p", "research", env, new FakeRunner(false));

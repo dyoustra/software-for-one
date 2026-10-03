@@ -12,7 +12,7 @@ import { readEstimate, formatEstimate, type Estimate } from "./estimate.js";
 import { readDecisions, appendDecision } from "./decisions.js";
 import { commitStage, discardPaths } from "./repo.js";
 import { readPriorArt, blocksPipeline } from "./priorart.js";
-import { lockTests, verifyTestLock } from "./testlock.js";
+import { lockTests, readTestLock, verifyTestLock } from "./testlock.js";
 import { filesFor } from "./contracts.js";
 import {
   runVerify,
@@ -112,6 +112,55 @@ export function startHeartbeat(id: string, env: Env | undefined, intervalMs: num
   }, intervalMs);
   timer.unref?.();
   return () => clearInterval(timer);
+}
+
+/**
+ * What has to follow test-repair, however it ran — in a run, or on its own
+ * with \`sfo stage\`: the suite must load and pass its unscoped gate steps,
+ * must fail against the skeleton, and is then hash-locked. Returns why it
+ * cannot be locked, or null once it is.
+ *
+ * Freezing the suite is what makes every later gate mean anything: from here
+ * the build is graded against tests it cannot renegotiate. A test-repair
+ * re-run by hand once skipped all of this, and a whole build was graded
+ * against nothing.
+ */
+export function sealSuite(
+  id: string,
+  env: Env | undefined,
+  checks: { suiteCheck?: SuiteCheckFn; redCheck?: typeof checkRedBeforeBuild } = {},
+): string | null {
+  const checked = (checks.suiteCheck ?? checkSuiteBeforeLock)(id, env);
+  if (!checked.ok) {
+    const failed = checked.steps.find((st) => !st.ok);
+    const detail = failed?.output.trim().split("\n").slice(-15).join("\n") ?? "";
+    return (
+      `test-repair left a suite that does not pass ${failed?.name ?? "the gate"} — ` +
+      `${checked.reason ?? "check failed"}. It is not locked, because no build ` +
+      `slice could fix it afterwards. Re-run \`sfo stage ${id} test-repair\`.` +
+      (detail ? `\n${detail}` : "")
+    );
+  }
+  const red = (checks.redCheck ?? checkRedBeforeBuild)(id, env);
+  if (red.checked.length > 0 && red.greenOnSkeleton.length === red.checked.length) {
+    return (
+      `the gate passes on the unbuilt skeleton for every slice (${red.checked.join(", ")}), so it tests nothing — ` +
+      `check the scoped steps in .sfo/CONTRACTS.json and re-run \`sfo stage ${id} test-repair\``
+    );
+  }
+  if (red.greenOnSkeleton.length > 0) {
+    console.error(`sfo: ${red.greenOnSkeleton.join(", ")} already pass against the skeleton; building anyway`);
+  }
+
+  // \`lockTests\` refuses an empty tree, and that refusal is fatal rather than
+  // skipped: an empty tree means test-write produced nothing, so there is no
+  // contract to build against.
+  try {
+    lockTests(id, TEST_DIR, env);
+  } catch (err) {
+    return `cannot freeze the test suite — ${reason(err)}. Re-run \`sfo stage ${id} test-write\`.`;
+  }
+  return null;
 }
 
 /**
@@ -662,6 +711,13 @@ async function runSlices(
     );
   }
 
+  // Without a lock the gate refuses every slice, so the build would fail each
+  // one twice and the run would carry on into smoke and review of code that
+  // nothing graded.
+  if (Object.keys(readTestLock(id, env)).length === 0) {
+    blockers.push(`the test suite was never locked — re-run \`sfo stage ${id} test-repair\``);
+  }
+
   if (blockers.length > 0) return { outcome: "failed", reason: blockers.join("; ") };
 
   const ctx: AdjudicationContext = {
@@ -1085,51 +1141,10 @@ export async function advance(
       }
     }
 
-    // Freezing the suite is what makes every later gate mean anything: from
-    // here the build is graded against tests it cannot renegotiate.
-    //
-    // `lockTests` refuses an empty tree, and that refusal is fatal rather than
-    // skipped. An empty tree means test-write produced nothing, so there is no
-    // contract to build against — and an unlocked project would then run the
-    // whole build and deliver a summary claiming verification that never
-    // happened. Failing here costs one stage; failing silently costs the run.
     if (upcoming === "test-repair") {
-      const checked = (opts.suiteCheck ?? checkSuiteBeforeLock)(id, env);
-      if (!checked.ok) {
-        const failed = checked.steps.find((st) => !st.ok);
-        const detail = failed?.output.trim().split("\n").slice(-15).join("\n") ?? "";
-        fail(
-          id,
-          state,
-          upcoming,
-          `test-repair left a suite that does not pass ${failed?.name ?? "the gate"} — ` +
-            `${checked.reason ?? "check failed"}. It is not locked, because no build ` +
-            `slice could fix it afterwards. Re-run \`sfo stage ${id} test-repair\`.` +
-            (detail ? `\n${detail}` : ""),
-          env,
-        );
-        return;
-      }
-      const red = (opts.redCheck ?? checkRedBeforeBuild)(id, env);
-      if (red.checked.length > 0 && red.greenOnSkeleton.length === red.checked.length) {
-        fail(
-          id,
-          state,
-          upcoming,
-          `the gate passes on the unbuilt skeleton for every slice (${red.checked.join(", ")}), so it tests nothing — ` +
-            `check the scoped steps in .sfo/CONTRACTS.json and re-run \`sfo stage ${id} test-repair\``,
-          env,
-        );
-        return;
-      }
-      if (red.greenOnSkeleton.length > 0) {
-        console.error(`sfo: ${red.greenOnSkeleton.join(", ")} already pass against the skeleton; building anyway`);
-      }
-
-      try {
-        lockTests(id, TEST_DIR, env);
-      } catch (err) {
-        fail(id, state, upcoming, `cannot freeze the test suite — ${reason(err)}. Re-run \`sfo stage ${id} test-write\`.`, env);
+      const unsealed = sealSuite(id, env, opts);
+      if (unsealed) {
+        fail(id, state, upcoming, unsealed, env);
         return;
       }
     }

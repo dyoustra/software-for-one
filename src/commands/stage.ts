@@ -5,6 +5,8 @@ import { readState, writeState } from "../core/state.js";
 import { budgetState, formatBudget } from "../core/budget.js";
 import { recordCost } from "../core/cost.js";
 import { commitStage } from "../core/repo.js";
+import { sealSuite } from "../core/orchestrator.js";
+import { writeFailure } from "../core/stopped.js";
 import { agentToolsForStage } from "../core/verify.js";
 import type { Runner } from "../runner/types.js";
 import { resolveProjectAccess } from "../core/access.js";
@@ -21,6 +23,7 @@ export async function runSingleStage(
   stage: string,
   env?: Env,
   injected?: Runner,
+  seal: typeof sealSuite = sealSuite,
 ): Promise<void> {
   const state = readState(id, env);
 
@@ -63,6 +66,18 @@ export async function runSingleStage(
 
   // Re-runs are appended, not replaced — the bill counts every attempt.
   recordCost(id, stage, result.ok, result.usage, env, "cli", result.billing);
+
+  // The checks and the lock that follow test-repair in a run follow it here
+  // too: skipped, the build is graded against an unlocked suite and every
+  // slice is refused.
+  const unsealed = result.ok && stage === "test-repair" ? seal(id, env) : null;
+  if (unsealed) {
+    commitStage(id, stage, env);
+    writeFailure(id, { stage, reason: unsealed, at: new Date().toISOString() }, env);
+    writeState({ ...state, currentStage: stage, status: "failed", pid: null, updatedAt: new Date().toISOString() }, env);
+    console.log(`${stage} ran, but ${unsealed}`);
+    return;
+  }
 
   if (result.ok && state.status === "failed") {
     // `advance` refuses failed projects and its error tells the user to come
