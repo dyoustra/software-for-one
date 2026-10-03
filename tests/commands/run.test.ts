@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { guardRunnable, detachedArgs, runnerFor } from "../../src/commands/run.js";
+import { guardRunnable, runnerFor } from "../../src/commands/run.js";
+import { commandArgs } from "../../src/core/host.js";
 import { FallbackRunner } from "../../src/runner/fallback.js";
 import { writeState, type ProjectState } from "../../src/core/state.js";
 import { writePriorArt, type PriorArt } from "../../src/core/priorart.js";
@@ -120,20 +121,20 @@ describe("guardRunnable and the prior-art verdict", () => {
   });
 });
 
-describe("detachedArgs", () => {
+describe("commandArgs", () => {
   it("runs the child attached", () => {
-    expect(detachedArgs("p")).toContain("--attach");
+    expect(commandArgs("p", { kind: "run" })).toContain("--attach");
   });
 
   it("carries --anyway through to the child", () => {
     // The child re-runs guardRunnable. Without the flag it would refuse the
     // very verdict the parent just let the human override — and refuse it with
     // stdio: "ignore", so the user would see "started (pid N)" and nothing else.
-    expect(detachedArgs("p", { anyway: true })).toContain("--anyway");
+    expect(commandArgs("p", { kind: "run", anyway: true })).toContain("--anyway");
   });
 
   it("does not pass --anyway when the human did not ask for it", () => {
-    expect(detachedArgs("p")).not.toContain("--anyway");
+    expect(commandArgs("p", { kind: "run" })).not.toContain("--anyway");
   });
 });
 
@@ -219,7 +220,7 @@ describe("guardRunnable and the budget ceiling", () => {
 
 describe("model access in run", () => {
   it("carries --use-api-key through to the child", () => {
-    expect(detachedArgs("p", { useApiKey: true })).toEqual(["run", "p", "--attach", "--use-api-key"]);
+    expect(commandArgs("p", { kind: "run", useApiKey: true })).toEqual(["run", "p", "--attach", "--use-api-key"]);
   });
 
   it("refuses before detaching when the chosen key cannot be found", () => {

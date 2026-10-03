@@ -1,6 +1,4 @@
-import { spawn } from "node:child_process";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { advance } from "../core/orchestrator.js";
 import { ClaudeCodeRunner } from "../runner/claude-code.js";
 import { readState, writeState, isStale } from "../core/state.js";
@@ -15,8 +13,6 @@ import { desktopNotifier, type Notifier } from "../core/notify.js";
 import { writeCrash } from "../core/stopped.js";
 import { listProjects } from "./status.js";
 import type { Runner } from "../runner/types.js";
-
-const here = path.dirname(fileURLToPath(import.meta.url));
 
 export interface GuardOptions {
   /** Build despite a blocking prior-art verdict. Scoped to that check alone. */
@@ -99,31 +95,6 @@ export function runnerFor(id: string, access: ResolvedAccess, env?: Env): Runner
   return new FallbackRunner(plan, new ClaudeCodeRunner({ access: keyAccess }), (input, result) =>
     recordCost(id, path.basename(input.logPath, ".log"), false, result.usage, env, "cli", result.billing),
   );
-}
-
-/**
- * The child re-enters the CLI and so re-runs `guardRunnable`. Any override the
- * human gave the parent has to travel with it, or the child refuses the run
- * with stdio: "ignore" and the failure is invisible.
- */
-export function detachedArgs(id: string, opts: GuardOptions = {}): string[] {
-  return [
-    "run",
-    id,
-    "--attach",
-    ...(opts.anyway ? ["--anyway"] : []),
-    ...(opts.useApiKey ? ["--use-api-key"] : []),
-  ];
-}
-
-/** Forks a detached child and returns immediately. */
-export function runDetached(id: string, opts: GuardOptions = {}): number {
-  const child = spawn(process.execPath, [path.join(here, "..", "cli.js"), ...detachedArgs(id, opts)], {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
-  return child.pid ?? -1;
 }
 
 /**

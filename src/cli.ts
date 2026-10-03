@@ -98,9 +98,10 @@ export function buildProgram(): Command {
         console.log(`not started — \`sfo run ${id}\` when you are ready`);
         return;
       }
-      const { guardRunnable, runDetached } = await import("./commands/run.js");
+      const { guardRunnable } = await import("./commands/run.js");
+      const { localHost } = await import("./core/host.js");
       guardRunnable(id);
-      console.log(`started (pid ${runDetached(id)}) — you'll get a notification when it needs you or is done`);
+      console.log(`started (${localHost().start(id, { kind: "run" })}) — you'll get a notification when it needs you or is done`);
     }));
 
   program
@@ -111,7 +112,7 @@ export function buildProgram(): Command {
     .option("--anyway", "build it even though research found prior art")
     .option("--use-api-key", "run on your API key this time, whatever your profile prefers")
     .action(guarded(async (id: string, opts: { attach?: boolean; anyway?: boolean; useApiKey?: boolean }) => {
-      const { runAttached, runDetached, guardRunnable } = await import("./commands/run.js");
+      const { runAttached, guardRunnable } = await import("./commands/run.js");
       guardRunnable(id, undefined, opts);
       if (opts.attach) {
         await runAttached(id, opts);
@@ -126,7 +127,8 @@ export function buildProgram(): Command {
           console.log(`\nsfo: ${open.length} question(s) still open — run \`sfo answer ${id}\``);
         }
       } else {
-        console.log(`started (pid ${runDetached(id, opts)})`);
+        const { localHost } = await import("./core/host.js");
+        console.log(`started (${localHost().start(id, { kind: "run", anyway: opts.anyway, useApiKey: opts.useApiKey })})`);
       }
     }));
 
@@ -138,7 +140,7 @@ export function buildProgram(): Command {
     .option("--attach", "apply it in this terminal instead of in the background")
     .option("--entry <n>", "apply an already-recorded entry (used by the background run)")
     .action(guarded(async (id: string, text: string | undefined, opts: { attach?: boolean; entry?: string }) => {
-      const { recordFeedback, runFeedbackAttached, startFeedbackDetached } = await import("./commands/feedback.js");
+      const { recordFeedback, runFeedbackAttached } = await import("./commands/feedback.js");
       let n: number;
       if (opts.entry) {
         n = Number(opts.entry);
@@ -155,7 +157,8 @@ export function buildProgram(): Command {
         const outcome = await runFeedbackAttached(id, n);
         console.log(outcome.outcome === "done" ? `applied: ${outcome.summary}` : JSON.stringify(outcome));
       } else {
-        console.log(`feedback ${n} recorded; applying it (pid ${startFeedbackDetached(id, n)}) — you'll get a notification`);
+        const { localHost } = await import("./core/host.js");
+        console.log(`feedback ${n} recorded; applying it (${localHost().start(id, { kind: "feedback", entry: n })}) — you'll get a notification`);
       }
     }));
 

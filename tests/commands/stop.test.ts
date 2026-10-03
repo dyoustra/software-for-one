@@ -3,6 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { stopRun } from "../../src/commands/stop.js";
+import { localHost } from "../../src/core/host.js";
 import { notifyOutcome } from "../../src/commands/run.js";
 import { writeState, readState, type ProjectStateInput } from "../../src/core/state.js";
 import { isStopped } from "../../src/core/stopped.js";
@@ -38,7 +39,7 @@ describe("stopRun", () => {
   it("signals the run's process group, and leaves it resumable", () => {
     seed();
     const signalled: number[] = [];
-    const out = stopRun("p", env, (pid) => void signalled.push(pid));
+    const out = stopRun("p", env, localHost((pid) => void signalled.push(pid)));
 
     expect(signalled).toEqual([-4242]);
     expect(readState("p", env)).toMatchObject({ status: "awaiting_human", pid: null, currentStage: "build" });
@@ -50,25 +51,25 @@ describe("stopRun", () => {
   it("falls back to the process itself when it leads no group", () => {
     seed();
     const signalled: number[] = [];
-    stopRun("p", env, (pid) => {
+    stopRun("p", env, localHost((pid) => {
       if (pid < 0) throw new Error("ESRCH");
       signalled.push(pid);
-    });
+    }));
     expect(signalled).toEqual([4242]);
   });
 
   it("marks it stopped even when the process is already gone", () => {
     seed();
-    const out = stopRun("p", env, () => {
+    const out = stopRun("p", env, localHost(() => {
       throw new Error("ESRCH");
-    });
+    }));
     expect(out).toMatch(/already gone/);
     expect(readState("p", env).status).toBe("awaiting_human");
   });
 
   it("refuses a project that is not running", () => {
     seed({ status: "done", pid: null });
-    expect(() => stopRun("p", env, () => {})).toThrow(/not running \(done\)/);
+    expect(() => stopRun("p", env, localHost(() => {}))).toThrow(/not running \(done\)/);
   });
 
   it("clears the stopped note when the next run starts", async () => {

@@ -1,6 +1,3 @@
-import { spawn } from "node:child_process";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { readState, writeState, isStale } from "../core/state.js";
 import { addFeedback, runFeedback, type FeedbackOutcome } from "../core/feedback.js";
 import { startHeartbeat, HEARTBEAT_INTERVAL_MS } from "../core/orchestrator.js";
@@ -13,8 +10,6 @@ import { runnerFor } from "./run.js";
 import type { Runner } from "../runner/types.js";
 import type { Env } from "../core/paths.js";
 
-const here = path.dirname(fileURLToPath(import.meta.url));
-
 /** Feedback changes a finished project; a project mid-run has not finished. */
 function guardIdle(id: string, env?: Env): void {
   const state = readState(id, env);
@@ -26,15 +21,6 @@ function guardIdle(id: string, env?: Env): void {
 export function recordFeedback(id: string, text: string, env?: Env): number {
   guardIdle(id, env);
   return addFeedback(id, text, env).n;
-}
-
-export function startFeedbackDetached(id: string, n: number): number {
-  const child = spawn(process.execPath, [path.join(here, "..", "cli.js"), "feedback", id, "--entry", String(n), "--attach"], {
-    detached: true,
-    stdio: "ignore",
-  });
-  child.unref();
-  return child.pid ?? -1;
 }
 
 function describe(outcome: FeedbackOutcome): string {
