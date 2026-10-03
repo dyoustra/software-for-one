@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { readState, writeState, type ProjectState } from "./state.js";
+import { holdAwake } from "./keepAwake.js";
 import { nextStage, blocksOnHuman, recoveryHint } from "./stages.js";
 import { artifactExists } from "./artifacts.js";
 import { readCriteria, type Criterion } from "./criteria.js";
@@ -98,7 +99,9 @@ export interface AdvanceOptions {
  * `sfo status` and to the already-running guard in `sfo run`.
  */
 export function startHeartbeat(id: string, env: Env | undefined, intervalMs: number): () => void {
+  holdAwake(id);
   const timer = setInterval(() => {
+    holdAwake(id);
     try {
       const current = readState(id, env);
       writeState({ ...current, heartbeatAt: new Date().toISOString() }, env);
