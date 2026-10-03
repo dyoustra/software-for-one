@@ -13,8 +13,23 @@ export interface ClaudeCodeRunnerOptions {
   maxBudgetUsd?: number;
   /** Which credential the child runs on. Absent means whatever the shell has. */
   access?: ResolvedAccess;
-  /** Confine Bash to the project. On unless false, or `SFO_SANDBOX=0`. */
-  sandbox?: boolean;
+  /** What bounds a stage. Defaults to `SFO_CONFINEMENT`, else "sandbox". */
+  confinement?: Confinement;
+}
+
+/**
+ * What keeps a stage from changing anything outside its project.
+ * - sandbox: Claude Code's Bash sandbox, on a machine the person uses.
+ * - vm: the machine itself is disposable and holds one run (a Sprite), so no
+ *   command waits for an approval nobody is there to give.
+ * - none: neither, for tests and debugging.
+ */
+export type Confinement = "sandbox" | "vm" | "none";
+
+function confinementFrom(value: string | undefined): Confinement {
+  if (value === undefined || value === "" || value === "sandbox") return "sandbox";
+  if (value === "vm" || value === "none") return value;
+  throw new Error(`SFO_CONFINEMENT must be sandbox, vm or none, not "${value}"`);
 }
 
 function num(value: unknown): number {
@@ -172,14 +187,14 @@ export class ClaudeCodeRunner implements Runner {
   private readonly maxBudgetUsd?: number;
   private readonly access: ResolvedAccess;
   private readonly billing: Billing | undefined;
-  private readonly sandbox: boolean;
+  private readonly confinement: Confinement;
 
   constructor(opts: ClaudeCodeRunnerOptions = {}) {
     this.bin = opts.bin ?? "claude";
     this.extraEnv = opts.env ?? {};
     this.access = opts.access ?? { method: "inherit" };
     this.billing = billingFor(this.access, process.env);
-    this.sandbox = opts.sandbox ?? process.env.SFO_SANDBOX !== "0";
+    this.confinement = opts.confinement ?? confinementFrom(process.env.SFO_CONFINEMENT);
     // Env var so every call site (sfo run, sfo stage, the detached child)
     // inherits the same ceiling without threading an option through each one.
     const fromEnv = Number(process.env.SFO_MAX_BUDGET_USD);
@@ -201,8 +216,10 @@ export class ClaudeCodeRunner implements Runner {
       "--setting-sources",
       "project,local",
       "--permission-mode",
-      "acceptEdits",
-      ...(this.sandbox ? ["--settings", JSON.stringify(SANDBOX_SETTINGS)] : []),
+      // Outside a VM, bypassPermissions also lets Bash and Write change files
+      // anywhere in the person's home, sandbox or not: a probe wrote to ~.
+      this.confinement === "vm" ? "bypassPermissions" : "acceptEdits",
+      ...(this.confinement === "sandbox" ? ["--settings", JSON.stringify(SANDBOX_SETTINGS)] : []),
       // Variadic, so it must be followed by another flag: placed last, it
       // would swallow the prompt as one more tool name.
       ...(input.allowedTools?.length ? ["--allowedTools", ...input.allowedTools] : []),

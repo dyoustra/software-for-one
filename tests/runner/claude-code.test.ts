@@ -386,7 +386,35 @@ describe("ClaudeCodeRunner sandbox", () => {
     expect(args).toContain('"allowUnsandboxedCommands":false');
 
     const off = path.join(dir, "off.log");
-    await new ClaudeCodeRunner({ bin: FAKE, sandbox: false }).runStage({ workdir: dir, prompt: "x", logPath: off });
+    await new ClaudeCodeRunner({ bin: FAKE, confinement: "none" }).runStage({ workdir: dir, prompt: "x", logPath: off });
     expect(fs.readFileSync(off, "utf8")).not.toContain("--settings");
+  });
+
+  it("on a VM, bypasses permissions instead of sandboxing", async () => {
+    const vm = path.join(dir, "vm.log");
+    await new ClaudeCodeRunner({ bin: FAKE, confinement: "vm" }).runStage({ workdir: dir, prompt: "x", logPath: vm });
+    const args = fs.readFileSync(vm, "utf8");
+    expect(args).toContain("bypassPermissions");
+    expect(args).not.toContain("acceptEdits");
+    expect(args).not.toContain("--settings");
+  });
+
+  it("never bypasses permissions outside a VM", async () => {
+    for (const confinement of ["sandbox", "none"] as const) {
+      const log = path.join(dir, `${confinement}.log`);
+      await new ClaudeCodeRunner({ bin: FAKE, confinement }).runStage({ workdir: dir, prompt: "x", logPath: log });
+      expect(fs.readFileSync(log, "utf8")).not.toContain("bypassPermissions");
+    }
+  });
+
+  it("refuses a confinement it does not know", () => {
+    const before = process.env.SFO_CONFINEMENT;
+    process.env.SFO_CONFINEMENT = "vn";
+    try {
+      expect(() => new ClaudeCodeRunner({ bin: FAKE })).toThrow(/sandbox, vm or none/);
+    } finally {
+      if (before === undefined) delete process.env.SFO_CONFINEMENT;
+      else process.env.SFO_CONFINEMENT = before;
+    }
   });
 });
