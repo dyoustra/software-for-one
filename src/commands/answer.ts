@@ -15,7 +15,10 @@ function stdinReader(): Reader {
   return { ask: (prompt) => rl.question(prompt), close: () => rl.close() };
 }
 
-export async function promptForAnswers(id: string, env?: Env, ask?: Ask): Promise<void> {
+type Answer = { questionId: string; answer: string; questionText: string };
+
+/** The questions still waiting for the person, or why there are none to answer. */
+function openFor(id: string, env?: Env): ReturnType<typeof openQuestions> {
   // Existence check only — a typo'd id must report "no such project", not
   // blame a missing QUESTIONS.json. The state written at the end is re-read
   // there, because the human may sit at the prompt for a long time.
@@ -38,6 +41,40 @@ export async function promptForAnswers(id: string, env?: Env, ask?: Ask): Promis
   if (open.length === 0) {
     throw new Error(`no open questions for ${id}`);
   }
+  return open;
+}
+
+function saveAnswers(id: string, answers: Answer[], env?: Env): string {
+  // Merge, never replace: writeAnswers overwrites the file, so a second pass
+  // answering two follow-ups would otherwise erase the first pass's answers.
+  const existing = readAnswers(id, env)?.answers ?? [];
+  writeAnswers(id, { answers: [...existing, ...answers] }, env);
+
+  const state = readState(id, env);
+  writeState({ ...state, status: "awaiting_human", updatedAt: new Date().toISOString() }, env);
+  return `answers saved — run \`sfo run ${id}\` to fold them into the spec`;
+}
+
+/**
+ * Answers given all at once, keyed by question id: for anything answering
+ * without a terminal, such as the app. Every open question must be answered,
+ * and only those, or nothing is saved.
+ */
+export function answerFrom(id: string, given: Record<string, string>, env?: Env): string {
+  const open = openFor(id, env);
+  const unknown = Object.keys(given).filter((qid) => !open.some((q) => q.id === qid));
+  if (unknown.length > 0) throw new Error(`not open questions for ${id}: ${unknown.join(", ")}`);
+  const missing = open.filter((q) => !given[q.id]?.trim()).map((q) => q.id);
+  if (missing.length > 0) throw new Error(`no answer given for ${missing.join(", ")}`);
+  return saveAnswers(
+    id,
+    open.map((q) => ({ questionId: q.id, answer: given[q.id].trim(), questionText: q.text })),
+    env,
+  );
+}
+
+export async function promptForAnswers(id: string, env?: Env, ask?: Ask): Promise<void> {
+  const open = openFor(id, env);
 
   // Drafts are pictures: a question asking which looks right is unanswerable
   // from the option labels alone.
@@ -49,7 +86,7 @@ export async function promptForAnswers(id: string, env?: Env, ask?: Ask): Promis
   }
 
   const reader = ask ? { ask, close: () => {} } : stdinReader();
-  const answers: { questionId: string; answer: string; questionText: string }[] = [];
+  const answers: Answer[] = [];
 
   try {
     for (const q of open) {
@@ -67,12 +104,5 @@ export async function promptForAnswers(id: string, env?: Env, ask?: Ask): Promis
     reader.close();
   }
 
-  // Merge, never replace: writeAnswers overwrites the file, so a second pass
-  // answering two follow-ups would otherwise erase the first pass's answers.
-  const existing = readAnswers(id, env)?.answers ?? [];
-  writeAnswers(id, { answers: [...existing, ...answers] }, env);
-
-  const state = readState(id, env);
-  writeState({ ...state, status: "awaiting_human", updatedAt: new Date().toISOString() }, env);
-  console.log(`\nanswers saved — run \`sfo run ${id}\` to fold them into the spec`);
+  console.log(`\n${saveAnswers(id, answers, env)}`);
 }

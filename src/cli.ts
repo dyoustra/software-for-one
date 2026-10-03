@@ -256,9 +256,16 @@ export function buildProgram(): Command {
     .command("answer")
     .description("Answer a project's open questions")
     .argument("<id>", "project id")
-    .action(guarded(async (id: string) => {
-      const { promptForAnswers } = await import("./commands/answer.js");
-      await promptForAnswers(id);
+    .option("--from <file>", "answers as JSON, {\"Q-001\": \"B\", …}; - reads stdin")
+    .action(guarded(async (id: string, opts: { from?: string }) => {
+      const { promptForAnswers, answerFrom } = await import("./commands/answer.js");
+      if (!opts.from) return promptForAnswers(id);
+      const fs = await import("node:fs");
+      const given: unknown = JSON.parse(fs.readFileSync(opts.from === "-" ? 0 : opts.from, "utf8"));
+      if (typeof given !== "object" || given === null || Object.values(given).some((v) => typeof v !== "string")) {
+        throw new Error('--from must hold a JSON object of question id to answer text, like {"Q-001": "B"}');
+      }
+      console.log(answerFrom(id, given as Record<string, string>));
     }));
 
   program

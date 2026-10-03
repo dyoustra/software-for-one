@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
-import { promptForAnswers } from "../../src/commands/answer.js";
+import { promptForAnswers, answerFrom } from "../../src/commands/answer.js";
 import { writeState } from "../../src/core/state.js";
 import { writeQuestions, readAnswers, type Questions } from "../../src/core/questions.js";
 
@@ -72,6 +72,27 @@ describe("promptForAnswers", () => {
     await expect(promptForAnswers("p", env, async () => "again")).rejects.toThrow(
       /no open questions for p/,
     );
+  });
+
+  it("takes every answer at once, without a terminal", () => {
+    seedProject({ questions: [question("Q-001"), question("Q-002")] });
+    expect(answerFrom("p", { "Q-001": "B", "Q-002": " A " }, env)).toMatch(/answers saved/);
+    expect(readAnswers("p", env)?.answers).toEqual([
+      { questionId: "Q-001", answer: "B", questionText: "question Q-001" },
+      { questionId: "Q-002", answer: "A", questionText: "question Q-002" },
+    ]);
+  });
+
+  it("saves nothing when an open question is left unanswered", () => {
+    seedProject({ questions: [question("Q-001"), question("Q-002")] });
+    expect(() => answerFrom("p", { "Q-001": "B", "Q-002": "  " }, env)).toThrow(/no answer given for Q-002/);
+    expect(readAnswers("p", env)).toBeNull();
+  });
+
+  it("refuses an answer to a question that is not open", () => {
+    seedProject({ questions: [question("Q-001")] });
+    expect(() => answerFrom("p", { "Q-001": "B", "Q-009": "A" }, env)).toThrow(/not open questions for p: Q-009/);
+    expect(readAnswers("p", env)).toBeNull();
   });
 
   it("asks only the new questions and keeps the earlier answers", async () => {
