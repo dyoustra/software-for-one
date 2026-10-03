@@ -62,6 +62,15 @@ any assertion. For `none`, write none. If `.sfo/drafts/` holds drafts, the perso
 in `.sfo/ANSWERS.json`: the golden output for the main invocation is that
 draft, adjusted only as their answer asked.
 
+**Speed criteria get timing tests with headroom.** The build may run on a
+slower, shared machine than the person's, and timing is noisy: a test that
+fails at exactly the target fails at random. Measure the criterion's work at
+its stated input size, take the best of a few runs, and assert within three
+times the target — loose enough never to fail by chance, tight enough to catch
+an algorithm that is ten times too slow. Say the real target in the test's
+comment. Frame rates are measured in the browser the same way, over a second or
+more of the real interaction.
+
 **Fakes must be as strict as the real thing.** For every `network` seam in
 `.sfo/SERVICES.jsonl`, the fake you build rejects any input that breaks one of
 that seam's `constraints`, raising the kind of error the real client raises. A

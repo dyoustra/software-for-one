@@ -49,6 +49,16 @@ what it needs, so the person knows before the build which checks will wait for
 them. Everything else must be checkable without them: host-side tests, a
 simulator, fakes as strict as the real thing.
 
+**Speed is a criterion when someone waits on it.** If a person uses it live —
+types into it, drags, plays, records, watches it update — or waits for it to
+process something, write the speeds that matter as criteria, with numbers, in
+what the person would notice: "analysing a 30-second take finishes in under
+2 s", "the waveform redraws at 30 fps or better while recording", "`--help`
+prints in under 300 ms". Say the input size each is measured at. Pick the
+target from what the person would feel, not from what is easy to pass. A tool
+nobody waits on needs none. Whether it *feels* fast on the person's own machine
+is for them to judge: list that under **Checks that need you**.
+
 **Model access is already decided.** Read `.sfo/ACCESS.json`:
 
     {"modelAccess":["claude_subscription","anthropic_api_key"],"sfoPrefers":"claude_subscription"}
