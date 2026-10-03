@@ -185,9 +185,10 @@ export function buildProgram(): Command {
     .command("check")
     .description("Run the checks that were waiting for hardware, a device, or you")
     .argument("<id>", "project id")
-    .action(guarded(async (id: string) => {
+    .option("--ready", "everything the checks need is here; skip asking")
+    .action(guarded(async (id: string, opts: { ready?: boolean }) => {
       const { runChecks } = await import("./commands/check.js");
-      console.log(await runChecks(id));
+      console.log(await runChecks(id, undefined, { ready: opts.ready }));
     }));
 
   program

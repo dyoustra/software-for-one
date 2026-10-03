@@ -82,6 +82,17 @@ describe("sfo check", () => {
     expect(formatStatus(listProjects(env))).not.toMatch(/waiting/);
   });
 
+  it("asks nothing with --ready, and runs the checks", async () => {
+    const out = await runChecks("p", env, {
+      ...quiet,
+      ready: true,
+      ask: async () => {
+        throw new Error("asked despite --ready");
+      },
+    });
+    expect(out).toMatch(/magtag — shows the forecast: completed/);
+  });
+
   it("says so when nothing is waiting", async () => {
     write(".sfo/SMOKE.jsonl", "");
     expect(await runChecks("p", env, quiet)).toBe("p has nothing waiting for you");

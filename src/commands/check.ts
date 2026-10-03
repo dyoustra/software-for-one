@@ -24,7 +24,14 @@ export type Ask = (question: string) => Promise<string>;
 export async function runChecks(
   id: string,
   env?: Env,
-  deps: { ask?: Ask; runner?: Runner; notify?: Notifier; log?: (m: string) => void } = {},
+  deps: {
+    ask?: Ask;
+    runner?: Runner;
+    notify?: Notifier;
+    log?: (m: string) => void;
+    /** The person already said everything listed is here (`--ready`): ask nothing. */
+    ready?: boolean;
+  } = {},
 ): Promise<string> {
   const log = deps.log ?? console.log;
   const state = readState(id, env);
@@ -32,10 +39,13 @@ export async function runChecks(
   const work = deferredWork(id, env);
   if (!hasDeferred(work)) return `${id} has nothing waiting for you`;
 
-  const rl = deps.ask ? null : readline.createInterface({ input: process.stdin, output: process.stdout });
+  if (deps.ready) {
+    for (const need of work.needs) log(`ready (--ready): ${need}`);
+  }
+  const rl = deps.ask || deps.ready ? null : readline.createInterface({ input: process.stdin, output: process.stdout });
   const ask: Ask = deps.ask ?? ((q) => (rl as readline.Interface).question(q));
   try {
-    for (const need of work.needs) {
+    for (const need of deps.ready ? [] : work.needs) {
       const answer = (await ask(`Ready: ${need}? [y/N] `)).trim().toLowerCase();
       if (answer !== "y" && answer !== "yes") return `not run — \`sfo check ${id}\` again when you have: ${need}`;
     }
