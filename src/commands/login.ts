@@ -50,7 +50,7 @@ export async function login(env: Env = process.env, log: (m: string) => void = c
   if (started.status !== 200) throw new Error(`the control plane at ${base} did not start a sign-in (${started.status})`);
   const { deviceCode, userCode, verifyUrl } = started.body as { deviceCode: string; userCode: string; verifyUrl: string };
 
-  log(`Your code: ${userCode}\nApprove it at ${verifyUrl} (opening it now)`);
+  log(`Your code: ${userCode}\nType it at ${verifyUrl} (opening it now) and approve`);
   if (process.platform === "darwin") spawnSync("open", [verifyUrl], { stdio: "ignore" });
 
   for (;;) {

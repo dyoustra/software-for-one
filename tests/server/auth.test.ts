@@ -32,7 +32,7 @@ describe("device sign-in", () => {
     const { started, approved, collected } = await login(s);
 
     expect(started.userCode).toMatch(/^[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$/);
-    expect(started.verifyUrl).toBe(`https://cp.test/approve?code=${started.userCode}`);
+    expect(started.verifyUrl).toBe("https://cp.test/approve");
     expect(await approved.json()).toEqual({ ok: true, approved: true, device: "danny's mac" });
     const { token } = (await collected.json()) as { token: string };
     expect(token).toMatch(/^sfo_/);
@@ -40,6 +40,16 @@ describe("device sign-in", () => {
     const devices = await s.get("/devices", token);
     expect(devices.status).toBe(200);
     expect(((await devices.json()) as { name: string }[]).map((d) => d.name)).toEqual(["danny's mac"]);
+  });
+
+  it("stores no token or code a copy of the database could use", async () => {
+    const s = server();
+    const started = (await (await s.post("/auth/device", {})).json()) as { deviceCode: string; userCode: string };
+    await s.post("/approve", { userCode: started.userCode, idToken: "me", approve: true });
+    const waiting = s.db.prepare("SELECT * FROM device_codes").get() as Record<string, unknown>;
+    expect(waiting.device_code).not.toBe(started.deviceCode);
+    expect(waiting.token).toBeNull();
+    expect(s.db.prepare("SELECT count(*) AS n FROM devices").get()).toEqual({ n: 0 });
   });
 
   it("keeps only a hash of a token, and forgets the code once collected", async () => {
@@ -63,6 +73,7 @@ describe("device sign-in", () => {
     const { approved } = await login(s, "stranger");
     expect(approved.status).toBe(403);
     expect(s.said.join("\n")).toMatch(/refused for Apple id stranger .*SFO_ALLOWED_APPLE_IDS=stranger/);
+    expect(s.said.join("\n")).not.toContain("@example.com");
     expect(s.db.prepare("SELECT count(*) AS n FROM users").get()).toEqual({ n: 0 });
   });
 
@@ -77,6 +88,15 @@ describe("device sign-in", () => {
     const started = (await (await s.post("/auth/device", {})).json()) as { deviceCode: string; userCode: string };
     await s.post("/approve", { userCode: started.userCode, idToken: "me", approve: false });
     expect((await s.get(`/auth/device/${started.deviceCode}`)).status).toBe(403);
+  });
+});
+
+describe("the approval page", () => {
+  it("never fills in a code from its link, so a sent link cannot be approved in one click", async () => {
+    const s = server();
+    const page = await (await s.get("/approve?code=ABCD-EFGH")).text();
+    expect(page).not.toContain("ABCD-EFGH");
+    expect(page).toMatch(/never approve a code someone sent you/);
   });
 });
 

@@ -24,6 +24,7 @@ const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const now = (): string => new Date().toISOString();
 export const hashToken = (token: string): string => createHash("sha256").update(token).digest("hex");
 
+
 function userCode(): string {
   const bytes = randomBytes(8);
   const chars = [...bytes].map((b) => CODE_ALPHABET[b % CODE_ALPHABET.length]);
@@ -34,7 +35,8 @@ function userCode(): string {
 async function personFor(deps: AuthDeps, idToken: string): Promise<string | null> {
   const who = await deps.verifyApple(idToken);
   if (!deps.allowed.has(who.sub)) {
-    (deps.log ?? console.log)(`sign-in refused for Apple id ${who.sub}${who.email ? ` (${who.email})` : ""} — to allow it: fly secrets set SFO_ALLOWED_APPLE_IDS=${who.sub}`);
+    // Apple's opaque id only: it is what the allowlist needs, and names no one.
+    (deps.log ?? console.log)(`sign-in refused for Apple id ${who.sub} — to allow it: fly secrets set SFO_ALLOWED_APPLE_IDS=${who.sub}`);
     return null;
   }
   const found = deps.db.prepare("SELECT id FROM users WHERE apple_sub = ?").get(who.sub) as { id: string } | undefined;
@@ -67,7 +69,7 @@ export function requireDevice(db: Db): MiddlewareHandler<Env> {
   };
 }
 
-type CodeRow = { device_code: string; user_code: string; device_name: string; status: string; token: string | null; expires_at: string };
+type CodeRow = { device_code: string; user_code: string; device_name: string; status: string; user_id: string | null; expires_at: string };
 
 export function authRoutes(app: Hono<Env>, deps: AuthDeps): void {
   const { db } = deps;
@@ -86,35 +88,39 @@ export function authRoutes(app: Hono<Env>, deps: AuthDeps): void {
     const deviceCode = randomBytes(32).toString("base64url");
     const code = userCode();
     db.prepare("INSERT INTO device_codes (device_code, user_code, device_name, expires_at) VALUES (?, ?, ?, ?)").run(
-      deviceCode,
+      hashToken(deviceCode),
       code,
       (body.name || "a device").slice(0, 80),
       new Date(Date.now() + DEVICE_CODE_TTL_MS).toISOString(),
     );
-    return c.json({ deviceCode, userCode: code, verifyUrl: `${deps.publicUrl}/approve?code=${code}` });
+    return c.json({ deviceCode, userCode: code, verifyUrl: `${deps.publicUrl}/approve` });
   });
 
   // Held open until approved, denied or expired, up to holdMs; the CLI asks again
   // on 202. The wait is inside the request, so the Machine is not stopped under it.
   app.get("/auth/device/:deviceCode", async (c) => {
     const deadline = Date.now() + holdMs;
+    const deviceCode = c.req.param("deviceCode") ?? "";
     for (;;) {
-      const row = db.prepare("SELECT * FROM device_codes WHERE device_code = ?").get(c.req.param("deviceCode")) as CodeRow | undefined;
+      const row = db.prepare("SELECT * FROM device_codes WHERE device_code = ?").get(hashToken(deviceCode)) as CodeRow | undefined;
       if (!row || row.expires_at < now()) return c.json({ error: "this code has expired — `sfo login` again" }, 410);
       if (row.status === "denied") {
         db.prepare("DELETE FROM device_codes WHERE device_code = ?").run(row.device_code);
         return c.json({ error: "denied" }, 403);
       }
-      if (row.status === "approved" && row.token) {
+      // The token is made here, for the CLI holding the code, and never stored
+      // waiting: the database keeps only the code's hash and, after this, the
+      // token's.
+      if (row.status === "approved" && row.user_id) {
         db.prepare("DELETE FROM device_codes WHERE device_code = ?").run(row.device_code);
-        return c.json({ token: row.token });
+        return c.json({ token: issueDevice(db, row.user_id, row.device_name).token });
       }
       if (Date.now() >= deadline) return c.json({ status: "pending" }, 202);
       await new Promise((r) => setTimeout(r, 500));
     }
   });
 
-  app.get("/approve", (c) => c.html(approvePage(c.req.query("code") ?? "")));
+  app.get("/approve", (c) => c.html(approvePage()));
 
   app.post("/approve", async (c) => {
     const body = (await c.req.json().catch(() => ({}))) as { userCode?: string; idToken?: string; approve?: boolean };
@@ -126,8 +132,7 @@ export function authRoutes(app: Hono<Env>, deps: AuthDeps): void {
       db.prepare("UPDATE device_codes SET status = 'denied' WHERE device_code = ?").run(row.device_code);
       return c.json({ ok: true, approved: false });
     }
-    const { deviceId, token } = issueDevice(db, userId, row.device_name);
-    db.prepare("UPDATE device_codes SET status = 'approved', user_id = ?, device_id = ?, token = ? WHERE device_code = ?").run(userId, deviceId, token, row.device_code);
+    db.prepare("UPDATE device_codes SET status = 'approved', user_id = ? WHERE device_code = ?").run(userId, row.device_code);
     return c.json({ ok: true, approved: true, device: row.device_name });
   });
 
@@ -151,8 +156,11 @@ export function authRoutes(app: Hono<Env>, deps: AuthDeps): void {
 }
 
 /** One page: sign in with Apple, then approve or deny the code a device is showing. */
-function approvePage(code: string): string {
-  const safe = code.replace(/[^A-Z0-9-]/gi, "").slice(0, 9);
+/**
+ * The code is typed, never filled in from the link: a pre-filled code is how
+ * someone else's sign-in, sent as a link, gets approved in one click.
+ */
+function approvePage(): string {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>sfo — approve a device</title>
 <style>body{font:16px -apple-system,system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#111;background:#fff}
@@ -160,8 +168,10 @@ function approvePage(code: string): string {
 button{font:inherit;padding:.6rem 1rem;margin:.4rem .4rem 0 0}#msg{margin-top:1rem}</style>
 <script src="https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js"></script></head>
 <body><h1>Approve a device</h1>
-<p>Check this matches the code your terminal shows:</p>
-<p><input id="code" value="${safe}" maxlength="9" autocomplete="off"></p>
+<p><strong>Only approve a code your own terminal is showing you right now.</strong>
+Approving signs that device in as you; never approve a code someone sent you.</p>
+<p>Type the code from your terminal:</p>
+<p><input id="code" value="" placeholder="XXXX-XXXX" maxlength="9" autocomplete="off"></p>
 <p><button id="yes">Sign in with Apple and approve</button><button id="no">Deny</button></p>
 <p id="msg"></p>
 <script>
