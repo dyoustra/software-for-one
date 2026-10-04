@@ -31,7 +31,16 @@ kind and does not say, that is a `blocking` question; do not guess. Read
 `.sfo/PREFERENCES.md` if it exists: the person's standing preferences ("web
 apps in Vite and React", "Python over Node"). Follow them unless this idea
 needs something they rule out, and when it does, deviate, and record a
-`structural` decision saying why.
+`structural` decision saying why. Where they rank languages for a kind of
+project, take the first that suits this idea; passing over one is a
+`structural` decision saying why. The idea, or an answer at clarify, overrides
+the ranking.
+
+**The name is the person's.** Unless the idea names it, ask in
+`.sfo/QUESTIONS.json`: "What should it be called?" (`preference`), with three
+or four suggestions as options: short, easy to type, and not a common command
+already. Free text is welcome. The name is the command, the package and what
+the person types; use the first suggestion everywhere until they answer.
 
 Write `.sfo/ARCHETYPE.json`:
 

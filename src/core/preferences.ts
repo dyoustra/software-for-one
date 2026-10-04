@@ -9,9 +9,15 @@ export const PREFERENCES_TEMPLATE = `# What I prefer
 <!-- Plain words. Every new project reads this as guidance, not law: an idea
      that needs something else gets it, with the reason recorded. -->
 
-- Web apps: Vite + React + TypeScript. Keep data in the browser unless it has to sync.
-- Command-line tools: Python.
-- Deliver locally; never deploy anywhere unless I ask.
+## Languages, best first, by kind of project
+
+- Command-line tools: Python, Go, TypeScript
+- Web apps: TypeScript (Vite + React)
+- Firmware: C++ (PlatformIO)
+
+## Everything else
+
+- Keep web app data in the browser unless it has to sync.
 `;
 
 export function preferencesPath(env?: Env): string {

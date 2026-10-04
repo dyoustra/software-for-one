@@ -49,6 +49,13 @@ describe("prompts and the artifacts they are graded on", () => {
     expect(loadPrompt("deliver")).toContain(VERIFY_FILE);
   });
 
+  it("has spec ask the person to name the project, and follow ranked languages", () => {
+    // lattice and moon were both the agent's names.
+    const spec = loadPrompt("spec");
+    expect(spec).toContain("What should it be called?");
+    expect(spec).toMatch(/rank languages for a kind/);
+  });
+
   it("lets clarify carry a renamed command into every file that names it", () => {
     // A command renamed at clarify left PRESENTATION.json on the old name,
     // and the render ran a command that did not exist.
