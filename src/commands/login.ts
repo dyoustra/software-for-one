@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { projectsRoot, type Env } from "../core/paths.js";
 import { readProfile, readKey, describeKeyRef, type KeyRef } from "../core/access.js";
 
@@ -16,6 +17,21 @@ export function controlUrl(env: Env = process.env): string {
   } catch {
     return DEFAULT_CONTROL_URL;
   }
+}
+
+type ControlFile = { url?: string; githubFingerprint?: string | null };
+
+function readControlFile(env: Env): ControlFile {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(projectsRoot(env), "control.json"), "utf8")) as ControlFile;
+  } catch {
+    return {};
+  }
+}
+
+function writeControlFile(file: ControlFile, env: Env): void {
+  fs.mkdirSync(projectsRoot(env), { recursive: true });
+  fs.writeFileSync(path.join(projectsRoot(env), "control.json"), `${JSON.stringify(file, null, 2)}\n`);
 }
 
 export function readControlToken(): string | null {
@@ -70,8 +86,7 @@ export async function login(env: Env = process.env, log: (m: string) => void = c
     }
     if (r.status !== 200) throw new Error(String(r.body.error ?? `sign-in failed (${r.status})`));
     storeControlToken(String(r.body.token));
-    fs.mkdirSync(projectsRoot(env), { recursive: true });
-    fs.writeFileSync(path.join(projectsRoot(env), "control.json"), `${JSON.stringify({ url: base }, null, 2)}\n`);
+    writeControlFile({ ...readControlFile(env), url: base }, env);
     log(`signed in to ${base}`);
     await offerCredentials(env, log);
     await importCloudProjects(env, log);
@@ -80,6 +95,12 @@ export async function login(env: Env = process.env, log: (m: string) => void = c
 }
 
 async function confirm(question: string): Promise<boolean> {
+  // With no terminal there is no one to say yes, and readline at end of input
+  // never answers: Node would exit mid-command.
+  if (!process.stdin.isTTY) {
+    console.log(`${question} [y/N] — no terminal, so no`);
+    return false;
+  }
   const readline = await import("node:readline/promises");
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
   const answer = await rl.question(`${question} [y/N] `);
@@ -117,13 +138,17 @@ export async function offerCredentials(env: Env = process.env, log: (m: string) 
   // A GitHub App cannot create repositories in a personal account, so cloud
   // projects' repos are made with the person's own fine-grained token.
   const gh = profile.githubToken ? readKey(profile.githubToken, env) : null;
-  if (profile.githubToken && gh) {
+  // Asked once per token: a hash of the last one uploaded is kept, never the token.
+  const fingerprint = gh ? createHash("sha256").update(gh).digest("hex") : null;
+  const control = readControlFile(env);
+  if (profile.githubToken && gh && control.githubFingerprint !== fingerprint) {
     const question = have.includes("github_installation")
       ? `Use your GitHub token (${describeKeyRef(profile.githubToken)}) for cloud projects' repos, replacing the GitHub connection stored now?`
       : `Upload your GitHub token (${describeKeyRef(profile.githubToken)}), stored encrypted, so cloud projects get a private repo?`;
     if (await confirm(question)) {
       const r = await authed("/credentials/github", { method: "PUT", body: JSON.stringify({ accessToken: gh }) }, env);
       log(r.status === 200 ? `GitHub: repos will be made as ${String(r.body.login)}` : `not uploaded: ${String(r.body.error)}`);
+      if (r.status === 200) writeControlFile({ ...readControlFile(env), githubFingerprint: fingerprint }, env);
     }
   } else if (!have.includes("github_installation")) {
     log("no GitHub token — cloud projects get no repo. To give them one: a fine-grained token with Administration read/write, `sfo profile set github keychain:<service>`, then `sfo login`");
@@ -144,8 +169,15 @@ export async function importCloudProjects(env: Env = process.env, log: (m: strin
   for (const [id, entry] of entries) {
     const ch = await authed("/projects/import/challenge", { method: "POST", body: JSON.stringify({ id, sprite: entry.sprite }) }, env);
     if (ch.status === 409) {
-      forgetEntry(id, env);
-      log(`${id} is already on the control plane`);
+      // Claimed is not the same as claimed by you: forget the local record only
+      // once the control plane shows the project under this account.
+      const mine = await authed(`/projects/${id}`, {}, env);
+      if (mine.status === 200 && mine.body.sprite === entry.sprite) {
+        forgetEntry(id, env);
+        log(`${id} is already on the control plane`);
+      } else {
+        log(`${id} or its Sprite ${entry.sprite} is claimed by another account on the control plane — kept here; it may not be yours any more`);
+      }
       continue;
     }
     if (ch.status !== 200) {
