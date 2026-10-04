@@ -143,6 +143,26 @@ describe("a project", () => {
   });
 });
 
+describe("preferences", () => {
+  it("are the defaults until set, validated, and used for a new project", async () => {
+    const s = server();
+    const token = await s.signIn("me");
+    const first = (await (await s.call("GET", "/preferences", token)).json()) as { preferences: { webHost: string }; allowed: { webHosts: string[] } };
+    expect(first.preferences.webHost).toBe("vercel");
+    expect(first.allowed.webHosts).toContain("cloudflare");
+
+    const prefs = { ...first.preferences, webHost: "netlify" };
+    expect((await s.call("PUT", "/preferences", token, { preferences: prefs })).status).toBe(400);
+    expect((await s.call("PUT", "/preferences", token, { preferences: { ...first.preferences, webHost: "none" }, sfoMd: "Python first." })).status).toBe(200);
+
+    await s.call("PUT", "/credentials/claude", token, { value: "sk-ant-oat01-secret" });
+    await (await s.call("POST", "/projects", token, { idea: "x" })).text();
+    const copied = (file: string) => s.fake.calls.find((c) => c.script.includes("~/.sfo/") && c.args[0] === file)?.input;
+    expect(JSON.parse(copied("preferences.json") ?? "{}").webHost).toBe("none");
+    expect(copied("SFO.md")).toBe("Python first.");
+  });
+});
+
 describe("importing a project made before the control plane", () => {
   /** The person writes the challenge onto the Sprite with their own access; here, the fake holds it. */
   function holding(s: ReturnType<typeof server>, sprite: string, proof: () => string) {

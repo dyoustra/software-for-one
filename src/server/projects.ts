@@ -8,7 +8,8 @@ import type { Db } from "./db.js";
 import { requireDevice, type Env } from "./auth.js";
 import { githubToken, type GitHubOAuth, type Vault } from "./credentials.js";
 import { PROJECT_ID, provisionProject, type GitHub, type SpriteCredential } from "../core/provision.js";
-import { DEFAULT_PREFERENCES } from "../core/preferences.js";
+import { DEFAULT_PREFERENCES, KINDS, LANGUAGES, PreferencesSchema, WEB_DATA, WEB_HOSTS } from "../core/preferences.js";
+import type { Project, PreferencesResponse } from "../api/types.js";
 import type { SpriteCli } from "../core/sprite.js";
 
 export interface ProjectDeps {
@@ -25,8 +26,8 @@ type ProjectRow = { id: string; user_id: string; sprite: string; repo: string | 
 
 const now = (): string => new Date().toISOString();
 
-function present(row: ProjectRow) {
-  return { id: row.id, sprite: row.sprite, repo: row.repo, status: row.status, summary: row.summary ? JSON.parse(row.summary) : null, createdAt: row.created_at, updatedAt: row.updated_at };
+function present(row: ProjectRow): Project {
+  return { id: row.id, sprite: row.sprite, repo: row.repo, status: row.status as Project["status"], summary: row.summary ? JSON.parse(row.summary) : null, createdAt: row.created_at, updatedAt: row.updated_at };
 }
 
 /**
@@ -79,6 +80,35 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
     }
   };
 
+  const stored = (userId: string): { preferences: unknown; sfoMd: string | null } => {
+    const row = db.prepare("SELECT preferences, sfo_md FROM user_preferences WHERE user_id = ?").get(userId) as { preferences: string; sfo_md: string | null } | undefined;
+    return row ? { preferences: JSON.parse(row.preferences), sfoMd: row.sfo_md } : { preferences: DEFAULT_PREFERENCES, sfoMd: null };
+  };
+
+  app.get("/preferences", auth, (c: Context<Env>) => {
+    const { preferences, sfoMd } = stored(c.get("userId"));
+    const body: PreferencesResponse = {
+      preferences: preferences as PreferencesResponse["preferences"],
+      sfoMd,
+      allowed: { kinds: [...KINDS], languages: [...LANGUAGES], webHosts: [...WEB_HOSTS], webData: [...WEB_DATA] },
+    };
+    return c.json(body);
+  });
+
+  // Validated against the same fixed lists the CLI enforces; SFO.md is free text.
+  app.put("/preferences", auth, async (c: Context<Env>) => {
+    const body = (await c.req.json().catch(() => ({}))) as { preferences?: unknown; sfoMd?: string | null };
+    const current = stored(c.get("userId"));
+    const parsed = body.preferences === undefined ? { success: true as const, data: current.preferences } : PreferencesSchema.safeParse(body.preferences);
+    if (!parsed.success) return c.json({ error: parsed.error.issues[0]?.message ?? "not valid preferences" }, 400);
+    const sfoMd = body.sfoMd === undefined ? current.sfoMd : body.sfoMd;
+    if (sfoMd !== null && (typeof sfoMd !== "string" || sfoMd.length > 20_000)) return c.json({ error: "SFO.md must be text under 20,000 characters" }, 400);
+    db.prepare(
+      "INSERT INTO user_preferences (user_id, preferences, sfo_md, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT (user_id) DO UPDATE SET preferences = excluded.preferences, sfo_md = excluded.sfo_md, updated_at = excluded.updated_at",
+    ).run(c.get("userId"), JSON.stringify(parsed.data), sfoMd, now());
+    return c.json({ ok: true });
+  });
+
   // Creating a project holds its request for the whole setup (about a minute),
   // reporting each step as a line of JSON: the Machine is never stopped under
   // it, because the work is the request.
@@ -100,8 +130,8 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
             run: body.run !== false,
             credentials,
             profileJson,
-            preferencesJson: body.preferencesJson ?? JSON.stringify(DEFAULT_PREFERENCES),
-            sfoMd: body.sfoMd ?? null,
+            preferencesJson: body.preferencesJson ?? JSON.stringify(stored(userId).preferences),
+            sfoMd: body.sfoMd ?? stored(userId).sfoMd,
             githubToken: token,
           },
           { cli: sprites, github: deps.repos, log: (message) => void say({ progress: message }) },
@@ -187,6 +217,14 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
     if (!REPORTS.has(command)) return c.json({ error: `one of: ${[...REPORTS].join(", ")}` }, 400);
     const r = await sfo(row, [command, row.id, ...(command === "logs" && c.req.query("raw") ? ["--raw"] : [])]);
     return c.json({ status: r.status, output: r.stdout });
+  });
+
+  // The delivery summary, as the run wrote it; empty until delivery.
+  app.get("/projects/:id/summary", auth, async (c: Context<Env>) => {
+    const row = owned(c);
+    if (!row) return c.json({ error: "no such project" }, 404);
+    const r = await sprites.exec(row.sprite, `cat ~/.sfo/"$1"/.sfo/SUMMARY.md 2>/dev/null || true`, [row.id]);
+    return c.json({ status: 0, output: r.stdout });
   });
 
   // Check results made on the person's machine, as a bundle of the copy they

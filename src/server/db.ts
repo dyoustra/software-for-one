@@ -99,6 +99,15 @@ const MIGRATIONS: string[] = [
   ALTER TABLE github_flows ADD COLUMN code_verifier TEXT NOT NULL DEFAULT '';
   ALTER TABLE github_flows ADD COLUMN redirect_uri TEXT NOT NULL DEFAULT '';
   `,
+  // The person's preferences, held here so the app and every machine share them.
+  `
+  CREATE TABLE user_preferences (
+    user_id TEXT PRIMARY KEY REFERENCES users(id),
+    preferences TEXT NOT NULL,
+    sfo_md TEXT,
+    updated_at TEXT NOT NULL
+  );
+  `,
 ];
 
 export type Db = DatabaseSync;
