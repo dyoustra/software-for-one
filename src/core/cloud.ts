@@ -99,7 +99,10 @@ export interface CloudDeps {
  */
 function credentialsFor(profile: Profile, env: Env, readKeyWith: KeyReader): { file: string; value: string; method: Profile["sfoPrefers"] }[] {
   const token = profile.subscriptionToken ? readKeyWith(profile.subscriptionToken, env) : null;
-  const key = profile.apiKey ? readKeyWith(profile.apiKey, env) : null;
+  // A key on a Sprite is a key that can be billed, so it goes only where it
+  // would be used: preferred, the fallback, or the only credential there is.
+  const keyUsed = profile.sfoPrefers === "anthropic_api_key" || profile.fallbackToApiKey || !token;
+  const key = profile.apiKey && keyUsed ? readKeyWith(profile.apiKey, env) : null;
   const found = [
     ...(token && profile.modelAccess.includes("claude_subscription") ? [{ file: "claude-token", value: token, method: "claude_subscription" as const }] : []),
     ...(key && profile.modelAccess.includes("anthropic_api_key") ? [{ file: "api-key", value: key, method: "anthropic_api_key" as const }] : []),

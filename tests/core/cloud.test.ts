@@ -98,6 +98,20 @@ describe("a new cloud project", () => {
     expect(cloudEntry(id, env)).toMatchObject({ sprite: name, repo: null, summary: { status: "awaiting_human" } });
   });
 
+  it("leaves the API key behind when the plan is preferred and there is no fallback", async () => {
+    const sprite = new FakeSprite(capturing("tiny-abc123"));
+    const profile: Profile = {
+      ...PROFILE,
+      modelAccess: ["claude_subscription", "anthropic_api_key"],
+      apiKey: { source: "env", var: "KEY" },
+    };
+    const both = (ref: { source: string }) => (ref.source === "keychain" ? TOKEN : "sk-ant-api-key");
+    await newCloudProject("an idea", { run: false }, profile, { cli: sprite, env, readKeyWith: both, log: quiet });
+
+    expect(sprite.execs.filter((e) => e.input).map((e) => e.args[0])).toEqual(["claude-token"]);
+    expect(JSON.parse(sprite.execs[0].args[1]).modelAccess).toEqual(["claude_subscription"]);
+  });
+
   it("refuses before creating anything when no credential can travel", async () => {
     const sprite = new FakeSprite();
     await expect(
