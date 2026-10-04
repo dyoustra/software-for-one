@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
 import { projectsRoot, type Env } from "../core/paths.js";
+import { readProfile, readKey, describeKeyRef, type KeyRef } from "../core/access.js";
 
 const KEYCHAIN_SERVICE = "sfo-control";
 export const DEFAULT_CONTROL_URL = "https://sfo-control.fly.dev";
@@ -66,8 +67,66 @@ export async function login(env: Env = process.env, log: (m: string) => void = c
     fs.mkdirSync(projectsRoot(env), { recursive: true });
     fs.writeFileSync(path.join(projectsRoot(env), "control.json"), `${JSON.stringify({ url: base }, null, 2)}\n`);
     log(`signed in to ${base}`);
+    await offerCredentials(env, log);
     return;
   }
+}
+
+async function confirm(question: string): Promise<boolean> {
+  const readline = await import("node:readline/promises");
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  const answer = await rl.question(`${question} [y/N] `);
+  rl.close();
+  return /^y(es)?$/i.test(answer.trim());
+}
+
+async function authed(path: string, init: RequestInit = {}, env: Env = process.env): Promise<{ status: number; body: Record<string, unknown> }> {
+  const token = readControlToken();
+  if (!token) throw new Error("not signed in — `sfo login`");
+  return request(`${controlUrl(env)}${path}`, { ...init, headers: { "content-type": "application/json", authorization: `Bearer ${token}`, ...(init.headers ?? {}) } });
+}
+
+/**
+ * Carries this machine's credentials up, so cloud projects started anywhere
+ * can use them: the Claude token the profile names for the cloud, and the API
+ * key only where the profile would use it. Each is named and asked about first.
+ */
+export async function offerCredentials(env: Env = process.env, log: (m: string) => void = console.log): Promise<void> {
+  const profile = readProfile(env);
+  if (!profile) return;
+  const have = ((await authed("/credentials", {}, env)).body.have ?? []) as string[];
+  const offers: [string, string, KeyRef | null, boolean][] = [
+    ["claude", "claude_token", profile.subscriptionToken, profile.modelAccess.includes("claude_subscription")],
+    ["api-key", "anthropic_api_key", profile.apiKey, profile.sfoPrefers === "anthropic_api_key" || profile.fallbackToApiKey],
+  ];
+  for (const [path, kind, ref, wanted] of offers) {
+    if (!ref || !wanted || have.includes(kind)) continue;
+    const value = readKey(ref, env);
+    if (!value) continue;
+    if (!(await confirm(`Upload your ${kind === "claude_token" ? "Claude token" : "API key"} (${describeKeyRef(ref)}), stored encrypted, for cloud projects?`))) continue;
+    const r = await authed(`/credentials/${path}`, { method: "PUT", body: JSON.stringify({ value }) }, env);
+    log(r.status === 200 ? `uploaded ${describeKeyRef(ref)}` : `not uploaded: ${String(r.body.error)}`);
+  }
+  if (!have.includes("github_installation")) log("GitHub is not connected — `sfo connect github` to give cloud projects a repo");
+}
+
+/** Opens GitHub's page to connect an account, and waits until the control plane has it. */
+export async function connectGithub(env: Env = process.env, log: (m: string) => void = console.log): Promise<void> {
+  const started = await authed("/github/connect", { method: "POST" }, env);
+  if (started.status !== 200) throw new Error(String(started.body.error ?? `could not start (${started.status})`));
+  const url = String(started.body.url);
+  log(`Approve sfo on GitHub: ${url} (opening it now)`);
+  if (process.platform === "darwin") spawnSync("open", [url], { stdio: "ignore" });
+  const deadline = Date.now() + 10 * 60_000;
+  while (Date.now() < deadline) {
+    const have = ((await authed("/credentials", {}, env).catch(() => ({ body: {} as Record<string, unknown> }))).body.have ?? []) as string[];
+    if (have.includes("github_installation")) {
+      log("GitHub is connected");
+      return;
+    }
+    await new Promise((done) => setTimeout(done, 2000));
+  }
+  throw new Error("GitHub was not connected within 10 minutes — `sfo connect github` to try again");
 }
 
 export async function logout(env: Env = process.env): Promise<string> {

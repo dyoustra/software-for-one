@@ -4,10 +4,14 @@ import os from "node:os";
 import path from "node:path";
 import { openDb, schemaVersion } from "../../src/server/db.js";
 import { createApp } from "../../src/server/app.js";
+import { Vault } from "../../src/server/credentials.js";
+import { randomBytes } from "node:crypto";
 
 describe("control plane", () => {
   it("answers its health check with what is running", async () => {
-    const app = createApp({ db: openDb(":memory:"), version: "abc1234", verifyApple: async () => ({ sub: "x" }), allowed: new Set(), publicUrl: "http://t" });
+    const db = openDb(":memory:");
+    const github = { authorizeUrl: () => "", exchange: async () => ({ accessToken: "", refreshToken: null, expiresAt: null }) };
+    const app = createApp({ db, version: "abc1234", verifyApple: async () => ({ sub: "x" }), allowed: new Set(), publicUrl: "http://t", vault: new Vault(db, randomBytes(32).toString("base64")), github });
     const res = await app.request("/health");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, version: "abc1234", schema: 2 });

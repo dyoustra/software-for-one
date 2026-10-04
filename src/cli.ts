@@ -257,6 +257,16 @@ export function buildProgram(): Command {
     }));
 
   program
+    .command("connect")
+    .description("Connect an account the control plane uses for you (github)")
+    .argument("<service>", "github")
+    .action(guarded(async (service: string) => {
+      if (service !== "github") throw new Error("only `sfo connect github` exists");
+      const { connectGithub } = await import("./commands/login.js");
+      await connectGithub();
+    }));
+
+  program
     .command("logout")
     .description("Sign this machine out of the control plane and revoke its token")
     .action(guarded(async () => {
