@@ -139,7 +139,7 @@ describe("declaredInstall", () => {
   it("is the install and each check, as the project declared them", () => {
     fs.writeFileSync(
       path.join(dir, ".sfo", "CONTRACTS.json"),
-      JSON.stringify({ gate: [{ name: "t", run: ["true"] }], install: { run: ["uv", "tool", "install", "."], check: [["moon", "--help"]] } }),
+      JSON.stringify({ gate: [{ name: "t", run: ["true"], files: "tests/{slice}*" }], install: { run: ["uv", "tool", "install", "."], check: [["moon", "--help"]] } }),
     );
     expect(declaredInstall("p", env)).toEqual([["uv", "tool", "install", "."], ["moon", "--help"]]);
   });
