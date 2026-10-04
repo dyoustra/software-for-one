@@ -2,6 +2,9 @@ import { Hono } from "hono";
 import { schemaVersion, type Db } from "./db.js";
 import { authRoutes, type AuthDeps, type Env } from "./auth.js";
 import { credentialRoutes, type GitHubOAuth, type Vault } from "./credentials.js";
+import { projectRoutes } from "./projects.js";
+import type { SpriteCli } from "../core/sprite.js";
+import type { GitHub } from "../core/provision.js";
 
 export interface ServerDeps extends Omit<AuthDeps, "db"> {
   db: Db;
@@ -10,6 +13,8 @@ export interface ServerDeps extends Omit<AuthDeps, "db"> {
   vault: Vault;
   github: GitHubOAuth;
   githubRedirects: string[];
+  sprites: SpriteCli;
+  repos?: GitHub;
 }
 
 /**
@@ -22,6 +27,7 @@ export function createApp(deps: ServerDeps): Hono<Env> {
   app.get("/health", (c) => c.json({ ok: true, version: deps.version, schema: schemaVersion(deps.db) }));
   authRoutes(app, deps);
   credentialRoutes(app, deps.db, deps.vault, deps.github, deps.githubRedirects);
+  projectRoutes(app, { db: deps.db, vault: deps.vault, sprites: deps.sprites, repos: deps.repos, oauth: deps.github });
 
   return app;
 }

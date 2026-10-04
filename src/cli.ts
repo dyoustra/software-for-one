@@ -439,6 +439,15 @@ export function buildProgram(): Command {
     }));
 
   program
+    .command("questions")
+    .description("Print a project's open questions as JSON, for another program to show")
+    .argument("<id>", "project id")
+    .action(guarded(async (id: string) => {
+      const { openQuestions } = await import("./core/openQuestions.js");
+      console.log(JSON.stringify(openQuestions(id)));
+    }));
+
+  program
     .command("stage")
     .description("Re-run a single stage in isolation")
     .argument("<id>", "project id")
@@ -521,7 +530,7 @@ export function isEntryPoint(argv1: string | undefined, moduleUrl: string): bool
 }
 
 /** Commands about one project that run where it lives: on its Sprite, for a cloud project. */
-const FORWARDED = new Set(["run", "answer", "feedback", "stop", "logs", "retry", "budget", "cost", "criteria", "why", "decisions", "slices", "stage"]);
+const FORWARDED = new Set(["run", "answer", "feedback", "stop", "logs", "retry", "budget", "cost", "criteria", "why", "decisions", "slices", "stage", "questions"]);
 
 export async function main(argv: string[] = process.argv): Promise<void> {
   await guarded(() => dispatch(argv))();

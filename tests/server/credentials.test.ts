@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createHash, randomBytes } from "node:crypto";
 import { openDb } from "../../src/server/db.js";
 import { createApp } from "../../src/server/app.js";
+import { noSprites } from "./fakes.js";
 import { Vault, githubToken, type GitHubOAuth, type GitHubTokens } from "../../src/server/credentials.js";
 
 const CLAUDE = "sk-ant-oat01-secret-value";
@@ -23,7 +24,7 @@ function server() {
       return "dyoustra";
     },
   };
-  const app = createApp({ db, version: "t", verifyApple: async (t) => ({ sub: t }), allowed: new Set(["me", "you"]), publicUrl: "https://cp.test", holdMs: 50, vault, github, githubRedirects: [APP_RETURN] });
+  const app = createApp({ db, version: "t", verifyApple: async (t) => ({ sub: t }), allowed: new Set(["me", "you"]), publicUrl: "https://cp.test", holdMs: 50, vault, github, githubRedirects: [APP_RETURN], sprites: noSprites });
   const call = (method: string, path: string, token?: string, body?: unknown) =>
     app.request(path, { method, headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
   const signIn = async (who: string) => ((await (await call("POST", "/auth/apple", undefined, { idToken: who })).json()) as { token: string }).token;

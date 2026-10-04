@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { openDb } from "../../src/server/db.js";
 import { createApp } from "../../src/server/app.js";
+import { noSprites } from "./fakes.js";
 import { Vault } from "../../src/server/credentials.js";
 import { randomBytes } from "node:crypto";
 import type { VerifyApple } from "../../src/server/apple.js";
@@ -15,7 +16,7 @@ function server(allowed = ["me"]) {
   const said: string[] = [];
   const db = openDb(":memory:");
   const github = { clientId: "x", authorizeUrl: () => "", whoami: async () => "x", exchange: async () => ({ accessToken: "", refreshToken: null, expiresAt: null }) };
-  const app = createApp({ db, version: "t", verifyApple: apple, allowed: new Set(allowed), publicUrl: "https://cp.test", holdMs: 50, log: (m) => said.push(m), vault: new Vault(db, randomBytes(32).toString("base64")), github, githubRedirects: [] });
+  const app = createApp({ db, version: "t", verifyApple: apple, allowed: new Set(allowed), publicUrl: "https://cp.test", holdMs: 50, log: (m) => said.push(m), vault: new Vault(db, randomBytes(32).toString("base64")), github, githubRedirects: [], sprites: noSprites });
   const post = (path: string, body: unknown, token?: string) =>
     app.request(path, { method: "POST", headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, body: JSON.stringify(body) });
   const get = (path: string, token?: string) => app.request(path, { headers: token ? { authorization: `Bearer ${token}` } : {} });

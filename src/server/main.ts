@@ -3,6 +3,7 @@ import { openDb } from "./db.js";
 import { createApp } from "./app.js";
 import { verifyApple } from "./apple.js";
 import { Vault, githubOAuth } from "./credentials.js";
+import { spriteApi } from "../core/spriteApi.js";
 
 const port = Number(process.env.PORT ?? 8080);
 const db = openDb(process.env.SFO_DB ?? "/data/sfo.db");
@@ -23,6 +24,7 @@ const app = createApp({
   verifyApple,
   allowed: new Set((process.env.SFO_ALLOWED_APPLE_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean)),
   publicUrl,
+  sprites: spriteApi(required("SPRITES_TOKEN")),
 });
 
 const server = serve({ fetch: app.fetch, port }, () => console.log(`sfo control plane on :${port}`));
