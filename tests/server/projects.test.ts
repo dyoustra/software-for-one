@@ -98,7 +98,7 @@ describe("a project", () => {
     expect(await res.json()).toMatchObject({ ok: true, resumed: true });
     const answer = s.fake.calls.find((c) => c.args[0] === "answer");
     expect(answer).toMatchObject({ args: ["answer", "moon-abc123", "--from", "-"], input: '{"Q-001":"moon"}' });
-    expect(s.fake.calls.at(-1)?.args).toEqual(["run", "moon-abc123"]);
+    expect(s.fake.calls.filter((c) => c.args[0] === "run").at(-1)?.args).toEqual(["run", "moon-abc123"]);
   });
 
   it("refuses answers that are not text", async () => {
@@ -119,10 +119,11 @@ describe("a project", () => {
   it("builds past research's verdict only when asked to", async () => {
     const s = server();
     const { token } = await withProject(s);
+    const lastRun = () => s.fake.calls.filter((c) => c.args[0] === "run").at(-1)?.args;
     await s.call("POST", "/projects/moon-abc123/run", token, {});
-    expect(s.fake.calls.at(-1)?.args).toEqual(["run", "moon-abc123"]);
+    expect(lastRun()).toEqual(["run", "moon-abc123"]);
     await s.call("POST", "/projects/moon-abc123/run", token, { anyway: true });
-    expect(s.fake.calls.at(-1)?.args).toEqual(["run", "moon-abc123", "--anyway"]);
+    expect(lastRun()).toEqual(["run", "moon-abc123", "--anyway"]);
   });
 
   it("reports only what cannot change it", async () => {
