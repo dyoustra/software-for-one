@@ -33,8 +33,8 @@ export function buildProgram(): Command {
     .option("--budget <usd>", "park the project when spend reaches this many dollars")
     .option("--access <methods>", "how this project may pay for model calls, overriding your profile")
     .option("--no-run", "capture and triage only; start later with `sfo run`")
-    .option("--cloud", "build it on a Sprite of its own, so it runs with this machine off")
-    .action(guarded(async (arg: string | undefined, opts: { budget?: string; access?: string; run: boolean; cloud?: boolean }) => {
+    .option("--local", "build it on this machine instead of on a Sprite of its own")
+    .action(guarded(async (arg: string | undefined, opts: { budget?: string; access?: string; run: boolean; local?: boolean }) => {
       const { readIdea, editInEditor, readAllStdin } = await import("./commands/new.js");
       const idea = await readIdea(arg, {
         isTTY: Boolean(process.stdin.isTTY),
@@ -49,8 +49,11 @@ export function buildProgram(): Command {
       const { ensureProfile } = await import("./commands/profile.js");
       const { accessFromProfile, parseAccessFlag, resolveAccess } = await import("./core/access.js");
       const profile = await ensureProfile();
-      if (opts.cloud) {
-        if (opts.access) throw new Error("--access is not supported with --cloud yet: a cloud project uses your profile");
+      // The cloud is the default: a project's own Sprite is the only place its
+      // agents, and the code they write, are confined. It never falls back to
+      // this machine on its own.
+      if (!opts.local) {
+        if (opts.access) throw new Error("--access works only with --local for now: a cloud project uses your profile");
         const { newCloudProject } = await import("./core/cloud.js");
         const { spriteCli } = await import("./core/sprite.js");
         await newCloudProject(idea, { budget: opts.budget, run: opts.run }, profile, { cli: spriteCli });
@@ -229,7 +232,7 @@ export function buildProgram(): Command {
           return;
         }
       }
-      console.log(await runChecks(id, undefined, { ready: opts.ready }));
+      console.log(await runChecks(id, undefined, { ready: opts.ready, noRepair: true }));
       pushProjectBack(id, { cli: spriteCli });
       console.log("results sent back to the Sprite");
     }));

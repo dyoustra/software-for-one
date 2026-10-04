@@ -111,7 +111,7 @@ function credentialsFor(profile: Profile, env: Env, readKeyWith: KeyReader): { f
   ];
   if (found.length === 0) {
     throw new Error(
-      "a cloud project needs a credential it can take with it: `claude setup-token`, store the token in your Keychain, then `sfo profile set cloud-token keychain:<service>` — or an API key with `sfo profile set key`",
+      "a cloud project needs a credential it can take with it: `claude setup-token`, store the token in your Keychain, then `sfo profile set cloud-token keychain:<service>` — or an API key with `sfo profile set key`. Or build on this machine with `sfo new --local`",
     );
   }
   return found;

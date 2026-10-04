@@ -27,7 +27,7 @@ feedback. Everything sfo does today, from anywhere.
 | Paying for models | **your profile's choice**, as on the Mac: subscription token or API key, preference and fallback. Long term sfo is model- and harness-agnostic, so nothing below may assume Claude beyond the existing `Runner` implementation |
 | Project home | the **Sprite's own disk**, plus a **private GitHub repo** pushed after every stage |
 | Delivery | **repo plus a one-command install** for CLIs; web apps **deployed to a public URL** (anyone with the link); Expo apps through EAS |
-| The Mac | **an optional runner**: same sfo, used for hardware checks, macOS-only toolchains, or by choice |
+| The Mac | **an optional runner**: same sfo, used for hardware checks, macOS-only toolchains, or by choice. **`sfo new` builds in the cloud by default; `--local` builds on the Mac.** A project's own Sprite is the only place its agents, and the code they write, are confined: on the Mac the gate runs that code outside the sandbox. |
 
 ## 2. The pieces
 

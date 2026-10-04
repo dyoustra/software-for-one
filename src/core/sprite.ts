@@ -24,7 +24,7 @@ function bin(): string {
 
 function run(args: string[], what: string, input?: string): string {
   const r = spawnSync(bin(), args, { encoding: "utf8", input, maxBuffer: 64 * 1024 * 1024 });
-  if (r.error) throw new Error(`could not run the sprite CLI (${r.error.message}) — install it: https://docs.sprites.dev`);
+  if (r.error) throw new Error(`could not run the sprite CLI (${r.error.message}) — install it (https://docs.sprites.dev) and \`sprite login\`, or build on this machine with \`sfo new --local\``);
   if (r.status !== 0) throw new Error(`${what} failed: ${`${r.stderr ?? ""}${r.stdout ?? ""}`.trim().split("\n").slice(-3).join(" ")}`);
   return r.stdout ?? "";
 }
