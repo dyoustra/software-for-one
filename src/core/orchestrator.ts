@@ -451,6 +451,7 @@ function applyPark(id: string, state: ProjectState, park: Park, env: Env | undef
   if (park.park === "limit") {
     writeLimit(id, { stage: park.stage, ...park.limit, at: new Date().toISOString() }, env);
   }
+  commitStage(id, `park-${park.park}`, env);
 }
 
 /**
@@ -928,6 +929,9 @@ export async function advance(
     if (upcoming === null) {
       state = { ...state, status: "done", pid: null, updatedAt: new Date().toISOString() };
       writeState(state, env);
+      // The repo is what leaves the machine the run was on; without this its
+      // last commit says the run is still going.
+      commitStage(id, "done", env);
       return;
     }
 

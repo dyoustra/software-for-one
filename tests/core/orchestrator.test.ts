@@ -393,6 +393,9 @@ describe("advance", () => {
     expect(subjects()).toEqual([
       expect.stringContaining("stage(research)"),
       expect.stringContaining("stage(spec)"),
+      // Waiting for the person is state the repo has to carry too: it is
+      // what leaves the machine the run was on.
+      expect.stringMatching(/^stage\(park-human\): state\.json/),
     ]);
   });
 
