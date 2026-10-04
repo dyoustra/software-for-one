@@ -114,6 +114,16 @@ describe("a new cloud project", () => {
     expect(JSON.parse(sprite.execs[0].args[1]).modelAccess).toEqual(["claude_subscription"]);
   });
 
+  it("takes the person's preferences along, for the project to snapshot there", async () => {
+    fs.writeFileSync(path.join(env.SFO_HOME, "PREFERENCES.md"), "Python over Node.\n");
+    const sprite = new FakeSprite(capturing("tiny-abc123"));
+    await newCloudProject("an idea", { run: false }, PROFILE, { cli: sprite, env, readKeyWith: keys, log: quiet });
+
+    const copied = sprite.execs.find((e) => e.script.includes("PREFERENCES.md"));
+    expect(copied?.input).toBe("Python over Node.\n");
+    expect(sprite.execs.indexOf(copied!)).toBeLessThan(sprite.execs.findIndex((e) => e.script.includes("sfo new")));
+  });
+
   it("refuses before creating anything when no credential can travel", async () => {
     const sprite = new FakeSprite();
     await expect(

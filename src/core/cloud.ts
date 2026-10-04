@@ -7,6 +7,7 @@ import { z } from "zod";
 import { projectsRoot, projectDir, type Env } from "./paths.js";
 import { readKey, type KeyReader, type Profile } from "./access.js";
 import { commitStage, NO_INTERFERENCE } from "./repo.js";
+import { readPreferences } from "./preferences.js";
 import type { SpriteCli } from "./sprite.js";
 
 export const CLOUD_FILE = "cloud.json";
@@ -184,6 +185,11 @@ export async function newCloudProject(
     if (setup.status !== 0) throw new Error(`setting up ${sprite} failed: ${setup.stdout.trim().split("\n").slice(-3).join(" ")}`);
     for (const c of credentials) {
       if (deps.cli.exec(sprite, STORE_SECRET, [c.file], { input: c.value }).status !== 0) throw new Error(`could not store the credential on ${sprite}`);
+    }
+    // Where `sfo new` on the Sprite snapshots them from, as it would here.
+    const preferences = readPreferences(env);
+    if (preferences?.trim() && deps.cli.exec(sprite, `cat > ~/.sfo/PREFERENCES.md`, [], { input: preferences }).status !== 0) {
+      throw new Error(`could not copy your preferences to ${sprite}`);
     }
 
     // On its own Sprite the project is local; without --local, sfo there would
