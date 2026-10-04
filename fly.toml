@@ -1,0 +1,32 @@
+app = "sfo-control"
+primary_region = "dfw"
+
+[build]
+  dockerfile = "deploy/Dockerfile"
+
+[env]
+  PORT = "8080"
+  SFO_DB = "/data/sfo.db"
+
+[[mounts]]
+  source = "sfo_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Stopped when idle and started by the next request; nothing may run outside one.
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    path = "/health"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

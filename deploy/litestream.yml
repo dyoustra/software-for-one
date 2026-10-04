@@ -1,0 +1,8 @@
+dbs:
+  - path: /data/sfo.db
+    replicas:
+      - type: s3
+        bucket: ${BUCKET_NAME}
+        path: sfo.db
+        endpoint: ${AWS_ENDPOINT_URL_S3}
+        region: auto
