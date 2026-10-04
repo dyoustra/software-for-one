@@ -9,6 +9,7 @@ import {
   defaultPreference,
   profilePath,
   SFO_METHODS,
+  type KeyRef,
   type KeyReader,
   type Profile,
 } from "../core/access.js";
@@ -116,18 +117,20 @@ export function formatProfile(
   readKeyWith: KeyReader = readKey,
 ): string {
   if (!profile) return "no profile yet — `sfo profile setup`";
-  const key = profile.apiKey
-    ? `${describeKeyRef(profile.apiKey)} (${readKeyWith(profile.apiKey, env) ? "found" : "NOT FOUND"})`
-    : "none";
+  const describe = (ref: KeyRef | null): string =>
+    ref ? `${describeKeyRef(ref)} (${readKeyWith(ref, env) ? "found" : "NOT FOUND"})` : "none";
+  const key = describe(profile.apiKey);
   return [
     `access:    ${profile.modelAccess.join(", ")}`,
     `api key:   ${key}`,
     `sfo runs:  ${profile.sfoPrefers}`,
     `fallback:  ${profile.fallbackToApiKey ? "switch to the API key when the plan limit is hit" : "park when the plan limit is hit"}`,
+    `cloud token: ${describe(profile.subscriptionToken)}`,
+    `github:    ${describe(profile.githubToken)}`,
   ].join("\n");
 }
 
-const SETTINGS = ["access", "key", "prefers", "fallback"] as const;
+const SETTINGS = ["access", "key", "prefers", "fallback", "cloud-token", "github"] as const;
 
 export function setProfile(
   setting: string,
@@ -164,6 +167,14 @@ export function setProfile(
     case "fallback": {
       if (value !== "on" && value !== "off") throw new Error("fallback takes on or off");
       next.fallbackToApiKey = value === "on";
+      break;
+    }
+    case "cloud-token":
+    case "github": {
+      const ref = value === "none" ? null : parseKeyRef(value);
+      if (ref && !readKeyWith(ref, env)) throw new Error(`nothing found at ${describeKeyRef(ref)}`);
+      if (setting === "cloud-token") next.subscriptionToken = ref;
+      else next.githubToken = ref;
       break;
     }
     default:

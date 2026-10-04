@@ -86,6 +86,29 @@ describe("commitStage", () => {
     expect(subjects(dir)[0]).toBe("stage(spec): SPEC.md");
   });
 
+  it("pushes each commit when the project has a remote, so its repo keeps up", () => {
+    const dir = makeProject("p");
+    const remote = fs.mkdtempSync(path.join(os.tmpdir(), "sfo-remote-"));
+    execFileSync("git", ["init", "-q", "--bare", remote]);
+    execFileSync("git", ["remote", "add", "origin", remote], { cwd: dir });
+    fs.writeFileSync(projectPath("p", ".sfo", "SPEC.md"), "# spec\n");
+    commitStage("p", "spec", env, () => {});
+
+    const pushed = execFileSync("git", ["log", "--format=%s", "HEAD"], { cwd: remote, encoding: "utf8" });
+    expect(pushed).toContain("stage(spec)");
+  });
+
+  it("survives a push that fails, keeping the commit", () => {
+    const dir = makeProject("p");
+    execFileSync("git", ["remote", "add", "origin", path.join(os.tmpdir(), "sfo-no-such-remote")], { cwd: dir });
+    fs.writeFileSync(projectPath("p", ".sfo", "SPEC.md"), "# spec\n");
+    const said: string[] = [];
+    commitStage("p", "spec", env, (m) => said.push(m));
+
+    expect(subjects(dir)[0]).toContain("stage(spec)");
+    expect(said.join("\n")).toMatch(/committed spec but could not push it/);
+  });
+
   it("makes the artifact retrievable from history afterwards", () => {
     const dir = makeProject("p");
     fs.writeFileSync(projectPath("p", ".sfo", "SPEC.md"), "# Spec\nthe body\n");

@@ -33,7 +33,8 @@ export function buildProgram(): Command {
     .option("--budget <usd>", "park the project when spend reaches this many dollars")
     .option("--access <methods>", "how this project may pay for model calls, overriding your profile")
     .option("--no-run", "capture and triage only; start later with `sfo run`")
-    .action(guarded(async (arg: string | undefined, opts: { budget?: string; access?: string; run: boolean }) => {
+    .option("--cloud", "build it on a Sprite of its own, so it runs with this machine off")
+    .action(guarded(async (arg: string | undefined, opts: { budget?: string; access?: string; run: boolean; cloud?: boolean }) => {
       const { readIdea, editInEditor, readAllStdin } = await import("./commands/new.js");
       const idea = await readIdea(arg, {
         isTTY: Boolean(process.stdin.isTTY),
@@ -48,6 +49,13 @@ export function buildProgram(): Command {
       const { ensureProfile } = await import("./commands/profile.js");
       const { accessFromProfile, parseAccessFlag, resolveAccess } = await import("./core/access.js");
       const profile = await ensureProfile();
+      if (opts.cloud) {
+        if (opts.access) throw new Error("--access is not supported with --cloud yet: a cloud project uses your profile");
+        const { newCloudProject } = await import("./core/cloud.js");
+        const { spriteCli } = await import("./core/sprite.js");
+        await newCloudProject(idea, { budget: opts.budget, run: opts.run }, profile, { cli: spriteCli });
+        return;
+      }
       const access = opts.access ? parseAccessFlag(opts.access) : accessFromProfile(profile);
       const resolved = resolveAccess(access, profile);
 
@@ -194,7 +202,54 @@ export function buildProgram(): Command {
     .option("--ready", "everything the checks need is here; skip asking")
     .action(guarded(async (id: string, opts: { ready?: boolean }) => {
       const { runChecks } = await import("./commands/check.js");
+      const { cloudEntry, pullProject, pushProjectBack } = await import("./core/cloud.js");
+      if (!cloudEntry(id)) {
+        console.log(await runChecks(id, undefined, { ready: opts.ready }));
+        return;
+      }
+      // The hardware is here, not on the Sprite: check a copy, then send the
+      // results back to where the project lives.
+      const { spriteCli } = await import("./core/sprite.js");
+      console.log(`pulled to ${pullProject(id, { cli: spriteCli })}`);
       console.log(await runChecks(id, undefined, { ready: opts.ready }));
+      pushProjectBack(id, { cli: spriteCli });
+      console.log("results sent back to the Sprite");
+    }));
+
+  program
+    .command("pull")
+    .description("Copy a cloud project to this machine (its Sprite stays the original)")
+    .argument("<id>", "project id")
+    .action(guarded(async (id: string) => {
+      const { pullProject } = await import("./core/cloud.js");
+      const { spriteCli } = await import("./core/sprite.js");
+      console.log(`pulled to ${pullProject(id, { cli: spriteCli })}`);
+    }));
+
+  program
+    .command("destroy")
+    .description("Delete a cloud project's Sprite and everything on it (its GitHub repo stays)")
+    .argument("<id>", "project id")
+    .option("--yes", "do not ask first")
+    .action(guarded(async (id: string, opts: { yes?: boolean }) => {
+      const { cloudEntry, destroyCloudProject } = await import("./core/cloud.js");
+      const entry = cloudEntry(id);
+      if (!entry) throw new Error(`${id} is not a cloud project — only cloud projects can be destroyed`);
+      if (!opts.yes) {
+        const readline = await import("node:readline/promises");
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+        const answer = await rl.question(
+          `Delete Sprite ${entry.sprite} and everything on it${entry.repo ? ` (the repo ${entry.repo} stays)` : " — it has no repo, so this is the only copy"}? [y/N] `,
+        );
+        rl.close();
+        if (!/^y(es)?$/i.test(answer.trim())) {
+          console.log("not destroyed");
+          return;
+        }
+      }
+      const { spriteCli } = await import("./core/sprite.js");
+      destroyCloudProject(id, { cli: spriteCli });
+      console.log(`destroyed ${entry.sprite}`);
     }));
 
   program
@@ -224,7 +279,7 @@ export function buildProgram(): Command {
     .command("profile")
     .description("Show or change how you pay for model calls")
     .argument("[action]", "`setup` to answer the first-run questions again, or `set`")
-    .argument("[setting]", "access, key, prefers or fallback")
+    .argument("[setting]", "access, key, prefers, fallback, cloud-token or github")
     .argument("[value]", "the new value")
     .action(guarded(async (action?: string, setting?: string, value?: string) => {
       const { formatProfile, setupProfileInteractively, setProfile } = await import("./commands/profile.js");
@@ -236,16 +291,31 @@ export function buildProgram(): Command {
       } else if (action === "set" && setting !== undefined && value !== undefined) {
         console.log(formatProfile(setProfile(setting, value)));
       } else {
-        throw new Error("usage: sfo profile [setup | set <access|key|prefers|fallback> <value>]");
+        throw new Error("usage: sfo profile [setup | set <access|key|prefers|fallback|cloud-token|github> <value>]");
       }
     }));
 
   program
     .command("status")
     .description("Show all projects")
-    .action(guarded(async () => {
+    .option("--json", "as JSON, for another program to read")
+    .action(guarded(async (opts: { json?: boolean }) => {
       const { listProjects, formatStatus } = await import("./commands/status.js");
-      console.log(formatStatus(listProjects()));
+      if (opts.json) {
+        console.log(JSON.stringify(listProjects()));
+        return;
+      }
+      const { readCloud, cloudSummaries } = await import("./core/cloud.js");
+      const cloudIds = new Set(Object.keys(readCloud()));
+      if (cloudIds.size === 0) {
+        console.log(formatStatus(listProjects()));
+        return;
+      }
+      const { spriteCli } = await import("./core/sprite.js");
+      // A cloud project pulled here for a check is a copy; its Sprite says how it is.
+      const local = listProjects().filter((p) => !cloudIds.has(p.id));
+      const cloud = cloudSummaries({ cli: spriteCli }) as unknown as typeof local;
+      console.log(formatStatus([...local, ...cloud]));
     }));
 
   program
@@ -357,4 +427,33 @@ export function isEntryPoint(argv1: string | undefined, moduleUrl: string): bool
   }
 }
 
-if (isEntryPoint(process.argv[1], import.meta.url)) buildProgram().parse();
+/** Commands about one project that run where it lives: on its Sprite, for a cloud project. */
+const FORWARDED = new Set(["run", "answer", "feedback", "stop", "logs", "retry", "budget", "cost", "criteria", "why", "decisions", "slices", "stage"]);
+
+export async function main(argv: string[] = process.argv): Promise<void> {
+  await guarded(() => dispatch(argv))();
+}
+
+async function dispatch(argv: string[]): Promise<void> {
+  const [command, id] = argv.slice(2);
+  if (command && id && FORWARDED.has(command)) {
+    const { cloudEntry, forward } = await import("./core/cloud.js");
+    const entry = cloudEntry(id);
+    if (entry) {
+      const { spriteCli } = await import("./core/sprite.js");
+      const args = argv.slice(2);
+      // An answers file is on this machine; the command runs on the Sprite.
+      const from = args.indexOf("--from");
+      if (command === "answer" && from !== -1 && args[from + 1] && args[from + 1] !== "-") {
+        const remote = `/tmp/sfo-answers-${id}.json`;
+        spriteCli.push(entry.sprite, args[from + 1], remote);
+        args[from + 1] = remote;
+      }
+      process.exitCode = forward(id, args, { cli: spriteCli });
+      return;
+    }
+  }
+  await buildProgram().parseAsync(argv);
+}
+
+if (isEntryPoint(process.argv[1], import.meta.url)) void main();

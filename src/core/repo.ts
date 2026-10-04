@@ -191,6 +191,27 @@ export function commitStage(
     );
   } catch (err) {
     log(`sfo: could not commit ${stage} artifacts: ${reason(err)}`);
+    return;
+  }
+  pushIfRemote(cwd, stage, log);
+}
+
+/**
+ * A cloud project's repo is its backup and what leaves the Sprite, so every
+ * commit is pushed as it is made. A project with no remote (every local one)
+ * pushes nothing. A failed push is said and survived: the next commit's push
+ * carries this one too.
+ */
+function pushIfRemote(cwd: string, stage: string, log: (message: string) => void): void {
+  try {
+    execFileSync("git", ["remote", "get-url", "origin"], { cwd, stdio: "pipe" });
+  } catch {
+    return;
+  }
+  try {
+    execFileSync("git", ["push", "-q", "origin", "HEAD"], { cwd, stdio: "pipe", timeout: 120_000 });
+  } catch (err) {
+    log(`sfo: committed ${stage} but could not push it: ${reason(err)}`);
   }
 }
 

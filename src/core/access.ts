@@ -43,6 +43,13 @@ export const ProfileSchema = z.object({
    * and a silent switch would make it on the person's behalf.
    */
   fallbackToApiKey: z.boolean().default(false),
+  /**
+   * For runs off this machine: a long-lived token from `claude setup-token`,
+   * handed to each cloud project's Sprite. The login on this Mac cannot be.
+   */
+  subscriptionToken: KeyRefSchema.nullable().default(null),
+  /** Optional: lets each cloud project have a private GitHub repo, pushed after every stage. */
+  githubToken: KeyRefSchema.nullable().default(null),
   updatedAt: z.string(),
 });
 export type Profile = z.infer<typeof ProfileSchema>;
