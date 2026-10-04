@@ -51,7 +51,10 @@ export function hasDeferred(d: Deferred): boolean {
 export function deferredCommands(id: string, env?: Env): string[] {
   const work = deferredWork(id, env);
   const contract = readContractFile(id, env);
-  if (!contract) return ["(no CONTRACTS.json: the built-in checks for this kind of project)"];
+  // Without a contract, sfo falls back to a built-in installer (npm link, uv
+  // tool install) whose effect cannot be shown as a command. A project built
+  // elsewhere must declare what runs, or nothing does.
+  if (!contract) throw new Error(`${id} declares no CONTRACTS.json, so what its checks would run here cannot be shown — not running them`);
   const out: string[][] = [];
   if (work.install && contract.install) out.push(contract.install.run, ...contract.install.check);
   for (const r of contract.render) if (r.needs.length > 0 && work.renders > 0) out.push(r.run);
@@ -59,20 +62,20 @@ export function deferredCommands(id: string, env?: Env): string[] {
   return out.map(shown);
 }
 
-const PLAIN = /^[\w@%+=:,./-]+$/;
+const PLAIN = /^[A-Za-z0-9_@%+=:,./-]+$/;
 
 /**
  * An argument list as it can be read and trusted. The project wrote it: an
- * escape sequence or a newline in it could redraw the line to look like
- * something else, so anything not plain is quoted with every control
- * character spelled out.
+ * escape sequence, a newline, a right-to-left override or a zero-width
+ * character could make the line look like something else. So anything not
+ * plain is quoted, and every character outside printable ASCII is spelled out.
  */
 export function shown(argv: string[]): string {
   return argv
     .map((a) =>
       PLAIN.test(a)
         ? a
-        : JSON.stringify(a).replace(/[\u007f-\u009f]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`),
+        : `"${a.replace(/[\\"]/g, (c) => `\\${c}`).replace(/[^\x20-\x7e]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`)}"`,
     )
     .join(" ");
 }

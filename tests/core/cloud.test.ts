@@ -204,6 +204,11 @@ describe("a cloud project afterwards", () => {
     expect(summary.note).toMatch(/^on sfo-/);
   });
 
+  it("finds no cloud project behind a built-in name", () => {
+    expect(cloudEntry("constructor", env)).toBeNull();
+    expect(cloudEntry("__proto__", env)).toBeNull();
+  });
+
   it("forgets the project once its Sprite is destroyed", async () => {
     const sprite = await made();
     const name = cloudEntry("tiny-abc123", env)!.sprite;

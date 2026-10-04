@@ -48,7 +48,9 @@ function writeCloud(projects: Record<string, CloudEntry>, env?: Env): void {
 }
 
 export function cloudEntry(id: string, env?: Env): CloudEntry | null {
-  return readCloud(env)[id] ?? null;
+  // Own keys only: "constructor" or "__proto__" is not a cloud project.
+  const all = readCloud(env);
+  return Object.hasOwn(all, id) ? all[id] : null;
 }
 
 function saveEntry(id: string, entry: CloudEntry | null, env?: Env): void {

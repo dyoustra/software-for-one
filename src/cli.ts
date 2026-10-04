@@ -217,7 +217,9 @@ export function buildProgram(): Command {
       const { deferredCommands } = await import("./core/deferred.js");
       const commands = deferredCommands(id);
       if (commands.length > 0 && !opts.yes) {
-        console.log(`these run on this machine, as you:\n${commands.map((c) => `  ${c}`).join("\n")}`);
+        console.log(
+          `these run on this machine, as you — and an install or test runs the project's own code, written on the Sprite:\n${commands.map((c) => `  ${c}`).join("\n")}`,
+        );
         const readline = await import("node:readline/promises");
         const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
         const answer = await rl.question("run them? [y/N] ");
