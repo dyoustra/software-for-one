@@ -43,6 +43,11 @@ async function request(url: string, init: RequestInit = {}): Promise<{ status: n
  */
 export async function login(env: Env = process.env, log: (m: string) => void = console.log): Promise<void> {
   const base = controlUrl(env);
+  if (readControlToken() && (await authed("/devices", {}, env).catch(() => ({ status: 0 }))).status === 200) {
+    log(`already signed in to ${base}`);
+    await offerCredentials(env, log);
+    return;
+  }
   const started = await request(`${base}/auth/device`, {
     method: "POST",
     headers: { "content-type": "application/json" },
