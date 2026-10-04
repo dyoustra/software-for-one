@@ -5,17 +5,17 @@ import { spawnSync } from "node:child_process";
  * through here, so tests can stand in for it.
  */
 export interface SpriteCli {
-  create(name: string): void;
-  destroy(name: string): void;
+  create(name: string): Promise<void>;
+  destroy(name: string): Promise<void>;
   /**
    * Runs `script` in a login shell on the Sprite, so its profile (PATH, the
    * credential sfo set up) applies. `args` reach it as "$1"…, never as script
    * text. `attach` hands it this terminal: prompts, editors and `-f` work.
    */
-  exec(name: string, script: string, args?: string[], opts?: { input?: string; attach?: boolean }): { status: number; stdout: string };
+  exec(name: string, script: string, args?: string[], opts?: { input?: string; attach?: boolean }): Promise<{ status: number; stdout: string }>;
   /** For anything large: exec's output is buffered, and 32 MB overflowed it. */
-  pull(name: string, remote: string, local: string): void;
-  push(name: string, local: string, remote: string): void;
+  pull(name: string, remote: string, local: string): Promise<void>;
+  push(name: string, local: string, remote: string): Promise<void>;
 }
 
 function bin(): string {
@@ -30,13 +30,13 @@ function run(args: string[], what: string, input?: string): string {
 }
 
 export const spriteCli: SpriteCli = {
-  create(name) {
+  async create(name) {
     run(["create", name, "--skip-console"], `creating Sprite ${name}`);
   },
-  destroy(name) {
+  async destroy(name) {
     run(["destroy", "-s", name, "--force"], `destroying Sprite ${name}`);
   },
-  exec(name, script, args = [], opts = {}) {
+  async exec(name, script, args = [], opts = {}) {
     const argv = ["exec", "-s", name, ...(opts.attach && process.stdin.isTTY ? ["--tty"] : []), "--", "bash", "-lc", script, "sfo", ...args];
     if (opts.attach) {
       const r = spawnSync(bin(), argv, { stdio: "inherit" });
@@ -47,10 +47,10 @@ export const spriteCli: SpriteCli = {
     if (r.error) throw new Error(`could not run the sprite CLI (${r.error.message})`);
     return { status: r.status ?? 1, stdout: `${r.stdout ?? ""}${r.status === 0 ? "" : (r.stderr ?? "")}` };
   },
-  pull(name, remote, local) {
+  async pull(name, remote, local) {
     run(["file", "pull", "-s", name, remote, local], `copying ${remote} from Sprite ${name}`);
   },
-  push(name, local, remote) {
+  async push(name, local, remote) {
     run(["file", "push", "-s", name, local, remote], `copying ${local} to Sprite ${name}`);
   },
 };

@@ -11,8 +11,8 @@ import {
   destroyCloudProject,
   pullProject,
   readCloud,
-  type GitHub,
 } from "../../src/core/cloud.js";
+import type { GitHub } from "../../src/core/provision.js";
 import type { SpriteCli } from "../../src/core/sprite.js";
 import type { Profile } from "../../src/core/access.js";
 
@@ -27,22 +27,22 @@ class FakeSprite implements SpriteCli {
   execs: Exec[] = [];
   pulls: [string, string][] = [];
   constructor(private readonly reply: (e: Exec) => { status: number; stdout: string } = () => ({ status: 0, stdout: "" })) {}
-  create(name: string) {
+  async create(name: string) {
     this.created.push(name);
   }
-  destroy(name: string) {
+  async destroy(name: string) {
     this.destroyed.push(name);
   }
-  exec(name: string, script: string, args: string[] = [], opts: { input?: string; attach?: boolean } = {}) {
+  async exec(name: string, script: string, args: string[] = [], opts: { input?: string; attach?: boolean } = {}) {
     const e = { name, script, args, ...opts };
     this.execs.push(e);
     return this.reply(e);
   }
-  pull(_name: string, remote: string, local: string) {
+  async pull(_name: string, remote: string, local: string) {
     this.pulls.push([remote, local]);
     fs.copyFileSync(remote, local);
   }
-  push() {}
+  async push() {}
 }
 
 const PROFILE: Profile = {
@@ -201,23 +201,23 @@ describe("a cloud project afterwards", () => {
 
   it("runs its commands on its Sprite, attached to this terminal", async () => {
     const sprite = await made();
-    forward("tiny-abc123", ["answer", "tiny-abc123"], { cli: sprite, env });
+    await forward("tiny-abc123", ["answer", "tiny-abc123"], { cli: sprite, env });
     expect(sprite.execs[0]).toMatchObject({ script: 'exec sfo "$@"', args: ["answer", "tiny-abc123"], attach: true });
   });
 
   it("asks a Sprite how its project is only while the project is running", async () => {
     const waiting = await made("awaiting_human");
-    cloudSummaries({ cli: waiting, env });
+    await cloudSummaries({ cli: waiting, env });
     expect(waiting.execs).toEqual([]);
 
     env = { SFO_HOME: fs.mkdtempSync(path.join(os.tmpdir(), "sfo-cloud-")) };
     const running = await made("running");
-    const [summary] = cloudSummaries({ cli: running, env });
+    const [summary] = await cloudSummaries({ cli: running, env });
     expect(running.execs.map((e) => e.script)).toEqual(["exec sfo status --json"]);
     expect(summary.note).toMatch(/^running · on sfo-/);
   });
 
-  it("finds no cloud project behind a built-in name", () => {
+  it("finds no cloud project behind a built-in name", async () => {
     expect(cloudEntry("constructor", env)).toBeNull();
     expect(cloudEntry("__proto__", env)).toBeNull();
   });
@@ -225,7 +225,7 @@ describe("a cloud project afterwards", () => {
   it("forgets the project once its Sprite is destroyed", async () => {
     const sprite = await made();
     const name = cloudEntry("tiny-abc123", env)!.sprite;
-    destroyCloudProject("tiny-abc123", { cli: sprite, env });
+    await destroyCloudProject("tiny-abc123", { cli: sprite, env });
     expect(sprite.destroyed).toEqual([name]);
     expect(cloudEntry("tiny-abc123", env)).toBeNull();
   });
@@ -246,14 +246,14 @@ describe("a cloud project afterwards", () => {
     });
     await newCloudProject("an idea", { run: false }, PROFILE, { cli: sprite, env, readKeyWith: keys, log: quiet });
 
-    const dir = pullProject("tiny-abc123", { cli: sprite, env });
+    const dir = await pullProject("tiny-abc123", { cli: sprite, env });
     expect(fs.readFileSync(path.join(dir, "a.txt"), "utf8")).toBe("1\n");
 
     fs.writeFileSync(path.join(origin, "a.txt"), "2\n");
     git("commit", "-q", "-am", "two");
     // Something here changed the copy, as an install rewrites INSTALL.json.
     fs.writeFileSync(path.join(dir, "a.txt"), "changed here\n");
-    pullProject("tiny-abc123", { cli: sprite, env });
+    await pullProject("tiny-abc123", { cli: sprite, env });
     expect(fs.readFileSync(path.join(dir, "a.txt"), "utf8")).toBe("2\n");
   });
 });

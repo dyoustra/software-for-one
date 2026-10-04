@@ -187,6 +187,8 @@ describe("resolveSeamCredential", () => {
     apiKey: { source: "env" as const, var: "MY_KEY" },
     sfoPrefers: "claude_subscription" as const,
     fallbackToApiKey: false,
+    subscriptionToken: null,
+    githubToken: null,
     updatedAt: "",
   };
 
