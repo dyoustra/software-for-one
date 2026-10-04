@@ -277,7 +277,11 @@ export function cloudSummaries(deps: CloudDeps): CloudSummary[] {
   const all = readCloud(deps.env);
   return Object.entries(all).flatMap(([id, entry]) => {
     const summary = !entry.summary || entry.summary.status === "running" ? refreshCloud(id, deps) : entry.summary;
-    return summary ? [{ ...summary, note: [summary.note, `on ${entry.sprite}`].filter(Boolean).join(" · ") }] : [];
+    if (!summary) return [];
+    // The label status would have shown, then where: a note replaces the
+    // label, so "on sfo-…" alone would hide that it is running.
+    const label = summary.note ?? (summary.status === "awaiting_human" ? "needs you" : summary.status);
+    return [{ ...summary, note: `${label} · on ${entry.sprite}` }];
   });
 }
 

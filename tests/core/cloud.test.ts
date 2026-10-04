@@ -203,7 +203,7 @@ describe("a cloud project afterwards", () => {
     const running = await made("running");
     const [summary] = cloudSummaries({ cli: running, env });
     expect(running.execs.map((e) => e.script)).toEqual(["exec sfo status --json"]);
-    expect(summary.note).toMatch(/^on sfo-/);
+    expect(summary.note).toMatch(/^running · on sfo-/);
   });
 
   it("finds no cloud project behind a built-in name", () => {
