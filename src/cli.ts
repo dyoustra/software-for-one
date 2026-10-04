@@ -54,9 +54,8 @@ export function buildProgram(): Command {
       // this machine on its own.
       if (!opts.local) {
         if (opts.access) throw new Error("--access works only with --local for now: a cloud project uses your profile");
-        const { newCloudProject } = await import("./core/cloud.js");
-        const { spriteCli } = await import("./core/sprite.js");
-        await newCloudProject(idea, { budget: opts.budget, run: opts.run }, profile, { cli: spriteCli });
+        const { cloudProjects } = await import("./commands/clouds.js");
+        await (await cloudProjects()).create(idea, { budget: opts.budget, run: opts.run }, profile);
         return;
       }
       const access = opts.access ? parseAccessFlag(opts.access) : accessFromProfile(profile);
@@ -217,15 +216,15 @@ export function buildProgram(): Command {
     .option("--yes", "for a cloud project, run its commands here without showing them first")
     .action(guarded(async (id: string, opts: { ready?: boolean; yes?: boolean }) => {
       const { runChecks } = await import("./commands/check.js");
-      const { cloudEntry, pullProject, pushProjectBack } = await import("./core/cloud.js");
-      if (!cloudEntry(id)) {
+      const { cloudProjects } = await import("./commands/clouds.js");
+      const cloud = await cloudProjects();
+      if (!(await cloud.has(id))) {
         console.log(await runChecks(id, undefined, { ready: opts.ready }));
         return;
       }
       // The hardware is here, not on the Sprite: check a copy, then send the
       // results back to where the project lives.
-      const { spriteCli } = await import("./core/sprite.js");
-      console.log(`pulled to ${await pullProject(id, { cli: spriteCli })}`);
+      console.log(`pulled to ${await cloud.pull(id)}`);
       // Written on a Sprite where nothing confined the agents, and about to
       // run here with this person's rights: they see what first.
       const { deferredCommands } = await import("./core/deferred.js");
@@ -244,7 +243,7 @@ export function buildProgram(): Command {
         }
       }
       console.log(await runChecks(id, undefined, { ready: opts.ready, noRepair: true }));
-      await pushProjectBack(id, { cli: spriteCli });
+      await cloud.pushBack(id);
       console.log("results sent back to the Sprite");
     }));
 
@@ -272,10 +271,10 @@ export function buildProgram(): Command {
     .action(guarded(async (id: string, opts: { yes?: boolean }) => {
       const { installTool, declaredInstall } = await import("./core/install.js");
       const { detectArchetype } = await import("./core/verify.js");
-      const { cloudEntry, pullProject } = await import("./core/cloud.js");
-      if (cloudEntry(id)) {
-        const { spriteCli } = await import("./core/sprite.js");
-        console.log(`pulled to ${await pullProject(id, { cli: spriteCli })}`);
+      const { cloudProjects } = await import("./commands/clouds.js");
+      const cloud = await cloudProjects();
+      if (await cloud.has(id)) {
+        console.log(`pulled to ${await cloud.pull(id)}`);
         // Written on a Sprite, about to run here as the person: shown first,
         // and nothing that cannot be shown.
         const commands = declaredInstall(id);
@@ -304,9 +303,8 @@ export function buildProgram(): Command {
     .description("Copy a cloud project to this machine (its Sprite stays the original)")
     .argument("<id>", "project id")
     .action(guarded(async (id: string) => {
-      const { pullProject } = await import("./core/cloud.js");
-      const { spriteCli } = await import("./core/sprite.js");
-      console.log(`pulled to ${await pullProject(id, { cli: spriteCli })}`);
+      const { cloudProjects } = await import("./commands/clouds.js");
+      console.log(`pulled to ${await (await cloudProjects()).pull(id)}`);
     }));
 
   program
@@ -315,24 +313,21 @@ export function buildProgram(): Command {
     .argument("<id>", "project id")
     .option("--yes", "do not ask first")
     .action(guarded(async (id: string, opts: { yes?: boolean }) => {
-      const { cloudEntry, destroyCloudProject } = await import("./core/cloud.js");
-      const entry = cloudEntry(id);
-      if (!entry) throw new Error(`${id} is not a cloud project — only cloud projects can be destroyed`);
+      const { cloudProjects } = await import("./commands/clouds.js");
+      const cloud = await cloudProjects();
+      if (!(await cloud.has(id))) throw new Error(`${id} is not a cloud project — only cloud projects can be destroyed`);
       if (!opts.yes) {
         const readline = await import("node:readline/promises");
         const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-        const answer = await rl.question(
-          `Delete Sprite ${entry.sprite} and everything on it${entry.repo ? ` (the repo ${entry.repo} stays)` : " — it has no repo, so this is the only copy"}? [y/N] `,
-        );
+        const answer = await rl.question(`Delete ${id}'s Sprite and everything on it (its GitHub repo, if it has one, stays)? [y/N] `);
         rl.close();
         if (!/^y(es)?$/i.test(answer.trim())) {
           console.log("not destroyed");
           return;
         }
       }
-      const { spriteCli } = await import("./core/sprite.js");
-      await destroyCloudProject(id, { cli: spriteCli });
-      console.log(`destroyed ${entry.sprite}`);
+      const gone = await cloud.destroy(id);
+      console.log(`destroyed ${gone.sprite}${gone.repo ? `; ${gone.repo} stays` : ""}`);
     }));
 
   program
@@ -388,17 +383,11 @@ export function buildProgram(): Command {
         console.log(JSON.stringify(listProjects()));
         return;
       }
-      const { readCloud, cloudSummaries } = await import("./core/cloud.js");
-      const cloudIds = new Set(Object.keys(readCloud()));
-      if (cloudIds.size === 0) {
-        console.log(formatStatus(listProjects()));
-        return;
-      }
-      const { spriteCli } = await import("./core/sprite.js");
+      const { cloudProjects } = await import("./commands/clouds.js");
+      const cloud = (await (await cloudProjects()).list()) as unknown as ReturnType<typeof listProjects>;
       // A cloud project pulled here for a check is a copy; its Sprite says how it is.
-      const local = listProjects().filter((p) => !cloudIds.has(p.id));
-      const cloud = (await cloudSummaries({ cli: spriteCli })) as unknown as typeof local;
-      console.log(formatStatus([...local, ...cloud]));
+      const cloudIds = new Set(cloud.map((p) => p.id));
+      console.log(formatStatus([...listProjects().filter((p) => !cloudIds.has(p.id)), ...cloud]));
     }));
 
   program
@@ -529,19 +518,10 @@ export async function main(argv: string[] = process.argv): Promise<void> {
 async function dispatch(argv: string[]): Promise<void> {
   const [command, id] = argv.slice(2);
   if (command && id && FORWARDED.has(command)) {
-    const { cloudEntry, forward } = await import("./core/cloud.js");
-    const entry = cloudEntry(id);
-    if (entry) {
-      const { spriteCli } = await import("./core/sprite.js");
-      const args = argv.slice(2);
-      // An answers file is on this machine; the command runs on the Sprite.
-      const from = args.indexOf("--from");
-      if (command === "answer" && from !== -1 && args[from + 1] && args[from + 1] !== "-") {
-        const remote = `/tmp/sfo-answers-${id}.json`;
-        await spriteCli.push(entry.sprite, args[from + 1], remote);
-        args[from + 1] = remote;
-      }
-      process.exitCode = await forward(id, args, { cli: spriteCli });
+    const { cloudProjects } = await import("./commands/clouds.js");
+    const cloud = await cloudProjects();
+    if (await cloud.has(id)) {
+      process.exitCode = await cloud.command(id, argv.slice(2));
       return;
     }
   }

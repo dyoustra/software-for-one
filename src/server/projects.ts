@@ -171,6 +171,33 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
     });
   }
 
+  // What sfo can say about a project without changing it, as it would print
+  // it. Only these commands: anything else could change the project.
+  const REPORTS = new Set(["cost", "criteria", "why", "decisions", "slices", "logs", "budget"]);
+  app.get("/projects/:id/report/:command", auth, async (c: Context<Env>) => {
+    const row = owned(c);
+    const command = c.req.param("command") ?? "";
+    if (!row) return c.json({ error: "no such project" }, 404);
+    if (!REPORTS.has(command)) return c.json({ error: `one of: ${[...REPORTS].join(", ")}` }, 400);
+    const r = await sfo(row, [command, row.id, ...(command === "logs" && c.req.query("raw") ? ["--raw"] : [])]);
+    return c.json({ status: r.status, output: r.stdout });
+  });
+
+  // Check results made on the person's machine, as a bundle of the copy they
+  // pulled; fast-forward only, so nothing on the Sprite is overwritten.
+  app.post("/projects/:id/bundle", auth, async (c: Context<Env>) => {
+    const row = owned(c);
+    if (!row) return c.json({ error: "no such project" }, 404);
+    const local = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "sfo-back-")), `${row.id}.bundle`);
+    fs.writeFileSync(local, new Uint8Array(await c.req.arrayBuffer()));
+    const remote = `/tmp/sfo-${row.id}-back.bundle`;
+    await sprites.push(row.sprite, local, remote);
+    fs.rmSync(path.dirname(local), { recursive: true, force: true });
+    const merged = await sprites.exec(row.sprite, `cd ~/.sfo/"$1" && git pull -q --ff-only "$2" HEAD`, [row.id, remote]);
+    if (merged.status !== 0) return c.json({ error: `could not bring the results back: ${merged.stdout.trim()}` }, 409);
+    return c.json({ ok: true, project: present(await refresh(row)) });
+  });
+
   // The project's git bundle, for pull, check and install on the person's machine.
   app.get("/projects/:id/bundle", auth, async (c: Context<Env>) => {
     const row = owned(c);

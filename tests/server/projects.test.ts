@@ -116,6 +116,14 @@ describe("a project", () => {
     expect(fb?.args).toEqual(["feedback", "moon-abc123", "make it $(rm -rf ~) smaller"]);
   });
 
+  it("reports only what cannot change it", async () => {
+    const s = server();
+    const { token } = await withProject(s);
+    expect((await s.call("GET", "/projects/moon-abc123/report/cost", token)).status).toBe(200);
+    expect(s.fake.calls.at(-1)?.args).toEqual(["cost", "moon-abc123"]);
+    expect((await s.call("GET", "/projects/moon-abc123/report/destroy", token)).status).toBe(400);
+  });
+
   it("goes with its Sprite when destroyed", async () => {
     const s = server();
     const { token } = await withProject(s);

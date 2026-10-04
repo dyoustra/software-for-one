@@ -46,6 +46,7 @@ export async function login(env: Env = process.env, log: (m: string) => void = c
   if (readControlToken() && (await authed("/devices", {}, env).catch(() => ({ status: 0 }))).status === 200) {
     log(`already signed in to ${base}`);
     await offerCredentials(env, log);
+    await importCloudProjects(env, log);
     return;
   }
   const started = await request(`${base}/auth/device`, {
@@ -73,6 +74,7 @@ export async function login(env: Env = process.env, log: (m: string) => void = c
     fs.writeFileSync(path.join(projectsRoot(env), "control.json"), `${JSON.stringify({ url: base }, null, 2)}\n`);
     log(`signed in to ${base}`);
     await offerCredentials(env, log);
+    await importCloudProjects(env, log);
     return;
   }
 }
@@ -85,7 +87,7 @@ async function confirm(question: string): Promise<boolean> {
   return /^y(es)?$/i.test(answer.trim());
 }
 
-async function authed(path: string, init: RequestInit = {}, env: Env = process.env): Promise<{ status: number; body: Record<string, unknown> }> {
+export async function authed(path: string, init: RequestInit = {}, env: Env = process.env): Promise<{ status: number; body: Record<string, unknown> }> {
   const token = readControlToken();
   if (!token) throw new Error("not signed in — `sfo login`");
   return request(`${controlUrl(env)}${path}`, { ...init, headers: { "content-type": "application/json", authorization: `Bearer ${token}`, ...(init.headers ?? {}) } });
@@ -125,6 +127,43 @@ export async function offerCredentials(env: Env = process.env, log: (m: string) 
     }
   } else if (!have.includes("github_installation")) {
     log("no GitHub token — cloud projects get no repo. To give them one: a fine-grained token with Administration read/write, `sfo profile set github keychain:<service>`, then `sfo login`");
+  }
+}
+
+/**
+ * Moves projects this machine started on Sprites directly onto the control
+ * plane. The control plane can reach every Sprite in the organization, so it
+ * asks for proof: a one-time challenge written onto the Sprite with this
+ * machine's own Sprites access.
+ */
+export async function importCloudProjects(env: Env = process.env, log: (m: string) => void = console.log): Promise<void> {
+  const { readCloud, forgetEntry } = await import("../core/cloud.js");
+  const entries = Object.entries(readCloud(env));
+  if (entries.length === 0) return;
+  const { spriteCli } = await import("../core/sprite.js");
+  for (const [id, entry] of entries) {
+    const ch = await authed("/projects/import/challenge", { method: "POST", body: JSON.stringify({ id, sprite: entry.sprite }) }, env);
+    if (ch.status === 409) {
+      forgetEntry(id, env);
+      log(`${id} is already on the control plane`);
+      continue;
+    }
+    if (ch.status !== 200) {
+      log(`${id} not moved: ${String(ch.body.error)}`);
+      continue;
+    }
+    const wrote = await spriteCli.exec(entry.sprite, `cat > ~/.sfo/"$1"/.sfo/import-proof`, [id], { input: String(ch.body.nonce) }).catch(() => null);
+    if (!wrote || wrote.status !== 0) {
+      log(`${id} not moved: could not reach ${entry.sprite} with your Sprites access`);
+      continue;
+    }
+    const done = await authed("/projects/import", { method: "POST", body: JSON.stringify({ nonce: ch.body.nonce, repo: entry.repo }) }, env);
+    if (done.status === 200) {
+      forgetEntry(id, env);
+      log(`moved ${id} to the control plane`);
+    } else {
+      log(`${id} not moved: ${String(done.body.error)}`);
+    }
   }
 }
 

@@ -51,6 +51,11 @@ export function cloudEntry(id: string, env?: Env): CloudEntry | null {
   return Object.hasOwn(all, id) ? all[id] : null;
 }
 
+/** Drops a project from the local index, once the control plane holds it. */
+export function forgetEntry(id: string, env?: Env): void {
+  saveEntry(id, null, env);
+}
+
 function saveEntry(id: string, entry: CloudEntry | null, env?: Env): void {
   const all = readCloud(env);
   if (entry) all[id] = entry;
@@ -186,25 +191,38 @@ export async function pullProject(id: string, deps: CloudDeps): Promise<string> 
   if (made.status !== 0) throw new Error(`could not bundle ${id} on ${entry.sprite}`);
   const local = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "sfo-pull-")), `${id}.bundle`);
   await deps.cli.pull(entry.sprite, remote, local);
-  const dir = projectDir(id, deps.env);
+  return checkoutBundle(id, local, deps.env);
+}
+
+/**
+ * Makes the local copy of a project match a bundle of the original. A copy,
+ * not a fork: whatever an install or check left in it gives way to the
+ * original (check results are sent back before this).
+ */
+export function checkoutBundle(id: string, bundle: string, env?: Env): string {
+  const dir = projectDir(id, env);
   if (fs.existsSync(path.join(dir, ".git"))) {
-    // A copy, not a fork: whatever an install or check left in it gives way
-    // to the original. Check results were sent back before this.
-    execFileSync("git", [...NO_INTERFERENCE, "fetch", "-q", local, "HEAD"], { cwd: dir, stdio: "pipe" });
+    execFileSync("git", [...NO_INTERFERENCE, "fetch", "-q", bundle, "HEAD"], { cwd: dir, stdio: "pipe" });
     execFileSync("git", [...NO_INTERFERENCE, "reset", "-q", "--hard", "FETCH_HEAD"], { cwd: dir, stdio: "pipe" });
   } else {
-    execFileSync("git", [...NO_INTERFERENCE, "clone", "-q", local, dir], { stdio: "pipe" });
+    execFileSync("git", [...NO_INTERFERENCE, "clone", "-q", bundle, dir], { stdio: "pipe" });
   }
   return dir;
+}
+
+/** The local copy's history as a bundle, after committing what a check left in it. */
+export function bundleLocalCopy(id: string, env?: Env): string {
+  commitStage(id, "check", env);
+  const local = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "sfo-push-")), `${id}.bundle`);
+  execFileSync("git", [...NO_INTERFERENCE, "bundle", "create", "-q", local, "HEAD"], { cwd: projectDir(id, env), stdio: "pipe" });
+  return local;
 }
 
 /** Sends what was done to the local copy (check results) back to the Sprite. */
 export async function pushProjectBack(id: string, deps: CloudDeps): Promise<void> {
   const entry = cloudEntry(id, deps.env);
   if (!entry) throw new Error(`${id} is not a cloud project`);
-  commitStage(id, "check", deps.env);
-  const local = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "sfo-push-")), `${id}.bundle`);
-  execFileSync("git", [...NO_INTERFERENCE, "bundle", "create", "-q", local, "HEAD"], { cwd: projectDir(id, deps.env), stdio: "pipe" });
+  const local = bundleLocalCopy(id, deps.env);
   const remote = `/tmp/sfo-${id}-back.bundle`;
   await deps.cli.push(entry.sprite, local, remote);
   const merged = await deps.cli.exec(entry.sprite, `cd ~/.sfo/"$1" && git pull -q --ff-only "$2" HEAD`, [id, remote]);
