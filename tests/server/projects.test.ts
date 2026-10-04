@@ -126,11 +126,48 @@ describe("a project", () => {
 });
 
 describe("importing a project made before the control plane", () => {
-  it("is kept once its Sprite confirms it holds the project", async () => {
+  /** The person writes the challenge onto the Sprite with their own access; here, the fake holds it. */
+  function holding(s: ReturnType<typeof server>, sprite: string, proof: () => string) {
+    const exec = s.fake.sprites.exec;
+    s.fake.sprites.exec = async (name, script, args, opts) =>
+      script.startsWith("cat ~/.sfo/") ? (name === sprite ? { status: 0, stdout: `${proof()}\n` } : { status: 1, stdout: "" }) : exec(name, script, args, opts);
+  }
+
+  it("is kept once the Sprite holds the challenge, written there with the person's own access", async () => {
     const s = server();
     const token = await s.signIn("me");
-    expect((await s.call("POST", "/projects/import", token, { id: "nope-000000", sprite: "sfo-old" })).status).toBe(400);
-    expect((await s.call("POST", "/projects/import", token, { id: "moon-abc123", sprite: "sfo-old", repo: null })).status).toBe(200);
-    expect(((await (await s.call("GET", "/projects", token)).json()) as { sprite: string }[]).map((p) => p.sprite)).toEqual(["sfo-old"]);
+    const ch = (await (await s.call("POST", "/projects/import/challenge", token, { id: "moon-abc123", sprite: "sfo-0123abcd" })).json()) as { nonce: string };
+    holding(s, "sfo-0123abcd", () => ch.nonce);
+    expect((await s.call("POST", "/projects/import", token, { nonce: ch.nonce, repo: null })).status).toBe(200);
+    expect(((await (await s.call("GET", "/projects", token)).json()) as { sprite: string }[]).map((p) => p.sprite)).toEqual(["sfo-0123abcd"]);
+  });
+
+  it("refuses a Sprite that does not hold the challenge: naming one proves nothing", async () => {
+    const s = server();
+    const token = await s.signIn("me");
+    const ch = (await (await s.call("POST", "/projects/import/challenge", token, { id: "moon-abc123", sprite: "sfo-0123abcd" })).json()) as { nonce: string };
+    holding(s, "sfo-0123abcd", () => "something else");
+    expect((await s.call("POST", "/projects/import", token, { nonce: ch.nonce })).status).toBe(403);
+    expect(await (await s.call("GET", "/projects", token)).json()).toEqual([]);
+  });
+
+  it("refuses another person's challenge, and a Sprite already claimed", async () => {
+    const s = server();
+    const mine = await s.signIn("me");
+    const yours = await s.signIn("you");
+    const ch = (await (await s.call("POST", "/projects/import/challenge", mine, { id: "moon-abc123", sprite: "sfo-0123abcd" })).json()) as { nonce: string };
+    holding(s, "sfo-0123abcd", () => ch.nonce);
+    expect((await s.call("POST", "/projects/import", yours, { nonce: ch.nonce })).status).toBe(400);
+
+    await withProject(s);
+    const created = s.fake.created[0];
+    expect((await s.call("POST", "/projects/import/challenge", yours, { id: "other-abc123", sprite: created })).status).toBe(409);
+  });
+
+  it("refuses names that are not sfo's", async () => {
+    const s = server();
+    const token = await s.signIn("me");
+    expect((await s.call("POST", "/projects/import/challenge", token, { id: "../etc", sprite: "sfo-0123abcd" })).status).toBe(400);
+    expect((await s.call("POST", "/projects/import/challenge", token, { id: "moon-abc123", sprite: "sfo-sprite" })).status).toBe(400);
   });
 });

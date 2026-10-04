@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { randomBytes } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import type { Context, Hono } from "hono";
@@ -191,20 +192,41 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
     return c.json({ ok: true, repo: row.repo });
   });
 
-  // A project made before the control plane existed, still on its own
-  // Sprite: kept once that Sprite confirms it holds the project.
+  // A project made before the control plane existed, on a Sprite the person
+  // reached with their own Sprites access. The server's token reaches every
+  // Sprite in the organization, so naming one proves nothing: the person must
+  // write a one-time challenge onto it with their own access, which the server
+  // then reads back. A Sprite already behind a project cannot be claimed again.
+  const challenges = new Map<string, { userId: string; id: string; sprite: string; expires: number }>();
+  const PROJECT_ID = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+  const SPRITE = /^sfo-[0-9a-f]{8}$/;
+  const PROOF = (id: string) => `~/.sfo/${id}/.sfo/import-proof`;
+
+  app.post("/projects/import/challenge", auth, async (c: Context<Env>) => {
+    const { id, sprite } = (await c.req.json().catch(() => ({}))) as { id?: string; sprite?: string };
+    if (!id || !PROJECT_ID.test(id) || !sprite || !SPRITE.test(sprite)) return c.json({ error: "id and sprite must be an sfo project id and Sprite name" }, 400);
+    if (db.prepare("SELECT 1 FROM projects WHERE id = ? OR sprite = ?").get(id, sprite)) return c.json({ error: "that project or Sprite is already claimed" }, 409);
+    const nonce = randomBytes(24).toString("base64url");
+    challenges.set(nonce, { userId: c.get("userId"), id, sprite, expires: Date.now() + 10 * 60_000 });
+    return c.json({ nonce, path: PROOF(id) });
+  });
+
   app.post("/projects/import", auth, async (c: Context<Env>) => {
-    const { id, sprite, repo } = (await c.req.json().catch(() => ({}))) as { id?: string; sprite?: string; repo?: string | null };
-    if (!id || !sprite) return c.json({ error: "id and sprite are required" }, 400);
-    if (db.prepare("SELECT 1 FROM projects WHERE id = ?").get(id)) return c.json({ error: "already imported" }, 409);
-    const listed = await sprites.exec(sprite, "exec sfo status --json").catch(() => null);
-    const summary = listed?.status === 0 ? ((JSON.parse(listed.stdout) as { id: string }[]).find((p) => p.id === id) ?? null) : null;
-    if (!summary) return c.json({ error: `${sprite} does not hold ${id}` }, 400);
+    const { nonce, repo } = (await c.req.json().catch(() => ({}))) as { nonce?: string; repo?: string | null };
+    const ch = nonce ? challenges.get(nonce) : undefined;
+    if (nonce) challenges.delete(nonce);
+    if (!ch || ch.userId !== c.get("userId") || ch.expires < Date.now()) return c.json({ error: "no such challenge — start the import again" }, 400);
+    const proof = await sprites.exec(ch.sprite, `cat ~/.sfo/"$1"/.sfo/import-proof && rm -f ~/.sfo/"$1"/.sfo/import-proof`, [ch.id]).catch(() => null);
+    if (!proof || proof.status !== 0 || proof.stdout.trim() !== nonce) return c.json({ error: "the Sprite does not hold the challenge — it must be written with your own Sprites access" }, 403);
+    if (db.prepare("SELECT 1 FROM projects WHERE id = ? OR sprite = ?").get(ch.id, ch.sprite)) return c.json({ error: "that project or Sprite is already claimed" }, 409);
+    const listed = await sprites.exec(ch.sprite, "exec sfo status --json").catch(() => null);
+    const summary = listed?.status === 0 ? ((JSON.parse(listed.stdout) as { id: string }[]).find((p) => p.id === ch.id) ?? null) : null;
+    if (!summary) return c.json({ error: `${ch.sprite} does not hold ${ch.id}` }, 400);
     db.prepare("INSERT INTO projects (id, user_id, sprite, repo, status, summary, created_at, updated_at) VALUES (?, ?, ?, ?, 'ready', ?, ?, ?)").run(
-      id,
+      ch.id,
       c.get("userId"),
-      sprite,
-      repo ?? null,
+      ch.sprite,
+      typeof repo === "string" && /^https:\/\/github\.com\/[\w.-]+\/[\w.-]+$/.test(repo) ? repo : null,
       JSON.stringify(summary),
       now(),
       now(),
