@@ -100,6 +100,12 @@ describe("the CLI through the control plane", () => {
     await expect(cloud.command(ID, ["stage", ID, "spec"])).rejects.toThrow(/not available for a cloud project/);
   });
 
+  it("treats being signed out as an error, never as \"not a cloud project\"", async () => {
+    const address = server.address() as AddressInfo;
+    const signedOut = controlPlane({ url: `http://127.0.0.1:${address.port}`, token: "sfo_revoked" }, { SFO_HOME: home });
+    await expect(signedOut.has(ID)).rejects.toThrow(/sign in first/);
+  });
+
   it("pulls a copy here from the project's bundle", async () => {
     const dir = await cloud.pull(ID);
     expect(dir).toBe(path.join(home, ID));

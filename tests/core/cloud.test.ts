@@ -11,6 +11,7 @@ import {
   destroyCloudProject,
   pullProject,
   readCloud,
+  isPulledCopy,
 } from "../../src/core/cloud.js";
 import type { GitHub } from "../../src/core/provision.js";
 import type { SpriteCli } from "../../src/core/sprite.js";
@@ -255,6 +256,8 @@ describe("a cloud project afterwards", () => {
 
     const dir = await pullProject("tiny-abc123", { cli: sprite, env });
     expect(fs.readFileSync(path.join(dir, "a.txt"), "utf8")).toBe("1\n");
+    expect(isPulledCopy("tiny-abc123", env)).toBe(true);
+    expect(isPulledCopy("made-here-000000", env)).toBe(false);
 
     fs.writeFileSync(path.join(origin, "a.txt"), "2\n");
     git("commit", "-q", "-am", "two");

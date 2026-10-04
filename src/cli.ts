@@ -218,7 +218,9 @@ export function buildProgram(): Command {
       const { runChecks } = await import("./commands/check.js");
       const { cloudProjects } = await import("./commands/clouds.js");
       const cloud = await cloudProjects();
+      const { isPulledCopy } = await import("./core/cloud.js");
       if (!(await cloud.has(id))) {
+        if (isPulledCopy(id)) throw new Error(`${id} here is a copy of a cloud project you are not signed in to see — not running its checks`);
         console.log(await runChecks(id, undefined, { ready: opts.ready }));
         return;
       }
@@ -273,7 +275,10 @@ export function buildProgram(): Command {
       const { detectArchetype } = await import("./core/verify.js");
       const { cloudProjects } = await import("./commands/clouds.js");
       const cloud = await cloudProjects();
-      if (await cloud.has(id)) {
+      const { isPulledCopy } = await import("./core/cloud.js");
+      const fromCloud = await cloud.has(id);
+      if (!fromCloud && isPulledCopy(id)) throw new Error(`${id} here is a copy of a cloud project you are not signed in to see — not installing it`);
+      if (fromCloud) {
         console.log(`pulled to ${await cloud.pull(id)}`);
         // Written on a Sprite, about to run here as the person: shown first,
         // and nothing that cannot be shown.

@@ -80,7 +80,7 @@ export function controlPlane(at: { url: string; token: string }, env: Env = proc
     const res = await raw(p, { ...init, headers: { "content-type": "application/json", ...(init.headers ?? {}) } });
     return { status: res.status, body: (await res.json().catch(() => ({}))) as Record<string, unknown> };
   };
-  const fail = (r: { status: number; body: Record<string, unknown> }) => {
+  const fail = (r: { status: number; body: Record<string, unknown> }): never => {
     throw new Error(String(r.body.error ?? `the control plane answered ${r.status}`));
   };
   const say = (r: { status: number; body: Record<string, unknown> }): number => {
@@ -189,7 +189,14 @@ export function controlPlane(at: { url: string; token: string }, env: Env = proc
       }
       return out;
     },
-    has: async (id) => (await api(`/projects/${id}`)).status === 200,
+    // Only "not found" means not a cloud project; anything else (signed out,
+    // unreachable) is an error, never a reason to treat it as a local one.
+    async has(id) {
+      const r = await api(`/projects/${id}`);
+      if (r.status === 200) return true;
+      if (r.status === 404) return false;
+      return fail(r);
+    },
     async command(id, argv) {
       const [command, , ...rest] = argv;
       switch (command) {

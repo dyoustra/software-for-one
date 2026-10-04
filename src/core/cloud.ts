@@ -207,7 +207,19 @@ export function checkoutBundle(id: string, bundle: string, env?: Env): string {
   } else {
     execFileSync("git", [...NO_INTERFERENCE, "clone", "-q", bundle, dir], { stdio: "pipe" });
   }
+  fs.writeFileSync(path.join(dir, ".git", PULLED_MARKER), "a copy of a cloud project; its commands are shown before they run here\n");
   return dir;
+}
+
+/**
+ * Marks a local copy as pulled from the cloud. It lives in .git, which no
+ * bundle can write into, so code written on the Sprite cannot remove it — and
+ * a marked copy is never treated as a project made here.
+ */
+const PULLED_MARKER = "sfo-pulled-from-cloud";
+
+export function isPulledCopy(id: string, env?: Env): boolean {
+  return fs.existsSync(path.join(projectDir(id, env), ".git", PULLED_MARKER));
 }
 
 /** The local copy's history as a bundle, after committing what a check left in it. */
