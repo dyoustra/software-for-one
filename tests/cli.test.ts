@@ -58,9 +58,10 @@ describe("isEntryPoint", () => {
 });
 
 describe("contract commands", () => {
-  it("registers check and preferences", () => {
-    const names = buildProgram().commands.map((c) => c.name());
-    expect(names).toEqual(expect.arrayContaining(["check", "preferences"]));
+  it("registers check and prefs, still reachable as preferences", () => {
+    const commands = buildProgram().commands;
+    expect(commands.map((c) => c.name())).toEqual(expect.arrayContaining(["check", "prefs"]));
+    expect(commands.find((c) => c.name() === "prefs")?.aliases()).toContain("preferences");
   });
 });
 

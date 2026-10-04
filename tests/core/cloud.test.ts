@@ -110,18 +110,19 @@ describe("a new cloud project", () => {
     const both = (ref: { source: string }) => (ref.source === "keychain" ? TOKEN : "sk-ant-api-key");
     await newCloudProject("an idea", { run: false }, profile, { cli: sprite, env, readKeyWith: both, log: quiet });
 
-    expect(sprite.execs.filter((e) => e.input).map((e) => e.args[0])).toEqual(["claude-token"]);
+    expect(sprite.execs.filter((e) => e.input && e.script.includes("~/.config/sfo")).map((e) => e.args[0])).toEqual(["claude-token"]);
     expect(JSON.parse(sprite.execs[0].args[1]).modelAccess).toEqual(["claude_subscription"]);
   });
 
   it("takes the person's preferences along, for the project to snapshot there", async () => {
-    fs.writeFileSync(path.join(env.SFO_HOME, "PREFERENCES.md"), "Python over Node.\n");
+    fs.writeFileSync(path.join(env.SFO_HOME, "SFO.md"), "Python over Node.\n");
     const sprite = new FakeSprite(capturing("tiny-abc123"));
     await newCloudProject("an idea", { run: false }, PROFILE, { cli: sprite, env, readKeyWith: keys, log: quiet });
 
-    const copied = sprite.execs.find((e) => e.script.includes("PREFERENCES.md"));
-    expect(copied?.input).toBe("Python over Node.\n");
-    expect(sprite.execs.indexOf(copied!)).toBeLessThan(sprite.execs.findIndex((e) => e.script.includes("sfo new")));
+    const copied = (file: string) => sprite.execs.find((e) => e.script.includes("~/.sfo/") && e.args[0] === file);
+    expect(copied("SFO.md")?.input).toBe("Python over Node.\n");
+    expect(JSON.parse(copied("preferences.json")?.input ?? "{}").webHost).toBe("vercel");
+    expect(sprite.execs.indexOf(copied("SFO.md")!)).toBeLessThan(sprite.execs.findIndex((e) => e.script.includes("sfo new")));
   });
 
   it("refuses before creating anything when no credential can travel", async () => {

@@ -1,5 +1,5 @@
 Read `.sfo/ARCHETYPE.json`, `.sfo/SPEC.md`, `.sfo/CRITERIA.jsonl`,
-`.sfo/SLICES.jsonl`, `.sfo/SERVICES.jsonl`, `.sfo/PREFERENCES.md` if it exists,
+`.sfo/SLICES.jsonl`, `.sfo/SERVICES.jsonl`, `.sfo/preferences.json`, `.sfo/SFO.md` (`.sfo/PREFERENCES.md` in older projects) if it exists,
 and the test suite.
 
 You do two things: make the toolchain exist, so the suite can load and fail

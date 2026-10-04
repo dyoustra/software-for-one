@@ -83,13 +83,17 @@ export function buildProgram(): Command {
         access,
       );
       console.log(`captured: ${id}`);
-      const { snapshotPreferences } = await import("./core/preferences.js");
+      const { snapshotPreferences, readPreferences } = await import("./core/preferences.js");
       snapshotPreferences(id);
+      const prefs = readPreferences();
+      const { writeBudget, writeSmokeCap } = await import("./core/budget.js");
+      writeSmokeCap(id, prefs.smokeCapUsd);
 
-      if (ceiling !== null) {
-        const { writeBudget } = await import("./core/budget.js");
-        writeBudget(id, ceiling);
-        console.log(`budget ceiling: $${ceiling.toFixed(2)}`);
+      // --budget wins; otherwise the person's standing default, if they set one.
+      const startingCeiling = ceiling ?? prefs.budgetUsd;
+      if (startingCeiling !== null) {
+        writeBudget(id, startingCeiling);
+        console.log(`budget ceiling: $${startingCeiling.toFixed(2)}`);
       }
 
       // Printed before anything is spent: the front half runs on `sfo run`,
@@ -180,22 +184,29 @@ export function buildProgram(): Command {
     }));
 
   program
-    .command("preferences")
-    .description("Edit your standing preferences: stacks, storage, delivery — guidance every new project reads")
-    .option("--show", "print them instead of opening the editor")
-    .action(guarded(async (opts: { show?: boolean }) => {
-      const fs = await import("node:fs");
-      const { preferencesPath, readPreferences, PREFERENCES_TEMPLATE } = await import("./core/preferences.js");
-      const file = preferencesPath();
-      if (opts.show) {
-        console.log(readPreferences() ?? "no preferences yet — `sfo preferences` to write some");
+    .command("prefs")
+    .alias("preferences")
+    .description("Your standing preferences: languages by kind, web host and data, default budgets; `edit` opens SFO.md")
+    .argument("[setting]", "languages, web-host, web-data, budget, smoke-cap, or edit")
+    .argument("[values...]", "the new value; for languages, the kind then a comma-separated ranking")
+    .action(guarded(async (setting: string | undefined, values: string[]) => {
+      const prefs = await import("./core/preferences.js");
+      if (setting === undefined) {
+        console.log(prefs.formatPreferences(prefs.readPreferences()));
+        console.log(`\nfree text: ${prefs.readSfoMd()?.trim() ? prefs.sfoMdPath() : "none yet — `sfo prefs edit`"}`);
         return;
       }
-      if (!fs.existsSync(file)) fs.writeFileSync(file, PREFERENCES_TEMPLATE);
-      const { spawnSync } = await import("node:child_process");
-      const editor = process.env.VISUAL || process.env.EDITOR || "vi";
-      spawnSync(`${editor} "$SFO_PREFS"`, { shell: true, stdio: "inherit", env: { ...process.env, SFO_PREFS: file } });
-      console.log(`saved ${file}`);
+      if (setting === "edit") {
+        const fs = await import("node:fs");
+        const file = prefs.sfoMdPath();
+        if (prefs.readSfoMd() === null) fs.writeFileSync(file, prefs.SFO_MD_TEMPLATE);
+        const { spawnSync } = await import("node:child_process");
+        const editor = process.env.VISUAL || process.env.EDITOR || "vi";
+        spawnSync(`${editor} "$SFO_PREFS"`, { shell: true, stdio: "inherit", env: { ...process.env, SFO_PREFS: file } });
+        console.log(`saved ${file}`);
+        return;
+      }
+      console.log(prefs.formatPreferences(prefs.setPreference(setting, values)));
     }));
 
   program

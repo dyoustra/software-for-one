@@ -1,4 +1,4 @@
-Read `.sfo/IDEA.md`, `.sfo/RESEARCH.md`, `.sfo/SERVICES.jsonl`, `.sfo/ACCESS.json`, and `.sfo/PREFERENCES.md` if it exists. Produce a specification.
+Read `.sfo/IDEA.md`, `.sfo/RESEARCH.md`, `.sfo/SERVICES.jsonl`, `.sfo/ACCESS.json`, `.sfo/preferences.json`, and `.sfo/SFO.md` (`.sfo/PREFERENCES.md` in older projects) if it exists. Produce a specification.
 
 **Write each file as you finish it, not all at the end.** Write `.sfo/SPEC.md` first and save it, then `.sfo/ARCHETYPE.json`, then `.sfo/CRITERIA.jsonl`, then `.sfo/SERVICES.jsonl`, then `.sfo/QUESTIONS.json`, then append to `.sfo/DECISIONS.jsonl`. Stages get killed mid-run; partial output that a re-run can build on beats losing twenty minutes of work to a dropped connection.
 
@@ -27,14 +27,20 @@ restating them.
 **Decide what you are building, in your own words.** The idea decides the kind
 of thing — a command-line tool, a web app, a browser extension, firmware for a
 board, anything — and the stack. If the idea could reasonably be more than one
-kind and does not say, that is a `blocking` question; do not guess. Read
-`.sfo/PREFERENCES.md` if it exists: the person's standing preferences ("web
-apps in Vite and React", "Python over Node"). Follow them unless this idea
-needs something they rule out, and when it does, deviate, and record a
-`structural` decision saying why. Where they rank languages for a kind of
-project, take the first that suits this idea; passing over one is a
-`structural` decision saying why. The idea, or an answer at clarify, overrides
-the ranking.
+kind and does not say, that is a `blocking` question; do not guess.
+
+**The person's preferences.** `.sfo/preferences.json` ranks languages for each
+kind of project, best first (`cli`, `web`, `mobile`, `firmware`, and `default`
+for anything else), and sets the web host (`none` means deliver locally), where
+a web app's data lives, and default budgets. `.sfo/SFO.md` is free text for
+everything else ("web apps in Vite and React"). They are guidance, and the idea
+overrides them, but **a better choice is raised, not quietly taken**: if this
+idea would be much simpler or better in something other than the first-ranked
+language, or against any other preference, ask in `.sfo/QUESTIONS.json`
+(`preference`), naming both with what each costs ("Your first choice for CLIs
+is Go; this is much simpler in Python because …"), and use their preference
+until they answer. Deviate without asking only when the preference is
+impossible for this idea, and record a `structural` decision saying why.
 
 **The name is the person's.** Unless the idea names it, ask in
 `.sfo/QUESTIONS.json`: "What should it be called?" (`preference`), with three

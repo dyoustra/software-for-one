@@ -33,7 +33,8 @@ describe("prompts and the artifacts they are graded on", () => {
     // No list of kinds: an archetype name sfo does not know is fine, because
     // the project's own contract says how it is checked.
     expect(loadPrompt("spec")).not.toMatch(/must be \*\*exactly one\*\*/);
-    expect(loadPrompt("spec")).toContain(".sfo/PREFERENCES.md");
+    expect(loadPrompt("spec")).toContain(".sfo/preferences.json");
+    expect(loadPrompt("spec")).toContain(".sfo/SFO.md");
     const repair = loadPrompt("test-repair");
     expect(repair).toContain(".sfo/CONTRACTS.json");
     // Worked examples for both built-in stacks, a web app and a board.
@@ -53,7 +54,7 @@ describe("prompts and the artifacts they are graded on", () => {
     // lattice and moon were both the agent's names.
     const spec = loadPrompt("spec");
     expect(spec).toContain("What should it be called?");
-    expect(spec).toMatch(/rank languages for a kind/);
+    expect(spec).toMatch(/a better choice is raised, not quietly taken/);
   });
 
   it("lets clarify carry a renamed command into every file that names it", () => {
