@@ -230,3 +230,89 @@ retries and two feedback runs.
   ASCII outlines for a building people know by sight. Drafts at clarify, now
   comparing media such as half-block pixel art, inline images and ASCII,
   would have put that choice in front of the person at the start.
+
+# Run 3: `lattice`, the first web app (2026-10-02 to 10-03)
+
+A pitch-quantization visualizer (Vite, React, TypeScript, Web Audio), and the
+first real test of project-declared contracts: its own gate, Playwright in the
+gate, renders as screenshots. Total: **$166.60** API-equivalent on the Max
+plan, **$0.00 billed**. **No slice was ever graded.**
+
+## What happened
+
+1. test-repair's agent exited 1. sfo said to re-run it with `sfo stage`.
+2. `sfo stage test-repair` succeeded, but skipped what follows test-repair in
+   a run: the suite check, the red check and **the lock**. `sfo run` went on
+   to the build.
+3. The gate refused S-01 twice, "the test suite was never locked" ($30 of
+   build). S-02 to S-13 all depend on S-01 and never ran.
+4. The run carried on into smoke, review, review-repair and delivery ($46) on
+   code nothing had graded. Review's reproduction tests created the lock,
+   twenty minutes after the last gate.
+5. SUMMARY.md said all of this honestly, in 41 KB.
+
+What the reviewer measured by hand: typecheck clean; 17 of 290 node and 16 of
+84 browser tests failing; three seams failing against the real libraries (the
+pitch shifter lands 17 cents off at +12 semitones; `pitchy` does not throw on
+a wrong-length window; an AudioContext starts without a gesture). The app runs
+(`lattice`) and is slow.
+
+## Defects the run found in sfo, all fixed
+
+| Defect | Effect | Fix |
+|---|---|---|
+| `sfo stage test-repair` skipped the suite check, red check and lock | a whole build graded against nothing | `sealSuite` follows test-repair wherever it runs (`cf31b6a`) |
+| A build on an unlocked suite failed each slice and carried on | $46 of smoke and review on ungraded code | no lock blocks the build before any slice (`cf31b6a`) |
+| Nothing made speed a requirement | a working app that is slow | speed criteria with numbers; timing tests at 3× the target (`8e08f59`) |
+
+## Lessons
+
+- **The recovery path is a pipeline path.** The fix sfo itself recommended
+  was the one route around the lock. Every "re-run with `sfo stage`" hint has
+  to do what the run loop does after that stage.
+- **A blocked gate should stop the run.** Carrying on to review only made a
+  longer report about code nobody had checked.
+- **The summary is too long.** 41 KB is not read. Not yet fixed.
+
+# Run 4: `soundscape`, the first cloud run (2026-10-03)
+
+A background command that adjusts a procedural drone to the app in front, built
+entirely on a Fly Sprite (Linux) from the CLI, with the laptop free. Total:
+**$37.79** API-equivalent on the Max plan, **$0.00 billed**.
+
+## Outcome
+
+- **10 of 10 slices passed on the first attempt.** No contest and no retry.
+- **Smoke:** the local control endpoint passed against the real thing over
+  loopback. Three seams that need a Mac (front-app notifications, PortAudio
+  output, Core Audio's default device) were deferred, then **all passed on
+  the Mac with `sfo check --ready`**, and `soundscape` installed from a new
+  terminal.
+- **Review:** one high finding left (R-001: the device-audio thread never
+  finishes after the stop fade, so stop waits out a 1.6 s timeout and leaves
+  the stream open). It needs a real audio device, which the Sprite does not
+  have; two repair attempts failed there.
+- **The person's verdict on the sound:** "like perfect", with the glassy
+  palette a little much at high intensity.
+- Spec knew where it was: it asked Python vs Swift because "the build pipeline
+  runs on Linux with no Swift toolchain".
+
+## What the Sprite needed
+
+| Finding | Fix |
+|---|---|
+| No `bwrap`, so Claude Code's sandbox cannot start | `SFO_CONFINEMENT=vm`: bypassPermissions, the VM is the boundary (`6bb02f3`) |
+| A detached job froze about 15 s after its exec session closed (3 of 120 ticks, 1 of 20 outgoing calls) | every heartbeat renews a five-minute Sprite task (`3826896`) |
+| The bundled Claude Code (2.1.251) cannot update itself | re-point `~/.local/bin/claude` at the native install |
+| `sfo answer` lost piped answers (readline drops early lines) | `sfo answer --from` (`03665b2`) |
+| `sfo check` could not confirm hardware without a terminal | `sfo check --ready` (`c508eb6`) |
+| 32 MB through `sprite exec` stdout overflowed its buffer | `sprite file pull` for anything large |
+| The final state was never committed, so the clone read "stale" | commit on done and on every park (`1135831`) |
+
+## Lessons
+
+- **The cloud found what the Mac never would:** an always-awake machine and a
+  terminal had hidden both the pausing and the missing non-interactive paths.
+  The app needs those paths anyway.
+- **Deferred checks work.** Everything that could be checked on Linux was;
+  what needed the Mac waited, named exactly what it needed, and passed there.
