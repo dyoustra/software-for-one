@@ -16,13 +16,25 @@ const MAX_NAMED_FILES = 5;
 const IDENTITY = ["-c", "user.name=sfo", "-c", "user.email=sfo@localhost"];
 
 /**
- * Global config that would otherwise reach into these repos. `commit.gpgsign`
- * is the same class of hazard as a missing identity: a user who signs their own
+ * Config that would otherwise reach into these repos. `commit.gpgsign` is the
+ * same class of hazard as a missing identity: a user who signs their own
  * commits has no key configured for sfo's committer, so every commit fails.
- * Hooks are skipped because a global `core.hooksPath` runs a hook written for
- * the user's own work against generated artifacts it knows nothing about.
+ *
+ * The rest is about who wrote the repo. sfo runs git outside any sandbox, in
+ * a directory a stage's agent can write to, \`.git\` included: a hook it plants
+ * (post-commit runs even under --no-verify) or an fsmonitor command in its
+ * config would run with the person's full rights. So no hooks, no fsmonitor,
+ * and no transport but https and ssh (an \`ext::\` remote runs a command).
  */
-const NO_INTERFERENCE = ["-c", "commit.gpgsign=false"];
+export const NO_INTERFERENCE = [
+  "-c", "commit.gpgsign=false",
+  "-c", "core.hooksPath=/dev/null",
+  "-c", "core.fsmonitor=false",
+  "-c", "protocol.allow=never",
+  "-c", "protocol.https.allow=always",
+  "-c", "protocol.ssh.allow=always",
+  "-c", "protocol.file.allow=always",
+];
 
 /**
  * `stage(spec): SPEC.md, QUESTIONS.md` — the stage that ran and what it
@@ -101,7 +113,7 @@ function withhold(
   env: Env | undefined,
   log: (message: string) => void,
 ): void {
-  execFileSync("git", ["rm", "--cached", "-q", "--", ...withheld.map((w) => w.path)], { cwd, stdio: "pipe" });
+  execFileSync("git", [...NO_INTERFERENCE, "rm", "--cached", "-q", "--", ...withheld.map((w) => w.path)], { cwd, stdio: "pipe" });
   const ignorable = withheld.filter((w) => !w.path.startsWith(".sfo/"));
   if (ignorable.length > 0) {
     const file = path.join(cwd, ".gitignore");
@@ -110,7 +122,7 @@ function withhold(
     if (lines.length > 0) {
       const sep = body === "" || body.endsWith("\n") ? "" : "\n";
       fs.writeFileSync(file, `${body}${sep}# withheld by sfo's commit guard\n${lines.join("\n")}\n`);
-      execFileSync("git", ["add", "--", ".gitignore"], { cwd, stdio: "pipe" });
+      execFileSync("git", [...NO_INTERFERENCE, "add", "--", ".gitignore"], { cwd, stdio: "pipe" });
     }
   }
   for (const w of withheld) log(`sfo: left ${w.path} out of the ${stage} commit — it ${w.why}`);
@@ -146,7 +158,7 @@ export function commitStage(
     // .git and SFO_HOME happens to sit inside another repo, that would stage
     // and commit the user's unrelated work under an sfo commit message.
     // realpath on both sides because macOS tmpdirs are symlinks.
-    const root = execFileSync("git", ["rev-parse", "--show-toplevel"], {
+    const root = execFileSync("git", [...NO_INTERFERENCE, "rev-parse", "--show-toplevel"], {
       cwd,
       encoding: "utf8",
       stdio: "pipe",
@@ -158,10 +170,10 @@ export function commitStage(
 
     ensureLogsIgnored(cwd, log);
 
-    execFileSync("git", ["add", "-A"], { cwd, stdio: "pipe" });
+    execFileSync("git", [...NO_INTERFERENCE, "add", "-A"], { cwd, stdio: "pipe" });
 
     const listStaged = (): string[] =>
-      execFileSync("git", ["diff", "--cached", "--name-only"], { cwd, encoding: "utf8", stdio: "pipe" })
+      execFileSync("git", [...NO_INTERFERENCE, "diff", "--cached", "--name-only"], { cwd, encoding: "utf8", stdio: "pipe" })
         .split("\n")
         .map((line) => line.trim())
         .filter(Boolean);
@@ -198,18 +210,19 @@ export function commitStage(
 
 /**
  * A cloud project's repo is its backup and what leaves the Sprite, so every
- * commit is pushed as it is made. A project with no remote (every local one)
- * pushes nothing. A failed push is said and survived: the next commit's push
- * carries this one too.
+ * commit is pushed as it is made. Only on a Sprite: anywhere else a remote
+ * may be one a stage's agent added, and pushing would carry the project to it.
+ * A failed push is said and survived: the next commit's push carries this one too.
  */
 function pushIfRemote(cwd: string, stage: string, log: (message: string) => void): void {
+  if (process.env.SFO_CONFINEMENT !== "vm") return;
   try {
-    execFileSync("git", ["remote", "get-url", "origin"], { cwd, stdio: "pipe" });
+    git(cwd, ["remote", "get-url", "origin"]);
   } catch {
     return;
   }
   try {
-    execFileSync("git", ["push", "-q", "origin", "HEAD"], { cwd, stdio: "pipe", timeout: 120_000 });
+    execFileSync("git", [...IDENTITY, ...NO_INTERFERENCE, "push", "-q", "origin", "HEAD"], { cwd, stdio: "pipe", timeout: 120_000 });
   } catch (err) {
     log(`sfo: committed ${stage} but could not push it: ${reason(err)}`);
   }
@@ -304,7 +317,7 @@ export function revertCommit(cwd: string, sha: string): { ok: boolean; detail: s
   try {
     const patch = git(cwd, ["diff", "--binary", `${sha}^`, sha, ...OUTSIDE_SFO]);
     if (patch.trim() === "") return { ok: true, detail: `${short} changed nothing outside .sfo/` };
-    execFileSync("git", ["apply", "-R", "--index", "-"], { cwd, input: patch, stdio: ["pipe", "pipe", "pipe"] });
+    execFileSync("git", [...NO_INTERFERENCE, "apply", "-R", "--index", "-"], { cwd, input: patch, stdio: ["pipe", "pipe", "pipe"] });
     const subject = git(cwd, ["log", "-1", "--format=%s", sha]).trim();
     git(cwd, ["commit", "--no-verify", "-q", "-m", `Revert "${subject}" (sfo rollback of ${short})`]);
     return { ok: true, detail: `reverted ${short}` };

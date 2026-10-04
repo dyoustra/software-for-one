@@ -200,7 +200,8 @@ export function buildProgram(): Command {
     .description("Run the checks that were waiting for hardware, a device, or you")
     .argument("<id>", "project id")
     .option("--ready", "everything the checks need is here; skip asking")
-    .action(guarded(async (id: string, opts: { ready?: boolean }) => {
+    .option("--yes", "for a cloud project, run its commands here without showing them first")
+    .action(guarded(async (id: string, opts: { ready?: boolean; yes?: boolean }) => {
       const { runChecks } = await import("./commands/check.js");
       const { cloudEntry, pullProject, pushProjectBack } = await import("./core/cloud.js");
       if (!cloudEntry(id)) {
@@ -211,6 +212,21 @@ export function buildProgram(): Command {
       // results back to where the project lives.
       const { spriteCli } = await import("./core/sprite.js");
       console.log(`pulled to ${pullProject(id, { cli: spriteCli })}`);
+      // Written on a Sprite where nothing confined the agents, and about to
+      // run here with this person's rights: they see what first.
+      const { deferredCommands } = await import("./core/deferred.js");
+      const commands = deferredCommands(id);
+      if (commands.length > 0 && !opts.yes) {
+        console.log(`these run on this machine, as you:\n${commands.map((c) => `  ${c}`).join("\n")}`);
+        const readline = await import("node:readline/promises");
+        const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+        const answer = await rl.question("run them? [y/N] ");
+        rl.close();
+        if (!/^y(es)?$/i.test(answer.trim())) {
+          console.log("not run");
+          return;
+        }
+      }
       console.log(await runChecks(id, undefined, { ready: opts.ready }));
       pushProjectBack(id, { cli: spriteCli });
       console.log("results sent back to the Sprite");

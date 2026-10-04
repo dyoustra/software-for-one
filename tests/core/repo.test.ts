@@ -40,6 +40,17 @@ function subjects(dir: string): string[] {
   return out.split("\n").filter(Boolean);
 }
 
+function onSprite(fn: () => void): void {
+  const before = process.env.SFO_CONFINEMENT;
+  process.env.SFO_CONFINEMENT = "vm";
+  try {
+    fn();
+  } finally {
+    if (before === undefined) delete process.env.SFO_CONFINEMENT;
+    else process.env.SFO_CONFINEMENT = before;
+  }
+}
+
 function commitCount(dir: string): number {
   return Number(
     execFileSync("git", ["rev-list", "--all", "--count"], { cwd: dir, encoding: "utf8" }).trim(),
@@ -86,13 +97,39 @@ describe("commitStage", () => {
     expect(subjects(dir)[0]).toBe("stage(spec): SPEC.md");
   });
 
-  it("pushes each commit when the project has a remote, so its repo keeps up", () => {
+  it("runs no hook or fsmonitor a stage's agent could have planted", () => {
+    // sfo's git runs outside the sandbox, in a .git the agent can write.
+    const dir = makeProject("p");
+    const marker = path.join(os.tmpdir(), `sfo-hook-ran-${process.pid}-${Date.now()}`);
+    fs.writeFileSync(path.join(dir, ".git", "hooks", "post-commit"), `#!/bin/sh\ntouch ${marker}\n`, { mode: 0o755 });
+    execFileSync("git", ["config", "core.fsmonitor", `touch ${marker}-fs; echo`], { cwd: dir });
+    fs.writeFileSync(projectPath("p", ".sfo", "SPEC.md"), "# spec\n");
+
+    commitStage("p", "spec", env, () => {});
+
+    expect(subjects(dir)[0]).toContain("stage(spec)");
+    expect(fs.existsSync(marker)).toBe(false);
+    expect(fs.existsSync(`${marker}-fs`)).toBe(false);
+  });
+
+  it("pushes nothing off a Sprite, whatever remote a stage added", () => {
     const dir = makeProject("p");
     const remote = fs.mkdtempSync(path.join(os.tmpdir(), "sfo-remote-"));
     execFileSync("git", ["init", "-q", "--bare", remote]);
     execFileSync("git", ["remote", "add", "origin", remote], { cwd: dir });
     fs.writeFileSync(projectPath("p", ".sfo", "SPEC.md"), "# spec\n");
     commitStage("p", "spec", env, () => {});
+
+    expect(() => execFileSync("git", ["log", "HEAD"], { cwd: remote, stdio: "pipe" })).toThrow();
+  });
+
+  it("on a Sprite, pushes each commit when the project has a remote, so its repo keeps up", () => {
+    const dir = makeProject("p");
+    const remote = fs.mkdtempSync(path.join(os.tmpdir(), "sfo-remote-"));
+    execFileSync("git", ["init", "-q", "--bare", remote]);
+    execFileSync("git", ["remote", "add", "origin", remote], { cwd: dir });
+    fs.writeFileSync(projectPath("p", ".sfo", "SPEC.md"), "# spec\n");
+    onSprite(() => commitStage("p", "spec", env, () => {}));
 
     const pushed = execFileSync("git", ["log", "--format=%s", "HEAD"], { cwd: remote, encoding: "utf8" });
     expect(pushed).toContain("stage(spec)");
@@ -103,7 +140,7 @@ describe("commitStage", () => {
     execFileSync("git", ["remote", "add", "origin", path.join(os.tmpdir(), "sfo-no-such-remote")], { cwd: dir });
     fs.writeFileSync(projectPath("p", ".sfo", "SPEC.md"), "# spec\n");
     const said: string[] = [];
-    commitStage("p", "spec", env, (m) => said.push(m));
+    onSprite(() => commitStage("p", "spec", env, (m) => said.push(m)));
 
     expect(subjects(dir)[0]).toContain("stage(spec)");
     expect(said.join("\n")).toMatch(/committed spec but could not push it/);

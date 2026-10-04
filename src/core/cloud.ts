@@ -6,7 +6,7 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { projectsRoot, projectDir, type Env } from "./paths.js";
 import { readKey, type KeyReader, type Profile } from "./access.js";
-import { commitStage } from "./repo.js";
+import { commitStage, NO_INTERFERENCE } from "./repo.js";
 import type { SpriteCli } from "./sprite.js";
 
 export const CLOUD_FILE = "cloud.json";
@@ -129,6 +129,8 @@ function remoteProfile(profile: Profile, methods: Profile["sfoPrefers"][]): stri
 export interface GitHub {
   login(token: string): Promise<string>;
   createPrivateRepo(token: string, name: string, description: string): Promise<string>;
+  /** A key with write access to this one repo and no other. */
+  addDeployKey(token: string, owner: string, repo: string, publicKey: string): Promise<void>;
 }
 
 export const github: GitHub = {
@@ -144,7 +146,15 @@ export const github: GitHub = {
       body: JSON.stringify({ name, description, private: true }),
     });
     if (!r.ok) throw new Error(`GitHub would not create ${name} (${r.status}): ${(await r.text()).slice(0, 200)}`);
-    return ((await r.json()) as { clone_url: string }).clone_url;
+    return ((await r.json()) as { html_url: string }).html_url;
+  },
+  async addDeployKey(token, owner, repo, publicKey) {
+    const r = await fetch(`https://api.github.com/repos/${owner}/${repo}/keys`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "content-type": "application/json" },
+      body: JSON.stringify({ title: "sfo Sprite", key: publicKey, read_only: false }),
+    });
+    if (!r.ok) throw new Error(`GitHub would not add a deploy key to ${repo} (${r.status}): ${(await r.text()).slice(0, 200)}`);
   },
 };
 
@@ -206,17 +216,27 @@ export async function newCloudProject(
   return id;
 }
 
+/**
+ * Creates the project's private repo and lets its Sprite push to it. The
+ * person's token never leaves this machine: everything on a Sprite is readable
+ * by the agents that run there, and that token reaches every repo they own.
+ * The Sprite instead makes a key of its own, allowed to push to this repo and
+ * nothing else.
+ */
 async function connectRepo(id: string, sprite: string, token: string, deps: CloudDeps): Promise<string> {
   const gh = deps.github ?? github;
-  const url = await gh.createPrivateRepo(token, id, "Built by sfo");
   const owner = await gh.login(token);
-  // git's own credential store on the Sprite: the token never sits in a
-  // remote URL, a config file or a command line.
-  const store = `umask 077; { printf 'https://%s:' "$1"; cat; printf '@github.com\\n'; } > ~/.git-credentials; git config --global credential.helper store`;
-  if (deps.cli.exec(sprite, store, [owner], { input: token }).status !== 0) throw new Error("could not store the GitHub token on the Sprite");
-  const wire = `cd ~/.sfo/"$1" && git remote add origin "$2" && git push -q -u origin HEAD`;
-  if (deps.cli.exec(sprite, wire, [id, url]).status !== 0) throw new Error("could not push to the new repo");
-  return url;
+  const page = await gh.createPrivateRepo(token, id, "Built by sfo");
+  const keygen = `set -e; mkdir -p ~/.ssh; chmod 700 ~/.ssh; rm -f ~/.ssh/sfo_deploy ~/.ssh/sfo_deploy.pub
+ssh-keygen -q -t ed25519 -N "" -C "sfo $1" -f ~/.ssh/sfo_deploy; cat ~/.ssh/sfo_deploy.pub`;
+  const made = deps.cli.exec(sprite, keygen, [id]);
+  if (made.status !== 0) throw new Error("could not make a deploy key on the Sprite");
+  await gh.addDeployKey(token, owner, id, made.stdout.trim());
+  const wire = `cd ~/.sfo/"$1" && git remote add origin "$2" \
+  && git config core.sshCommand "ssh -i ~/.ssh/sfo_deploy -o IdentitiesOnly=yes -o StrictHostKeyChecking=accept-new" \
+  && git push -q -u origin HEAD`;
+  if (deps.cli.exec(sprite, wire, [id, `git@github.com:${owner}/${id}.git`]).status !== 0) throw new Error("could not push to the new repo");
+  return page;
 }
 
 /** Runs an sfo command on the project's Sprite, attached to this terminal. */
@@ -271,9 +291,9 @@ export function pullProject(id: string, deps: CloudDeps): string {
   deps.cli.pull(entry.sprite, remote, local);
   const dir = projectDir(id, deps.env);
   if (fs.existsSync(path.join(dir, ".git"))) {
-    execFileSync("git", ["pull", "-q", "--ff-only", local, "HEAD"], { cwd: dir, stdio: "pipe" });
+    execFileSync("git", [...NO_INTERFERENCE, "pull", "-q", "--ff-only", local, "HEAD"], { cwd: dir, stdio: "pipe" });
   } else {
-    execFileSync("git", ["clone", "-q", local, dir], { stdio: "pipe" });
+    execFileSync("git", [...NO_INTERFERENCE, "clone", "-q", local, dir], { stdio: "pipe" });
   }
   return dir;
 }
@@ -284,7 +304,7 @@ export function pushProjectBack(id: string, deps: CloudDeps): void {
   if (!entry) throw new Error(`${id} is not a cloud project`);
   commitStage(id, "check", deps.env);
   const local = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "sfo-push-")), `${id}.bundle`);
-  execFileSync("git", ["bundle", "create", "-q", local, "HEAD"], { cwd: projectDir(id, deps.env), stdio: "pipe" });
+  execFileSync("git", [...NO_INTERFERENCE, "bundle", "create", "-q", local, "HEAD"], { cwd: projectDir(id, deps.env), stdio: "pipe" });
   const remote = `/tmp/sfo-${id}-back.bundle`;
   deps.cli.push(entry.sprite, local, remote);
   const merged = deps.cli.exec(entry.sprite, `cd ~/.sfo/"$1" && git pull -q --ff-only "$2" HEAD`, [id, remote]);

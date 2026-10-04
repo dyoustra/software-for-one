@@ -6,7 +6,7 @@ import { runChecks } from "../../src/commands/check.js";
 import { writeState } from "../../src/core/state.js";
 import { writeSlices } from "../../src/core/slices.js";
 import { readSmokeRecords, latestSmoke } from "../../src/core/smoke.js";
-import { deferredWork } from "../../src/core/deferred.js";
+import { deferredWork, deferredCommands } from "../../src/core/deferred.js";
 import { readContractFile } from "../../src/core/contracts.js";
 import { listProjects, formatStatus } from "../../src/commands/status.js";
 
@@ -91,6 +91,10 @@ describe("sfo check", () => {
       },
     });
     expect(out).toMatch(/magtag — shows the forecast: completed/);
+  });
+
+  it("can show the exact commands it would run, before running a project built elsewhere", () => {
+    expect(deferredCommands("p", env)).toEqual([[process.execPath, "-e", BOARD].join(" ")]);
   });
 
   it("says so when nothing is waiting", async () => {

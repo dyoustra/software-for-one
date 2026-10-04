@@ -135,21 +135,28 @@ describe("a new cloud project", () => {
     expect(sprite.execs.some((e) => e.script.includes("sfo run"))).toBe(false);
   });
 
-  it("gets a private repo when there is a GitHub token, with the token kept out of arguments", async () => {
-    const sprite = new FakeSprite(capturing("tiny-abc123"));
+  it("gets a private repo when there is a GitHub token, which never reaches the Sprite", async () => {
+    const GH_TOKEN = "ghp_secret";
+    const sprite = new FakeSprite((e) =>
+      e.script.includes("ssh-keygen") ? { status: 0, stdout: "ssh-ed25519 AAAA sfo tiny-abc123\n" } : capturing("tiny-abc123")(e),
+    );
     const made: string[] = [];
+    const keys: string[] = [];
     const gh: GitHub = {
       login: async () => "someone",
-      createPrivateRepo: async (_t, name) => (made.push(name), `https://github.com/someone/${name}.git`),
+      createPrivateRepo: async (_t, name) => (made.push(name), `https://github.com/someone/${name}`),
+      addDeployKey: async (_t, owner, repo, key) => void keys.push(`${owner}/${repo} ${key}`),
     };
+    const ghKeys = (ref: { source: string; service?: string }) => (ref.service === "github-token" ? GH_TOKEN : TOKEN);
     const profile = { ...PROFILE, githubToken: { source: "keychain" as const, service: "github-token" } };
-    await newCloudProject("an idea", { run: false }, profile, { cli: sprite, env, readKeyWith: keys, github: gh, log: quiet });
+    await newCloudProject("an idea", { run: false }, profile, { cli: sprite, env, readKeyWith: ghKeys, github: gh, log: quiet });
 
     expect(made).toEqual(["tiny-abc123"]);
-    expect(cloudEntry("tiny-abc123", env)?.repo).toBe("https://github.com/someone/tiny-abc123.git");
+    expect(keys).toEqual(["someone/tiny-abc123 ssh-ed25519 AAAA sfo tiny-abc123"]);
+    expect(cloudEntry("tiny-abc123", env)?.repo).toBe("https://github.com/someone/tiny-abc123");
     const wired = sprite.execs.find((e) => e.script.includes("git remote add origin"));
-    expect(wired?.args).toEqual(["tiny-abc123", "https://github.com/someone/tiny-abc123.git"]);
-    for (const e of sprite.execs) expect([e.script, ...e.args].join(" ")).not.toContain(TOKEN);
+    expect(wired?.args).toEqual(["tiny-abc123", "git@github.com:someone/tiny-abc123.git"]);
+    for (const e of sprite.execs) expect([e.script, ...e.args, e.input ?? ""].join(" ")).not.toContain(GH_TOKEN);
   });
 
   it("still builds when GitHub fails: the repo is optional", async () => {
@@ -159,6 +166,7 @@ describe("a new cloud project", () => {
       createPrivateRepo: async () => {
         throw new Error("422");
       },
+      addDeployKey: async () => {},
     };
     const profile = { ...PROFILE, githubToken: { source: "keychain" as const, service: "github-token" } };
     const said: string[] = [];

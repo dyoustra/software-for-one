@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
 import { SMOKE_DIR } from "./archetype.js";
+import { NO_INTERFERENCE } from "./repo.js";
 
 /**
  * Marks of work left undone, in code a build agent just wrote. Strong signals
@@ -26,7 +27,7 @@ export interface GamingHit {
 }
 
 function git(cwd: string, args: string[]): string {
-  return execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 * 1024 * 1024 });
+  return execFileSync("git", [...NO_INTERFERENCE, ...args], { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], maxBuffer: 64 * 1024 * 1024 });
 }
 
 const excluded = (file: string): boolean =>

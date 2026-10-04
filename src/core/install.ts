@@ -198,6 +198,18 @@ function save(id: string, record: InstallRecord, env: Env): InstallRecord {
   return record;
 }
 
+/**
+ * Puts a changed project back where the person uses it, as it was last put
+ * there. An install that waited for hardware and was then done by \`sfo check\`
+ * had the hardware; without carrying that over, every later change would
+ * record the install as waiting again, with the tool still installed.
+ */
+export function reinstall(id: string, archetype: string, env: Env = process.env, install = installTool): InstallRecord {
+  const last = readInstall(id, env);
+  const wasDone = last !== null && !last.deferred && last.commands.some((c) => c.installed);
+  return install(id, archetype, env, exec, wasDone);
+}
+
 export function readInstall(id: string, env?: Env): InstallRecord | null {
   try {
     return JSON.parse(fs.readFileSync(artifactPath(id, INSTALL_FILE, env), "utf8")) as InstallRecord;

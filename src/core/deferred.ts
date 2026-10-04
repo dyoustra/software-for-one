@@ -42,3 +42,19 @@ export function deferredWork(id: string, env?: Env): Deferred {
 export function hasDeferred(d: Deferred): boolean {
   return d.seams.length + d.renders > 0 || d.install;
 }
+
+/**
+ * The commands \`sfo check\` would run for this deferred work, as the project
+ * declared them. Shown before running a project that was built somewhere
+ * else: they run here, with this person's rights.
+ */
+export function deferredCommands(id: string, env?: Env): string[] {
+  const work = deferredWork(id, env);
+  const contract = readContractFile(id, env);
+  if (!contract) return ["(no CONTRACTS.json: the built-in checks for this kind of project)"];
+  const out: string[] = [];
+  if (work.install && contract.install) out.push(contract.install.run.join(" "), ...contract.install.check.map((c) => c.join(" ")));
+  for (const r of contract.render) if (r.needs.length > 0 && work.renders > 0) out.push(r.run.join(" "));
+  for (const e of contract.smoke) if (work.seams.includes(e.name)) out.push(e.run.join(" "));
+  return out;
+}

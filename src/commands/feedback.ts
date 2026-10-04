@@ -3,7 +3,7 @@ import { addFeedback, readFeedback, runFeedback, type FeedbackOutcome } from "..
 import { startHeartbeat, HEARTBEAT_INTERVAL_MS } from "../core/orchestrator.js";
 import { detectArchetype, runVerify, checkSuiteBeforeLock, runPassedGate } from "../core/verify.js";
 import { resolveProjectAccess } from "../core/access.js";
-import { installTool } from "../core/install.js";
+import { reinstall } from "../core/install.js";
 import { captureRenders } from "../core/presentation.js";
 import { desktopNotifier, type Notifier } from "../core/notify.js";
 import { runnerFor } from "./run.js";
@@ -110,7 +110,7 @@ function applyWith(id: string, env: Env | undefined, deps: { runner?: Runner; he
           }
         },
         afterwards: () => {
-          installTool(id, archetype, env ?? process.env);
+          reinstall(id, archetype, env ?? process.env);
           captureRenders(id, archetype, env ?? process.env);
         },
       },

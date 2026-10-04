@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { commandNames, installTool, readInstall, type Exec } from "../../src/core/install.js";
+import { commandNames, installTool, readInstall, reinstall, type Exec } from "../../src/core/install.js";
 
 let env: Record<string, string>;
 let dir: string;
@@ -104,3 +104,33 @@ describe("installTool", () => {
   });
 });
 
+
+describe("reinstall, after a change", () => {
+  function lastInstall(record: object | null) {
+    fs.mkdirSync(path.join(dir, ".sfo"), { recursive: true });
+    if (record) fs.writeFileSync(path.join(dir, ".sfo", "INSTALL.json"), JSON.stringify(record));
+  }
+  function needsMetFor(): boolean | undefined {
+    let seen: boolean | undefined;
+    reinstall("p", "cli-python", env, (_id, _a, _e, _r, needsMet) => {
+      seen = needsMet;
+      return { installer: null, commands: [], at: "" };
+    });
+    return seen;
+  }
+
+  it("installs again when sfo check had installed it, since the hardware was there", () => {
+    lastInstall({ installer: "x", commands: [{ name: "soundscape --version", installed: true, detail: "" }], at: "" });
+    expect(needsMetFor()).toBe(true);
+  });
+
+  it("keeps waiting when the install was still waiting for hardware", () => {
+    lastInstall({ installer: "x", commands: [], at: "", deferred: ["hardware: a Mac"] });
+    expect(needsMetFor()).toBe(false);
+  });
+
+  it("assumes nothing when it was never installed", () => {
+    lastInstall(null);
+    expect(needsMetFor()).toBe(false);
+  });
+});
