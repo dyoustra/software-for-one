@@ -20,7 +20,7 @@ export function createApp(deps: ServerDeps): Hono<Env> {
 
   app.get("/health", (c) => c.json({ ok: true, version: deps.version, schema: schemaVersion(deps.db) }));
   authRoutes(app, deps);
-  credentialRoutes(app, deps.db, deps.vault, deps.github);
+  credentialRoutes(app, deps.db, deps.vault, deps.github, deps, deps.publicUrl);
 
   return app;
 }

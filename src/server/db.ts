@@ -82,6 +82,16 @@ const MIGRATIONS: string[] = [
   ALTER TABLE device_codes ADD COLUMN status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'denied'));
   ALTER TABLE device_codes ADD COLUMN token TEXT;
   `,
+  // A GitHub connection in progress: started by a signed-in device, finished
+  // in a browser that proves it is the same person; usable once.
+  `
+  CREATE TABLE github_flows (
+    flow_hash TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    expires_at TEXT NOT NULL,
+    used_at TEXT
+  );
+  `,
 ];
 
 export type Db = DatabaseSync;

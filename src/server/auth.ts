@@ -32,7 +32,7 @@ function userCode(): string {
 }
 
 /** The person behind an Apple sign-in, created on first sight, or null if they are not allowed in. */
-async function personFor(deps: AuthDeps, idToken: string): Promise<string | null> {
+export async function personFor(deps: Pick<AuthDeps, "db" | "verifyApple" | "allowed" | "log">, idToken: string): Promise<string | null> {
   const who = await deps.verifyApple(idToken);
   if (!deps.allowed.has(who.sub)) {
     // Apple's opaque id only: it is what the allowlist needs, and names no one.

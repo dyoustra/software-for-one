@@ -1,7 +1,8 @@
-import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import type { Context, Hono } from "hono";
+import { getCookie, setCookie } from "hono/cookie";
 import type { Db } from "./db.js";
-import { requireDevice, type Env } from "./auth.js";
+import { hashToken, personFor, requireDevice, type AuthDeps, type Env } from "./auth.js";
 
 export const KINDS = ["claude_token", "anthropic_api_key", "github_installation"] as const;
 export type CredentialKind = (typeof KINDS)[number];
@@ -49,26 +50,6 @@ export class Vault {
 
   remove(userId: string, kind: CredentialKind): boolean {
     return this.db.prepare("DELETE FROM credentials WHERE user_id = ? AND kind = ?").run(userId, kind).changes > 0;
-  }
-
-  /** A short-lived, unforgeable stand-in for who started a browser flow. */
-  sign(userId: string, ttlMs: number): string {
-    const payload = `${userId}.${Date.now() + ttlMs}`;
-    return `${Buffer.from(payload).toString("base64url")}.${this.mac(payload)}`;
-  }
-
-  verify(state: string): string | null {
-    const [encoded, mac] = state.split(".");
-    if (!encoded || !mac) return null;
-    const payload = Buffer.from(encoded, "base64url").toString("utf8");
-    const expected = Buffer.from(this.mac(payload));
-    if (expected.length !== Buffer.from(mac).length || !timingSafeEqual(expected, Buffer.from(mac))) return null;
-    const [userId, expires] = payload.split(".");
-    return Number(expires) > Date.now() ? userId : null;
-  }
-
-  private mac(payload: string): string {
-    return createHmac("sha256", this.key).update(`state|${payload}`).digest("base64url");
   }
 }
 
@@ -123,7 +104,14 @@ export async function githubToken(vault: Vault, gh: GitHubOAuth, userId: string)
   return fresh.accessToken;
 }
 
-export function credentialRoutes(app: Hono<Env>, db: Db, vault: Vault, gh: GitHubOAuth): void {
+export function credentialRoutes(
+  app: Hono<Env>,
+  db: Db,
+  vault: Vault,
+  gh: GitHubOAuth,
+  identity: Pick<AuthDeps, "db" | "verifyApple" | "allowed" | "log">,
+  publicUrl: string,
+): void {
   const auth = requireDevice(db);
 
   app.get("/credentials", auth, (c: Context<Env>) => c.json({ have: vault.kinds(c.get("userId")) }));
@@ -146,21 +134,77 @@ export function credentialRoutes(app: Hono<Env>, db: Db, vault: Vault, gh: GitHu
     return vault.remove(c.get("userId"), kind) ? c.json({ ok: true }) : c.json({ error: "nothing stored" }, 404);
   });
 
-  // The app or CLI asks for a link to open; GitHub sends the person back to
-  // /github/callback, and the signed state says who started it.
-  app.post("/github/connect", auth, (c: Context<Env>) => c.json({ url: gh.authorizeUrl(vault.sign(c.get("userId"), 10 * 60_000)) }));
+  // Connecting GitHub is started by a signed-in device and finished in a
+  // browser, and the browser must prove it is the same person: a link someone
+  // else started, sent to you, would otherwise link your GitHub account to
+  // theirs. So the browser signs in with Apple (and must match), gets a cookie
+  // for this flow, and GitHub's return must carry both; each flow works once.
+  const FLOW_COOKIE = "sfo_github_flow";
+  const flowFor = (flow: string) =>
+    db.prepare("SELECT user_id, expires_at, used_at FROM github_flows WHERE flow_hash = ?").get(hashToken(flow)) as
+      | { user_id: string; expires_at: string; used_at: string | null }
+      | undefined;
+  const live = (row: ReturnType<typeof flowFor>): row is NonNullable<ReturnType<typeof flowFor>> =>
+    !!row && !row.used_at && row.expires_at > new Date().toISOString();
+
+  app.post("/github/connect", auth, (c: Context<Env>) => {
+    const flow = randomBytes(32).toString("base64url");
+    db.prepare("INSERT INTO github_flows (flow_hash, user_id, expires_at) VALUES (?, ?, ?)").run(
+      hashToken(flow),
+      c.get("userId"),
+      new Date(Date.now() + 10 * 60_000).toISOString(),
+    );
+    return c.json({ url: `${publicUrl}/github/start?flow=${flow}` });
+  });
+
+  app.get("/github/start", (c) => c.html(startPage()));
+
+  app.post("/github/start", async (c) => {
+    const { flow, idToken } = (await c.req.json().catch(() => ({}))) as { flow?: string; idToken?: string };
+    const row = flowFor(flow ?? "");
+    if (!flow || !live(row)) return c.json({ error: "this link has expired or was used — start again from sfo" }, 400);
+    const userId = idToken ? await personFor(identity, idToken).catch(() => null) : null;
+    if (userId !== row.user_id) return c.json({ error: "this link was started by a different sfo account — start it from your own" }, 403);
+    setCookie(c, FLOW_COOKIE, flow, { httpOnly: true, secure: true, sameSite: "Lax", path: "/github", maxAge: 600 });
+    return c.json({ redirect: gh.authorizeUrl(flow) });
+  });
 
   app.get("/github/callback", async (c) => {
-    const userId = vault.verify(c.req.query("state") ?? "");
+    const flow = c.req.query("state") ?? "";
     const code = c.req.query("code");
-    if (!userId || !code) return c.html(page("This link has expired. Start again from sfo."), 400);
+    const row = flowFor(flow);
+    if (!code || !live(row) || getCookie(c, FLOW_COOKIE) !== flow) {
+      return c.html(page("This GitHub link was not started in this browser, or has expired. Start again from sfo."), 400);
+    }
+    db.prepare("UPDATE github_flows SET used_at = ? WHERE flow_hash = ?").run(new Date().toISOString(), hashToken(flow));
     try {
-      vault.put(userId, "github_installation", JSON.stringify(await gh.exchange({ code })));
+      vault.put(row.user_id, "github_installation", JSON.stringify(await gh.exchange({ code })));
     } catch (err) {
       return c.html(page(`GitHub did not connect: ${err instanceof Error ? err.message : String(err)}`), 502);
     }
     return c.html(page("GitHub is connected. You can close this page."));
   });
+}
+
+function startPage(): string {
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>sfo — connect GitHub</title>
+<style>body{font:16px -apple-system,system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#111;background:#fff}@media (prefers-color-scheme:dark){body{color:#eee;background:#111}}button{font:inherit;padding:.6rem 1rem}</style>
+<script src="https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js"></script></head>
+<body><h1>Connect GitHub</h1><p>Sign in with the Apple account you use for sfo, then approve sfo on GitHub.</p>
+<p><button id="go">Sign in with Apple and continue</button></p><p id="msg"></p>
+<script>
+AppleID.auth.init({clientId:"com.youstra.sfo.web",scope:"",redirectURI:location.origin+"/approve",usePopup:true});
+document.getElementById("go").onclick=async()=>{
+  const msg=document.getElementById("msg");
+  try{
+    const r=await AppleID.auth.signIn();
+    const res=await fetch("/github/start",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({flow:new URLSearchParams(location.search).get("flow"),idToken:r.authorization.id_token})});
+    const body=await res.json();
+    if(res.ok) location.href=body.redirect; else msg.textContent=body.error;
+  }catch(e){msg.textContent="Sign-in did not finish: "+(e.error||e.message||e);}
+};
+</script></body></html>`;
 }
 
 function page(message: string): string {

@@ -120,7 +120,7 @@ export async function connectGithub(env: Env = process.env, log: (m: string) => 
   const started = await authed("/github/connect", { method: "POST" }, env);
   if (started.status !== 200) throw new Error(String(started.body.error ?? `could not start (${started.status})`));
   const url = String(started.body.url);
-  log(`Approve sfo on GitHub: ${url} (opening it now)`);
+  log(`Sign in with Apple, then approve sfo on GitHub: ${url} (opening it now)`);
   if (process.platform === "darwin") spawnSync("open", [url], { stdio: "ignore" });
   const deadline = Date.now() + 10 * 60_000;
   while (Date.now() < deadline) {

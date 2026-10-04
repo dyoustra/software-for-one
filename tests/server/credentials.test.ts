@@ -21,7 +21,7 @@ function server() {
   const call = (method: string, path: string, token?: string, body?: unknown) =>
     app.request(path, { method, headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
   const signIn = async (who: string) => ((await (await call("POST", "/auth/apple", undefined, { idToken: who })).json()) as { token: string }).token;
-  return { db, vault, call, signIn, exchanged };
+  return { app, db, vault, call, signIn, exchanged };
 }
 
 describe("credentials", () => {
@@ -68,22 +68,53 @@ describe("credentials", () => {
 });
 
 describe("connecting GitHub", () => {
-  it("stores the account's tokens when GitHub sends the person back", async () => {
-    const s = server();
-    const token = await s.signIn("me");
+  /** Starts a connection as `who`, then finishes it in a browser signed in as `browser`. */
+  async function connect(s: ReturnType<typeof server>, who: string, browser: string) {
+    const token = await s.signIn(who);
     const { url } = (await (await s.call("POST", "/github/connect", token)).json()) as { url: string };
-    const state = new URL(url).searchParams.get("state") ?? "";
+    const flow = new URL(url).searchParams.get("flow") ?? "";
+    const start = await s.call("POST", "/github/start", undefined, { flow, idToken: browser });
+    const cookie = (start.headers.get("set-cookie") ?? "").split(";")[0];
+    return { token, flow, start, cookie };
+  }
+  const callback = (s: ReturnType<typeof server>, flow: string, cookie: string) =>
+    s.app.request(`/github/callback?code=abc&state=${encodeURIComponent(flow)}`, { headers: cookie ? { cookie } : {} });
 
-    const back = await s.call("GET", `/github/callback?code=abc&state=${encodeURIComponent(state)}`);
-    expect(await back.text()).toContain("GitHub is connected");
+  it("stores the account's tokens when the same person finishes in their browser", async () => {
+    const s = server();
+    const { token, flow, start, cookie } = await connect(s, "me", "me");
+    expect(start.status).toBe(200);
+    expect(cookie).toMatch(/^sfo_github_flow=/);
+    expect(await (await callback(s, flow, cookie)).text()).toContain("GitHub is connected");
     expect(await (await s.call("GET", "/credentials", token)).json()).toEqual({ have: ["github_installation"] });
   });
 
-  it("refuses a callback whose state it did not sign", async () => {
+  it("refuses a link someone else started, so your GitHub cannot be linked to their account", async () => {
+    const s = server();
+    const { start } = await connect(s, "you", "me");
+    expect(start.status).toBe(403);
+    expect(start.headers.get("set-cookie")).toBeNull();
+  });
+
+  it("refuses GitHub's return in a browser that did not start the flow", async () => {
+    const s = server();
+    const { flow } = await connect(s, "me", "me");
+    expect((await callback(s, flow, "")).status).toBe(400);
+    expect(s.exchanged).toEqual([]);
+  });
+
+  it("works once: a replayed return is refused", async () => {
+    const s = server();
+    const { flow, cookie } = await connect(s, "me", "me");
+    await callback(s, flow, cookie);
+    expect((await callback(s, flow, cookie)).status).toBe(400);
+    expect(s.exchanged).toHaveLength(1);
+  });
+
+  it("refuses a flow it never started", async () => {
     const s = server();
     await s.signIn("me");
-    const forged = `${Buffer.from("someone.99999999999999").toString("base64url")}.not-a-mac`;
-    expect((await s.call("GET", `/github/callback?code=abc&state=${forged}`)).status).toBe(400);
+    expect((await callback(s, "made-up", "sfo_github_flow=made-up")).status).toBe(400);
     expect(s.exchanged).toEqual([]);
   });
 
