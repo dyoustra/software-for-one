@@ -54,8 +54,13 @@ export async function login(env: Env = process.env, log: (m: string) => void = c
   if (process.platform === "darwin") spawnSync("open", [verifyUrl], { stdio: "ignore" });
 
   for (;;) {
-    const r = await request(`${base}/auth/device/${deviceCode}`);
-    if (r.status === 202) continue;
+    // A restart of the control plane (a deploy, a new secret) drops the held
+    // request; the code survives it, so ask again.
+    const r = await request(`${base}/auth/device/${deviceCode}`).catch(() => null);
+    if (r === null || r.status === 202 || r.status >= 500) {
+      if (r === null || r.status >= 500) await new Promise((done) => setTimeout(done, 2000));
+      continue;
+    }
     if (r.status !== 200) throw new Error(String(r.body.error ?? `sign-in failed (${r.status})`));
     storeControlToken(String(r.body.token));
     fs.mkdirSync(projectsRoot(env), { recursive: true });
