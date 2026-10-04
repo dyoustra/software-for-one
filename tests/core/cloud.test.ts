@@ -94,6 +94,8 @@ describe("a new cloud project", () => {
     expect(setup.args[0]).toBe("https://github.com/dyoustra/software-for-one.git");
     expect(JSON.parse(setup.args[1])).toMatchObject({ modelAccess: ["claude_subscription"], sfoPrefers: "claude_subscription" });
 
+    const capture = sprite.execs.find((e) => e.script.includes("sfo new"));
+    expect(capture?.args).toEqual(["an idea", "--local", "--no-run"]);
     expect(sprite.execs.some((e) => e.script.includes("sfo run") && e.args[0] === id)).toBe(true);
     expect(cloudEntry(id, env)).toMatchObject({ sprite: name, repo: null, summary: { status: "awaiting_human" } });
   });

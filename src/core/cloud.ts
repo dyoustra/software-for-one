@@ -186,7 +186,9 @@ export async function newCloudProject(
       if (deps.cli.exec(sprite, STORE_SECRET, [c.file], { input: c.value }).status !== 0) throw new Error(`could not store the credential on ${sprite}`);
     }
 
-    const captured = deps.cli.exec(sprite, `cd ~ && exec sfo new "$@"`, [idea, "--no-run", ...(opts.budget ? ["--budget", opts.budget] : [])]);
+    // On its own Sprite the project is local; without --local, sfo there would
+    // try to make yet another Sprite.
+    const captured = deps.cli.exec(sprite, `cd ~ && exec sfo new "$@"`, [idea, "--local", "--no-run", ...(opts.budget ? ["--budget", opts.budget] : [])]);
     triage = captured.stdout;
     log(captured.stdout.trim().replace(/not started — `sfo run [^`]+` when you are ready\n?/, ""));
     id = captured.stdout.match(/^captured: (\S+)/m)?.[1] ?? null;
