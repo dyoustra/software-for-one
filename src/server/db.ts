@@ -92,6 +92,13 @@ const MIGRATIONS: string[] = [
     used_at TEXT
   );
   `,
+  // PKCE: the verifier never leaves the server, and GitHub redeems a code
+  // only with the verifier for the challenge it was issued under. The return
+  // address is fixed when the flow starts, not taken from whoever finishes it.
+  `
+  ALTER TABLE github_flows ADD COLUMN code_verifier TEXT NOT NULL DEFAULT '';
+  ALTER TABLE github_flows ADD COLUMN redirect_uri TEXT NOT NULL DEFAULT '';
+  `,
 ];
 
 export type Db = DatabaseSync;

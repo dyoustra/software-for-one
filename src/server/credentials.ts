@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import type { Context, Hono } from "hono";
 import type { Db } from "./db.js";
 import { hashToken, requireDevice, type Env } from "./auth.js";
@@ -55,9 +55,9 @@ export class Vault {
 /** GitHub's side of connecting an account, injectable for tests. */
 export interface GitHubOAuth {
   clientId: string;
-  authorizeUrl(state: string, redirectUri: string): string;
-  /** Exchanges a returned code or a refresh token for fresh tokens. */
-  exchange(grant: { code: string; redirectUri: string } | { refreshToken: string }): Promise<GitHubTokens>;
+  authorizeUrl(state: string, redirectUri: string, codeChallenge: string): string;
+  /** Exchanges a returned code (with its PKCE verifier) or a refresh token for fresh tokens. */
+  exchange(grant: { code: string; redirectUri: string; codeVerifier: string } | { refreshToken: string }): Promise<GitHubTokens>;
   /** Whose account a token is for; throws if GitHub does not accept it. */
   whoami(accessToken: string): Promise<string>;
 }
@@ -72,12 +72,12 @@ export interface GitHubTokens {
 export function githubOAuth(clientId: string, clientSecret: string): GitHubOAuth {
   return {
     clientId,
-    authorizeUrl: (state, redirectUri) =>
-      `https://github.com/login/oauth/authorize?${new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, state })}`,
+    authorizeUrl: (state, redirectUri, codeChallenge) =>
+      `https://github.com/login/oauth/authorize?${new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, state, code_challenge: codeChallenge, code_challenge_method: "S256" })}`,
     async exchange(grant) {
       const body =
         "code" in grant
-          ? { client_id: clientId, client_secret: clientSecret, code: grant.code, redirect_uri: grant.redirectUri }
+          ? { client_id: clientId, client_secret: clientSecret, code: grant.code, redirect_uri: grant.redirectUri, code_verifier: grant.codeVerifier }
           : { client_id: clientId, client_secret: clientSecret, grant_type: "refresh_token", refresh_token: grant.refreshToken };
       const res = await fetch("https://github.com/login/oauth/access_token", {
         method: "POST",
@@ -148,8 +148,8 @@ export function credentialRoutes(
   // person finishing it, so a link someone else started, landing in your app,
   // is refused rather than linking your GitHub to their account. Single-use.
   const flowFor = (flow: string) =>
-    db.prepare("SELECT user_id, expires_at, used_at FROM github_flows WHERE flow_hash = ?").get(hashToken(flow)) as
-      | { user_id: string; expires_at: string; used_at: string | null }
+    db.prepare("SELECT user_id, expires_at, used_at, code_verifier, redirect_uri FROM github_flows WHERE flow_hash = ?").get(hashToken(flow)) as
+      | { user_id: string; expires_at: string; used_at: string | null; code_verifier: string; redirect_uri: string }
       | undefined;
 
   app.get("/github/app", (c) => c.json({ clientId: gh.clientId }));
@@ -158,24 +158,28 @@ export function credentialRoutes(
     const { redirectUri } = (await c.req.json().catch(() => ({}))) as { redirectUri?: string };
     if (!redirectUri || !redirects.includes(redirectUri)) return c.json({ error: `redirectUri must be one of: ${redirects.join(", ")}` }, 400);
     const flow = randomBytes(32).toString("base64url");
-    db.prepare("INSERT INTO github_flows (flow_hash, user_id, expires_at) VALUES (?, ?, ?)").run(
+    const verifier = randomBytes(32).toString("base64url");
+    db.prepare("INSERT INTO github_flows (flow_hash, user_id, expires_at, code_verifier, redirect_uri) VALUES (?, ?, ?, ?, ?)").run(
       hashToken(flow),
       c.get("userId"),
       new Date(Date.now() + 10 * 60_000).toISOString(),
+      verifier,
+      redirectUri,
     );
-    return c.json({ url: gh.authorizeUrl(flow, redirectUri) });
+    const challenge = createHash("sha256").update(verifier).digest("base64url");
+    return c.json({ url: gh.authorizeUrl(flow, redirectUri, challenge) });
   });
 
   app.post("/github/complete", auth, async (c: Context<Env>) => {
-    const { code, state, redirectUri } = (await c.req.json().catch(() => ({}))) as { code?: string; state?: string; redirectUri?: string };
+    const { code, state } = (await c.req.json().catch(() => ({}))) as { code?: string; state?: string };
     const row = flowFor(state ?? "");
-    if (!code || !redirectUri || !row || row.used_at || row.expires_at < new Date().toISOString()) {
+    if (!code || !row || row.used_at || row.expires_at < new Date().toISOString()) {
       return c.json({ error: "this GitHub connection has expired or was used — start again" }, 400);
     }
     if (row.user_id !== c.get("userId")) return c.json({ error: "this GitHub connection was started by a different sfo account" }, 403);
     db.prepare("UPDATE github_flows SET used_at = ? WHERE flow_hash = ?").run(new Date().toISOString(), hashToken(state ?? ""));
     try {
-      vault.put(row.user_id, "github_installation", JSON.stringify(await gh.exchange({ code, redirectUri })));
+      vault.put(row.user_id, "github_installation", JSON.stringify(await gh.exchange({ code, redirectUri: row.redirect_uri, codeVerifier: row.code_verifier })));
     } catch (err) {
       return c.json({ error: `GitHub did not connect: ${err instanceof Error ? err.message : String(err)}` }, 502);
     }

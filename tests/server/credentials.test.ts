@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { openDb } from "../../src/server/db.js";
 import { createApp } from "../../src/server/app.js";
 import { Vault, githubToken, type GitHubOAuth, type GitHubTokens } from "../../src/server/credentials.js";
@@ -13,7 +13,7 @@ function server() {
   const exchanged: unknown[] = [];
   const github: GitHubOAuth = {
     clientId: "Iv-test",
-    authorizeUrl: (state, redirect) => `https://github.test/authorize?state=${state}&redirect_uri=${redirect}`,
+    authorizeUrl: (state, redirect, challenge) => `https://github.test/authorize?state=${state}&redirect_uri=${redirect}&code_challenge=${challenge}`,
     exchange: async (grant) => {
       exchanged.push(grant);
       return { accessToken: "code" in grant ? "ghu_first" : "ghu_fresh", refreshToken: "ghr_x", expiresAt: new Date(Date.now() + 8 * 3600_000).toISOString() };
@@ -82,7 +82,7 @@ describe("connecting GitHub from the app", () => {
     return { token, state };
   }
   const finish = (s: ReturnType<typeof server>, token: string, state: string) =>
-    s.call("POST", "/github/complete", token, { code: "abc", state, redirectUri: APP_RETURN });
+    s.call("POST", "/github/complete", token, { code: "abc", state });
 
   it("stores the account's tokens when the person who started it finishes it", async () => {
     const s = server();
@@ -97,6 +97,17 @@ describe("connecting GitHub from the app", () => {
     const mine = await s.signIn("me");
     expect((await finish(s, mine, theirs.state)).status).toBe(403);
     expect(s.exchanged).toEqual([]);
+  });
+
+  it("redeems the code with the PKCE verifier behind the challenge GitHub was given, and its own return address", async () => {
+    const s = server();
+    const token = await s.signIn("me");
+    const url = new URL(((await (await s.call("POST", "/github/connect", token, { redirectUri: APP_RETURN })).json()) as { url: string }).url);
+    await s.call("POST", "/github/complete", token, { code: "abc", state: url.searchParams.get("state"), redirectUri: "https://evil.test" });
+
+    const [grant] = s.exchanged as { codeVerifier: string; redirectUri: string }[];
+    expect(createHash("sha256").update(grant.codeVerifier).digest("base64url")).toBe(url.searchParams.get("code_challenge"));
+    expect(grant.redirectUri).toBe(APP_RETURN);
   });
 
   it("works once: a replay is refused", async () => {

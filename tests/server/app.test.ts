@@ -14,7 +14,7 @@ describe("control plane", () => {
     const app = createApp({ db, version: "abc1234", verifyApple: async () => ({ sub: "x" }), allowed: new Set(), publicUrl: "http://t", vault: new Vault(db, randomBytes(32).toString("base64")), github, githubRedirects: [] });
     const res = await app.request("/health");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, version: "abc1234", schema: 3 });
+    expect(await res.json()).toEqual({ ok: true, version: "abc1234", schema: 4 });
   });
 
   it("brings a database up to date once, and leaves it there on reopen", () => {
@@ -24,7 +24,7 @@ describe("control plane", () => {
     db.close();
 
     const again = openDb(file);
-    expect(schemaVersion(again)).toBe(3);
+    expect(schemaVersion(again)).toBe(4);
     expect(again.prepare("SELECT count(*) AS n FROM users").get()).toEqual({ n: 1 });
   });
 
