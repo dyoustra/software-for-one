@@ -305,7 +305,10 @@ export function pullProject(id: string, deps: CloudDeps): string {
   deps.cli.pull(entry.sprite, remote, local);
   const dir = projectDir(id, deps.env);
   if (fs.existsSync(path.join(dir, ".git"))) {
-    execFileSync("git", [...NO_INTERFERENCE, "pull", "-q", "--ff-only", local, "HEAD"], { cwd: dir, stdio: "pipe" });
+    // A copy, not a fork: whatever an install or check left in it gives way
+    // to the original. Check results were sent back before this.
+    execFileSync("git", [...NO_INTERFERENCE, "fetch", "-q", local, "HEAD"], { cwd: dir, stdio: "pipe" });
+    execFileSync("git", [...NO_INTERFERENCE, "reset", "-q", "--hard", "FETCH_HEAD"], { cwd: dir, stdio: "pipe" });
   } else {
     execFileSync("git", [...NO_INTERFERENCE, "clone", "-q", local, dir], { stdio: "pipe" });
   }

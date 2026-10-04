@@ -238,6 +238,41 @@ export function buildProgram(): Command {
     }));
 
   program
+    .command("install")
+    .description("Put a project where you use it, on this machine (a cloud project is pulled here first)")
+    .argument("<id>", "project id")
+    .option("--yes", "for a cloud project, run its install here without showing it first")
+    .action(guarded(async (id: string, opts: { yes?: boolean }) => {
+      const { installTool, declaredInstall } = await import("./core/install.js");
+      const { detectArchetype } = await import("./core/verify.js");
+      const { cloudEntry, pullProject } = await import("./core/cloud.js");
+      if (cloudEntry(id)) {
+        const { spriteCli } = await import("./core/sprite.js");
+        console.log(`pulled to ${pullProject(id, { cli: spriteCli })}`);
+        // Written on a Sprite, about to run here as the person: shown first,
+        // and nothing that cannot be shown.
+        const commands = declaredInstall(id);
+        if (!commands) throw new Error(`${id} declares no install in CONTRACTS.json, so what installing it would run here cannot be shown — not installing`);
+        if (!opts.yes) {
+          const { shown } = await import("./core/deferred.js");
+          console.log(`these run on this machine, as you — and installing runs the project's own build, written on the Sprite:\n${commands.map((c) => `  ${shown(c)}`).join("\n")}`);
+          const readline = await import("node:readline/promises");
+          const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+          const answer = await rl.question("run them? [y/N] ");
+          rl.close();
+          if (!/^y(es)?$/i.test(answer.trim())) {
+            console.log("not installed");
+            return;
+          }
+        }
+      }
+      // Asked for here, by the person at this machine: whatever the install waits for is here.
+      const record = installTool(id, detectArchetype(id), process.env, undefined, true);
+      for (const c of record.commands) console.log(`${c.installed ? "installed" : "not installed"} — ${c.name}: ${c.detail}`);
+      if (record.commands.some((c) => !c.installed)) process.exitCode = 1;
+    }));
+
+  program
     .command("pull")
     .description("Copy a cloud project to this machine (its Sprite stays the original)")
     .argument("<id>", "project id")

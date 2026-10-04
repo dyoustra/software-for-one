@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { commandNames, installTool, readInstall, reinstall, type Exec } from "../../src/core/install.js";
+import { commandNames, installTool, readInstall, reinstall, declaredInstall, type Exec } from "../../src/core/install.js";
 
 let env: Record<string, string>;
 let dir: string;
@@ -132,5 +132,19 @@ describe("reinstall, after a change", () => {
   it("assumes nothing when it was never installed", () => {
     lastInstall(null);
     expect(needsMetFor()).toBe(false);
+  });
+});
+
+describe("declaredInstall", () => {
+  it("is the install and each check, as the project declared them", () => {
+    fs.writeFileSync(
+      path.join(dir, ".sfo", "CONTRACTS.json"),
+      JSON.stringify({ gate: [{ name: "t", run: ["true"] }], install: { run: ["uv", "tool", "install", "."], check: [["moon", "--help"]] } }),
+    );
+    expect(declaredInstall("p", env)).toEqual([["uv", "tool", "install", "."], ["moon", "--help"]]);
+  });
+
+  it("is nothing to show without a contract", () => {
+    expect(declaredInstall("p", env)).toBeNull();
   });
 });

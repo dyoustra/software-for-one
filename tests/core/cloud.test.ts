@@ -250,6 +250,8 @@ describe("a cloud project afterwards", () => {
 
     fs.writeFileSync(path.join(origin, "a.txt"), "2\n");
     git("commit", "-q", "-am", "two");
+    // Something here changed the copy, as an install rewrites INSTALL.json.
+    fs.writeFileSync(path.join(dir, "a.txt"), "changed here\n");
     pullProject("tiny-abc123", { cli: sprite, env });
     expect(fs.readFileSync(path.join(dir, "a.txt"), "utf8")).toBe("2\n");
   });

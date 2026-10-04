@@ -210,6 +210,16 @@ export function reinstall(id: string, archetype: string, env: Env = process.env,
   return install(id, archetype, env, exec, wasDone);
 }
 
+/**
+ * What installing this project runs, as it declared it: the install, then
+ * each check. Null without a contract, when the built-in installer would run
+ * instead and could not be shown as a command.
+ */
+export function declaredInstall(id: string, env?: Env): string[][] | null {
+  const install = readContractFile(id, env)?.install;
+  return install ? [install.run, ...install.check] : null;
+}
+
 export function readInstall(id: string, env?: Env): InstallRecord | null {
   try {
     return JSON.parse(fs.readFileSync(artifactPath(id, INSTALL_FILE, env), "utf8")) as InstallRecord;
