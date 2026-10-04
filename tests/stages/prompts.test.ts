@@ -49,6 +49,14 @@ describe("prompts and the artifacts they are graded on", () => {
     expect(loadPrompt("deliver")).toContain(VERIFY_FILE);
   });
 
+  it("lets clarify carry a renamed command into every file that names it", () => {
+    // A command renamed at clarify left PRESENTATION.json on the old name,
+    // and the render ran a command that did not exist.
+    const clarify = loadPrompt("clarify");
+    expect(clarify).toContain(".sfo/PRESENTATION.json");
+    expect(clarify).toMatch(/Write only[^\n]*\.sfo\/PRESENTATION\.json/);
+  });
+
   it("hands spec the access snapshot, and tells clarify not to re-ask it", () => {
     // Left to a spec that might or might not raise it, the first project built
     // a tool its owner had no credential to run.

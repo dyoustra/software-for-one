@@ -1,4 +1,4 @@
-Read `.sfo/SPEC.md`, `.sfo/CRITERIA.jsonl`, `.sfo/QUESTIONS.json`, and `.sfo/ANSWERS.json`.
+Read `.sfo/SPEC.md`, `.sfo/CRITERIA.jsonl`, `.sfo/PRESENTATION.json`, `.sfo/SERVICES.jsonl`, `.sfo/QUESTIONS.json`, and `.sfo/ANSWERS.json`.
 
 `.sfo/ANSWERS.json` is `{"answers":[{"questionId":"Q-001","answer":"<free text>"}]}`. Each `answer` is the raw text the human typed, not an option key. "A, but with a `--materialize` flag" is not "A" — the qualification is a real requirement and must survive into `.sfo/SPEC.md` or `.sfo/CRITERIA.jsonl`. An answer that names no option at all is still an answer; take it at its word.
 
@@ -30,6 +30,13 @@ record nothing and add a follow-up question asking where it is stored instead.
 An answer of "skip" records nothing: that seam's smoke check reports it was
 skipped for want of a credential.
 
+**An answer reaches everything that names what it changed.** The spec stage
+wrote several files about one design; when an answer renames the command,
+changes a flag, an output or a service, update every file that mentions it —
+`.sfo/SPEC.md`, `.sfo/CRITERIA.jsonl`, the `invocations` in
+`.sfo/PRESENTATION.json`, `.sfo/SERVICES.jsonl` — keeping each file's format.
+A later stage that reads the old name builds or checks the wrong thing.
+
 If an answer changes what is being built or with what, rewrite `.sfo/ARCHETYPE.json` to match — `{"archetype":"<what it is, in words>","why":"..."}` — and the **Stack** section of `.sfo/SPEC.md`. If it is unchanged, leave the file alone.
 
 If an answer opens a genuinely new ambiguity that would change the architecture, add a question to `.sfo/QUESTIONS.json` and stop. Never add one about how the person pays for model calls — `.sfo/ACCESS.json` already answers that. Otherwise leave `.sfo/QUESTIONS.json` alone.
@@ -46,4 +53,4 @@ When you do add one, rewrite the whole file: carry **every** existing question t
 
 Every one of these files is schema-validated when read. A malformed line fails the next stage rather than being skipped, so emit strict JSON: double quotes, no trailing commas, no comments, and one complete object per line in the `.jsonl` files.
 
-Write only `.sfo/SPEC.md`, `.sfo/ARCHETYPE.json`, `.sfo/CRITERIA.jsonl`, `.sfo/QUESTIONS.json`, `.sfo/CREDENTIALS.json`, and `.sfo/DECISIONS.jsonl`. Never write `.sfo/ANSWERS.json`.
+Write only `.sfo/SPEC.md`, `.sfo/ARCHETYPE.json`, `.sfo/CRITERIA.jsonl`, `.sfo/PRESENTATION.json`, `.sfo/SERVICES.jsonl`, `.sfo/QUESTIONS.json`, `.sfo/CREDENTIALS.json`, and `.sfo/DECISIONS.jsonl`. Never write `.sfo/ANSWERS.json`.
