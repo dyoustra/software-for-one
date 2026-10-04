@@ -112,66 +112,20 @@ export async function offerCredentials(env: Env = process.env, log: (m: string) 
     const r = await authed(`/credentials/${path}`, { method: "PUT", body: JSON.stringify({ value }) }, env);
     log(r.status === 200 ? `uploaded ${describeKeyRef(ref)}` : `not uploaded: ${String(r.body.error)}`);
   }
-  if (!have.includes("github_installation")) log("GitHub is not connected — `sfo connect github` to give cloud projects a repo");
-}
-
-type Fetch = typeof fetch;
-
-/**
- * GitHub's device flow: a code to approve at github.com/login/device, after
- * which GitHub hands the tokens to this process. No redirect comes back
- * through anything, so there is nothing to forge or to bind.
- */
-export async function githubDeviceFlow(
-  clientId: string,
-  deps: { fetch?: Fetch; log?: (m: string) => void; open?: (url: string) => void; wait?: (ms: number) => Promise<void> } = {},
-): Promise<{ accessToken: string; refreshToken: string | null; expiresAt: string | null }> {
-  const f = deps.fetch ?? fetch;
-  const wait = deps.wait ?? ((ms) => new Promise<void>((done) => setTimeout(done, ms)));
-  const post = async (url: string, body: Record<string, string>) =>
-    (await (await f(url, { method: "POST", headers: { accept: "application/json", "content-type": "application/json" }, body: JSON.stringify(body) })).json()) as Record<string, unknown>;
-
-  const started = await post("https://github.com/login/device/code", { client_id: clientId });
-  if (typeof started.device_code !== "string") throw new Error(`GitHub would not start a device sign-in: ${String(started.error_description ?? started.error ?? "unknown")}`);
-  (deps.log ?? console.log)(`Your GitHub code: ${String(started.user_code)}\nEnter it at ${String(started.verification_uri)} (opening it now)`);
-  (deps.open ?? ((url) => process.platform === "darwin" && spawnSync("open", [url], { stdio: "ignore" })))(String(started.verification_uri));
-
-  // GitHub says how often it may be asked, and asks for slower when it is too often.
-  let intervalMs = Number(started.interval ?? 5) * 1000;
-  const deadline = Date.now() + Number(started.expires_in ?? 900) * 1000;
-  while (Date.now() < deadline) {
-    await wait(intervalMs);
-    const r = await post("https://github.com/login/oauth/access_token", {
-      client_id: clientId,
-      device_code: started.device_code,
-      grant_type: "urn:ietf:params:oauth:grant-type:device_code",
-    });
-    if (typeof r.access_token === "string") {
-      return {
-        accessToken: r.access_token,
-        refreshToken: typeof r.refresh_token === "string" ? r.refresh_token : null,
-        expiresAt: typeof r.expires_in === "number" ? new Date(Date.now() + r.expires_in * 1000).toISOString() : null,
-      };
+  // A GitHub App cannot create repositories in a personal account, so cloud
+  // projects' repos are made with the person's own fine-grained token.
+  const gh = profile.githubToken ? readKey(profile.githubToken, env) : null;
+  if (profile.githubToken && gh) {
+    const question = have.includes("github_installation")
+      ? `Use your GitHub token (${describeKeyRef(profile.githubToken)}) for cloud projects' repos, replacing the GitHub connection stored now?`
+      : `Upload your GitHub token (${describeKeyRef(profile.githubToken)}), stored encrypted, so cloud projects get a private repo?`;
+    if (await confirm(question)) {
+      const r = await authed("/credentials/github", { method: "PUT", body: JSON.stringify({ accessToken: gh }) }, env);
+      log(r.status === 200 ? `GitHub: repos will be made as ${String(r.body.login)}` : `not uploaded: ${String(r.body.error)}`);
     }
-    if (r.error === "authorization_pending") continue;
-    if (r.error === "slow_down") {
-      intervalMs = typeof r.interval === "number" ? r.interval * 1000 : intervalMs + 5000;
-      continue;
-    }
-    throw new Error(r.error === "access_denied" ? "you declined on GitHub" : `GitHub sign-in failed: ${String(r.error_description ?? r.error)}`);
+  } else if (!have.includes("github_installation")) {
+    log("no GitHub token — cloud projects get no repo. To give them one: a fine-grained token with Administration read/write, `sfo profile set github keychain:<service>`, then `sfo login`");
   }
-  throw new Error("the GitHub code expired — `sfo connect github` again");
-}
-
-/** Connects GitHub with its device flow, then hands the tokens to the control plane, which checks them. */
-export async function connectGithub(env: Env = process.env, log: (m: string) => void = console.log): Promise<void> {
-  const app = await request(`${controlUrl(env)}/github/app`);
-  const clientId = String(app.body.clientId ?? "");
-  if (!clientId) throw new Error("the control plane has no GitHub App configured");
-  const tokens = await githubDeviceFlow(clientId, { log });
-  const stored = await authed("/credentials/github", { method: "PUT", body: JSON.stringify(tokens) }, env);
-  if (stored.status !== 200) throw new Error(String(stored.body.error ?? `could not store it (${stored.status})`));
-  log(`GitHub is connected as ${String(stored.body.login)}`);
 }
 
 export async function logout(env: Env = process.env): Promise<string> {
