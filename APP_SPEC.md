@@ -87,8 +87,15 @@ delivery, and sweep anything stopped over 48 hours. A Machine's root
 filesystem is reset on restart, so that plan also needed a Fly Volume per run.
 **Fly Sprites do all of that themselves**, and are what sfo uses:
 
-- **One Sprite per project**, created at `sfo new`. Its disk persists across
-  every pause: no volume to attach, no stop or start to call.
+- **One Sprite per project**, created at `sfo new`, never shared. This is
+  what makes VM confinement safe: with permissions bypassed, an agent on a
+  shared Sprite could rewrite every other project on it, and restoring a
+  checkpoint would rewind them all. Its disk persists across every pause: no
+  volume to attach, no stop or start to call.
+- **Setting one up** takes about a minute: Claude Code from its native
+  installer, sfo cloned from GitHub `main` and built, the person's model
+  credential and (optionally) GitHub token from their Keychain, and
+  `SFO_CONFINEMENT=vm`.
 - **It pauses itself** about 30 seconds after the last activity it
   recognises, and wakes on the next request. A stage's outgoing model calls
   are not activity it recognises, so **every sfo heartbeat renews a
@@ -99,13 +106,17 @@ filesystem is reset on restart, so that plan also needed a Fly Volume per run.
   Running, it bills the CPU actually used, which suits builds that spend most
   of their time waiting on a model.
 - **After every stage the worker pushes to the project's private GitHub
-  repo.** The Sprite's disk is the working copy; the repo is the backup, and
-  what later runs and `sfo install` clone.
+  repo**, when the person has given sfo a GitHub token; without one, a project
+  builds with no repo. The Sprite's disk is the working copy; the repo is the
+  backup, and what later runs and `sfo install` clone.
 - **Checkpoints** (about a second, copy-on-write) are available for rolling
   a project back; sfo does not use them yet.
 - **After delivery** the Sprite stays, paused, for `feedback`, `retry` and
-  `check`, and is destroyed after 30 idle days (a sweep by the control
-  plane). Its repo remains.
+  `check`, **until the person runs `sfo destroy`**; nothing deletes one
+  automatically. Kept, a finished project costs about $0.016 a month (0.8 GB
+  measured, at $0.02 per GB-month cold); there is no per-Sprite fee, and paused
+  Sprites do not count toward the running limit. Its repo remains after
+  destroy.
 
 Builds take **hours**, not the design doc's 5–25 minutes: ut-tower's build
 was about 6 hours of compute across its stages.
@@ -113,7 +124,7 @@ was about 6 hours of compute across its stages.
 ## 4. sfo changes
 
 1. **Where a run executes becomes an interface.**
-   `RunHost { start(project, command), stop, resume, destroy, status }`, with
+   `RunHost { start(project, command), stop }`, with
    `LocalHost` (today's detached process on the Mac) and `SpriteHost`. The CLI's
    `sfo run`, `retry`, `feedback` and `check` go through it.
 2. **The worker reports events.** State changes, parks, questions, renders
@@ -196,7 +207,7 @@ Quotas and billing for other users, teams and shared projects, a
 2. **Sprites by hand:** sfo on a Sprite with VM confinement and
    `holdAwake`, one real project run from the CLI to delivery. Then
    **`SpriteHost`**: create and set up a Sprite per project, push per stage,
-   wake on answer, and the 30-day sweep.
+   wake on answer, `sfo destroy`.
 3. **The control plane:** API, Postgres, Sign in with Apple, worker events,
    Expo push.
 4. **The app:** projects, project detail, capture, questions with drafts,
