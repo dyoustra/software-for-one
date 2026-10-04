@@ -57,7 +57,8 @@ export function deferredCommands(id: string, env?: Env): string[] {
   if (!contract) throw new Error(`${id} declares no CONTRACTS.json, so what its checks would run here cannot be shown — not running them`);
   const out: string[][] = [];
   if (work.install && contract.install) out.push(contract.install.run, ...contract.install.check);
-  for (const r of contract.render) if (r.needs.length > 0 && work.renders > 0) out.push(r.run);
+  // Capturing the deferred renders captures every declared one.
+  if (work.renders > 0) for (const r of contract.render) out.push(r.run);
   for (const e of contract.smoke) if (work.seams.includes(e.name)) out.push(e.run);
   return out.map(shown);
 }

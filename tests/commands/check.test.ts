@@ -97,6 +97,24 @@ describe("sfo check", () => {
     expect(deferredCommands("p", env)).toEqual([shown([process.execPath, "-e", BOARD])]);
   });
 
+  it("runs no repair agent and no gate when told to run only what was shown", async () => {
+    const FAILS = `require('fs').appendFileSync(process.env.SFO_SMOKE_RESULTS, JSON.stringify({seam:'x',check:'shows the forecast',level:'failed',detail:'blank panel'})+'\\n')`;
+    write(
+      ".sfo/CONTRACTS.json",
+      JSON.stringify({
+        gate: [{ name: "host tests", run: ["true"], files: "tests/{slice}*" }],
+        smoke: [{ name: "magtag", run: [process.execPath, "-e", FAILS], needs: ["hardware: Adafruit MagTag on USB"] }],
+      }),
+    );
+    const runner = {
+      runStage: async () => {
+        throw new Error("a repair agent ran");
+      },
+    };
+    const out = await runChecks("p", env, { ...quiet, ready: true, noRepair: true, runner });
+    expect(out).toMatch(/magtag — shows the forecast: failed/);
+  });
+
   it("refuses to describe a project with no contract, rather than show less than will run", () => {
     fs.rmSync(path.join(dir, ".sfo", "CONTRACTS.json"));
     expect(() => deferredCommands("p", env)).toThrow(/declares no CONTRACTS\.json/);

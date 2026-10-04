@@ -31,6 +31,12 @@ export async function runChecks(
     log?: (m: string) => void;
     /** The person already said everything listed is here (`--ready`): ask nothing. */
     ready?: boolean;
+    /**
+     * Run only the declared checks: no repair agent, and no gate, if one
+     * fails. For a project built elsewhere, whose commands the person approved
+     * one by one, nothing else may run.
+     */
+    noRepair?: boolean;
   } = {},
 ): Promise<string> {
   const log = deps.log ?? console.log;
@@ -85,6 +91,7 @@ export async function runChecks(
         },
         onlySeams: work.seams,
         needsMet: true,
+        noRepair: deps.noRepair,
       });
       const latest = latestSmoke(readSmokeRecords(id, env)).filter((r) => work.seams.includes(r.seam));
       lines.push(...latest.map((r) => `${r.seam} — ${r.check}: ${r.level}${r.level === "completed" ? "" : ` (${r.detail.split("\n")[0]})`}`));
