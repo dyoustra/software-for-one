@@ -7,7 +7,7 @@ import { stream } from "hono/streaming";
 import type { Db } from "./db.js";
 import { requireDevice, type Env } from "./auth.js";
 import { githubToken, type GitHubOAuth, type Vault } from "./credentials.js";
-import { provisionProject, type GitHub, type SpriteCredential } from "../core/provision.js";
+import { PROJECT_ID, provisionProject, type GitHub, type SpriteCredential } from "../core/provision.js";
 import { DEFAULT_PREFERENCES } from "../core/preferences.js";
 import type { SpriteCli } from "../core/sprite.js";
 
@@ -58,6 +58,7 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
 
   /** The project, if it is this person's; anyone else's is indistinguishable from none. */
   const owned = (c: Context<Env>): ProjectRow | null => {
+    if (!PROJECT_ID.test(c.req.param("id") ?? "")) return null;
     const row = db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ? AND status != 'destroyed'").get(c.req.param("id") ?? "", c.get("userId")) as ProjectRow | undefined;
     return row ?? null;
   };
@@ -198,7 +199,6 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
   // write a one-time challenge onto it with their own access, which the server
   // then reads back. A Sprite already behind a project cannot be claimed again.
   const challenges = new Map<string, { userId: string; id: string; sprite: string; expires: number }>();
-  const PROJECT_ID = /^[a-z0-9]+(-[a-z0-9]+)*$/;
   const SPRITE = /^sfo-[0-9a-f]{8}$/;
   const PROOF = (id: string) => `~/.sfo/${id}/.sfo/import-proof`;
 

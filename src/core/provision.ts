@@ -1,6 +1,9 @@
 import { randomBytes } from "node:crypto";
 import type { SpriteCli } from "./sprite.js";
 
+/** What sfo names a project: a lowercase slug ending in a hex suffix. */
+export const PROJECT_ID = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
 /** Where every new Sprite gets sfo from. A Sprite runs what is on main. */
 export const SFO_REPO = "https://github.com/dyoustra/software-for-one.git";
 
@@ -126,6 +129,9 @@ export async function provisionProject(
     log(captured.stdout.trim().replace(/not started — `sfo run [^`]+` when you are ready\n?/, ""));
     id = captured.stdout.match(/^captured: (\S+)/m)?.[1] ?? null;
     if (captured.status !== 0 || !id) throw new Error("capture failed on the Sprite");
+    // The id comes from the Sprite, and becomes a directory and a path here:
+    // anything but sfo's own shape (a slug and a hex suffix) is refused.
+    if (!PROJECT_ID.test(id)) throw new Error(`the Sprite reported a project id sfo would never make: ${JSON.stringify(id.slice(0, 80))}`);
   } catch (err) {
     // Nothing on it is worth keeping yet, and nothing else would ever remove it.
     await cli.destroy(sprite);

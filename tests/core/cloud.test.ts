@@ -142,6 +142,13 @@ describe("a new cloud project", () => {
     expect(readCloud(env)).toEqual({});
   });
 
+  it("refuses a project id the Sprite reports that sfo would never make, and cleans up", async () => {
+    const sprite = new FakeSprite(capturing("../../etc"));
+    await expect(newCloudProject("an idea", { run: true }, PROFILE, { cli: sprite, env, readKeyWith: keys, log: quiet })).rejects.toThrow(/would never make/);
+    expect(sprite.destroyed).toEqual(sprite.created);
+    expect(readCloud(env)).toEqual({});
+  });
+
   it("does not start what triage called out of scope", async () => {
     const sprite = new FakeSprite(capturing("big-abc123", "awaiting_human", "triage: out of scope — it could build this instead: less"));
     await newCloudProject("an idea", { run: true }, PROFILE, { cli: sprite, env, readKeyWith: keys, log: quiet });
