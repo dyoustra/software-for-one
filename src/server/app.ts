@@ -9,6 +9,7 @@ export interface ServerDeps extends Omit<AuthDeps, "db"> {
   version: string;
   vault: Vault;
   github: GitHubOAuth;
+  githubRedirects: string[];
 }
 
 /**
@@ -20,7 +21,7 @@ export function createApp(deps: ServerDeps): Hono<Env> {
 
   app.get("/health", (c) => c.json({ ok: true, version: deps.version, schema: schemaVersion(deps.db) }));
   authRoutes(app, deps);
-  credentialRoutes(app, deps.db, deps.vault, deps.github, deps, deps.publicUrl);
+  credentialRoutes(app, deps.db, deps.vault, deps.github, deps.githubRedirects);
 
   return app;
 }

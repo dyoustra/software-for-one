@@ -16,7 +16,9 @@ const publicUrl = process.env.SFO_PUBLIC_URL ?? "https://sfo-control.fly.dev";
 const app = createApp({
   db,
   vault: new Vault(db, required("SFO_CREDENTIALS_KEY")),
-  github: githubOAuth(process.env.GITHUB_CLIENT_ID ?? "Iv23liGwo5OqMwme5fVq", required("GITHUB_CLIENT_SECRET"), `${publicUrl}/github/callback`),
+  github: githubOAuth(process.env.GITHUB_CLIENT_ID ?? "Iv23liGwo5OqMwme5fVq", required("GITHUB_CLIENT_SECRET")),
+  // The app's return addresses, added as the app gains them (and on the GitHub App).
+  githubRedirects: (process.env.SFO_GITHUB_REDIRECTS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   version: process.env.SFO_VERSION ?? "dev",
   verifyApple,
   allowed: new Set((process.env.SFO_ALLOWED_APPLE_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean)),

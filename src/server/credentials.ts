@@ -1,8 +1,7 @@
 import { createCipheriv, createDecipheriv, randomBytes } from "node:crypto";
 import type { Context, Hono } from "hono";
-import { getCookie, setCookie } from "hono/cookie";
 import type { Db } from "./db.js";
-import { hashToken, personFor, requireDevice, type AuthDeps, type Env } from "./auth.js";
+import { hashToken, requireDevice, type Env } from "./auth.js";
 
 export const KINDS = ["claude_token", "anthropic_api_key", "github_installation"] as const;
 export type CredentialKind = (typeof KINDS)[number];
@@ -55,9 +54,12 @@ export class Vault {
 
 /** GitHub's side of connecting an account, injectable for tests. */
 export interface GitHubOAuth {
-  authorizeUrl(state: string): string;
-  /** Exchanges a callback code or a refresh token for fresh tokens. */
-  exchange(grant: { code: string } | { refreshToken: string }): Promise<GitHubTokens>;
+  clientId: string;
+  authorizeUrl(state: string, redirectUri: string): string;
+  /** Exchanges a returned code or a refresh token for fresh tokens. */
+  exchange(grant: { code: string; redirectUri: string } | { refreshToken: string }): Promise<GitHubTokens>;
+  /** Whose account a token is for; throws if GitHub does not accept it. */
+  whoami(accessToken: string): Promise<string>;
 }
 
 export interface GitHubTokens {
@@ -67,14 +69,15 @@ export interface GitHubTokens {
   expiresAt: string | null;
 }
 
-export function githubOAuth(clientId: string, clientSecret: string, callbackUrl: string): GitHubOAuth {
+export function githubOAuth(clientId: string, clientSecret: string): GitHubOAuth {
   return {
-    authorizeUrl: (state) =>
-      `https://github.com/login/oauth/authorize?${new URLSearchParams({ client_id: clientId, redirect_uri: callbackUrl, state })}`,
+    clientId,
+    authorizeUrl: (state, redirectUri) =>
+      `https://github.com/login/oauth/authorize?${new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, state })}`,
     async exchange(grant) {
       const body =
         "code" in grant
-          ? { client_id: clientId, client_secret: clientSecret, code: grant.code, redirect_uri: callbackUrl }
+          ? { client_id: clientId, client_secret: clientSecret, code: grant.code, redirect_uri: grant.redirectUri }
           : { client_id: clientId, client_secret: clientSecret, grant_type: "refresh_token", refresh_token: grant.refreshToken };
       const res = await fetch("https://github.com/login/oauth/access_token", {
         method: "POST",
@@ -88,6 +91,11 @@ export function githubOAuth(clientId: string, clientSecret: string, callbackUrl:
         refreshToken: json.refresh_token ?? null,
         expiresAt: json.expires_in ? new Date(Date.now() + json.expires_in * 1000).toISOString() : null,
       };
+    },
+    async whoami(accessToken) {
+      const res = await fetch("https://api.github.com/user", { headers: { authorization: `Bearer ${accessToken}`, accept: "application/vnd.github+json" } });
+      if (!res.ok) throw new Error(`GitHub did not accept the token (${res.status})`);
+      return ((await res.json()) as { login: string }).login;
     },
   };
 }
@@ -109,8 +117,8 @@ export function credentialRoutes(
   db: Db,
   vault: Vault,
   gh: GitHubOAuth,
-  identity: Pick<AuthDeps, "db" | "verifyApple" | "allowed" | "log">,
-  publicUrl: string,
+  /** Where GitHub may send someone back: the app's own addresses, as registered on the GitHub App. */
+  redirects: string[],
 ): void {
   const auth = requireDevice(db);
 
@@ -134,82 +142,55 @@ export function credentialRoutes(
     return vault.remove(c.get("userId"), kind) ? c.json({ ok: true }) : c.json({ error: "nothing stored" }, 404);
   });
 
-  // Connecting GitHub is started by a signed-in device and finished in a
-  // browser, and the browser must prove it is the same person: a link someone
-  // else started, sent to you, would otherwise link your GitHub account to
-  // theirs. So the browser signs in with Apple (and must match), gets a cookie
-  // for this flow, and GitHub's return must carry both; each flow works once.
-  const FLOW_COOKIE = "sfo_github_flow";
+  // Whichever signed-in client starts a GitHub connection finishes it, over
+  // its own session: the app opens GitHub inside itself, GitHub returns to the
+  // app, and the app hands the code back here. The flow must belong to the
+  // person finishing it, so a link someone else started, landing in your app,
+  // is refused rather than linking your GitHub to their account. Single-use.
   const flowFor = (flow: string) =>
     db.prepare("SELECT user_id, expires_at, used_at FROM github_flows WHERE flow_hash = ?").get(hashToken(flow)) as
       | { user_id: string; expires_at: string; used_at: string | null }
       | undefined;
-  const live = (row: ReturnType<typeof flowFor>): row is NonNullable<ReturnType<typeof flowFor>> =>
-    !!row && !row.used_at && row.expires_at > new Date().toISOString();
 
-  app.post("/github/connect", auth, (c: Context<Env>) => {
+  app.get("/github/app", (c) => c.json({ clientId: gh.clientId }));
+
+  app.post("/github/connect", auth, async (c: Context<Env>) => {
+    const { redirectUri } = (await c.req.json().catch(() => ({}))) as { redirectUri?: string };
+    if (!redirectUri || !redirects.includes(redirectUri)) return c.json({ error: `redirectUri must be one of: ${redirects.join(", ")}` }, 400);
     const flow = randomBytes(32).toString("base64url");
     db.prepare("INSERT INTO github_flows (flow_hash, user_id, expires_at) VALUES (?, ?, ?)").run(
       hashToken(flow),
       c.get("userId"),
       new Date(Date.now() + 10 * 60_000).toISOString(),
     );
-    return c.json({ url: `${publicUrl}/github/start?flow=${flow}` });
+    return c.json({ url: gh.authorizeUrl(flow, redirectUri) });
   });
 
-  app.get("/github/start", (c) => c.html(startPage()));
-
-  app.post("/github/start", async (c) => {
-    const { flow, idToken } = (await c.req.json().catch(() => ({}))) as { flow?: string; idToken?: string };
-    const row = flowFor(flow ?? "");
-    if (!flow || !live(row)) return c.json({ error: "this link has expired or was used — start again from sfo" }, 400);
-    const userId = idToken ? await personFor(identity, idToken).catch(() => null) : null;
-    if (userId !== row.user_id) return c.json({ error: "this link was started by a different sfo account — start it from your own" }, 403);
-    setCookie(c, FLOW_COOKIE, flow, { httpOnly: true, secure: true, sameSite: "Lax", path: "/github", maxAge: 600 });
-    return c.json({ redirect: gh.authorizeUrl(flow) });
-  });
-
-  app.get("/github/callback", async (c) => {
-    const flow = c.req.query("state") ?? "";
-    const code = c.req.query("code");
-    const row = flowFor(flow);
-    if (!code || !live(row) || getCookie(c, FLOW_COOKIE) !== flow) {
-      return c.html(page("This GitHub link was not started in this browser, or has expired. Start again from sfo."), 400);
+  app.post("/github/complete", auth, async (c: Context<Env>) => {
+    const { code, state, redirectUri } = (await c.req.json().catch(() => ({}))) as { code?: string; state?: string; redirectUri?: string };
+    const row = flowFor(state ?? "");
+    if (!code || !redirectUri || !row || row.used_at || row.expires_at < new Date().toISOString()) {
+      return c.json({ error: "this GitHub connection has expired or was used — start again" }, 400);
     }
-    db.prepare("UPDATE github_flows SET used_at = ? WHERE flow_hash = ?").run(new Date().toISOString(), hashToken(flow));
+    if (row.user_id !== c.get("userId")) return c.json({ error: "this GitHub connection was started by a different sfo account" }, 403);
+    db.prepare("UPDATE github_flows SET used_at = ? WHERE flow_hash = ?").run(new Date().toISOString(), hashToken(state ?? ""));
     try {
-      vault.put(row.user_id, "github_installation", JSON.stringify(await gh.exchange({ code })));
+      vault.put(row.user_id, "github_installation", JSON.stringify(await gh.exchange({ code, redirectUri })));
     } catch (err) {
-      return c.html(page(`GitHub did not connect: ${err instanceof Error ? err.message : String(err)}`), 502);
+      return c.json({ error: `GitHub did not connect: ${err instanceof Error ? err.message : String(err)}` }, 502);
     }
-    return c.html(page("GitHub is connected. You can close this page."));
+    return c.json({ ok: true });
+  });
+
+  // The CLI runs GitHub's device flow itself and brings the tokens here; they
+  // are kept only once GitHub confirms they work.
+  app.put("/credentials/github", auth, async (c: Context<Env>) => {
+    const tokens = (await c.req.json().catch(() => ({}))) as Partial<GitHubTokens>;
+    if (typeof tokens.accessToken !== "string") return c.json({ error: "accessToken is required" }, 400);
+    const login = await gh.whoami(tokens.accessToken).catch(() => null);
+    if (!login) return c.json({ error: "GitHub did not accept that token" }, 400);
+    vault.put(c.get("userId"), "github_installation", JSON.stringify({ accessToken: tokens.accessToken, refreshToken: tokens.refreshToken ?? null, expiresAt: tokens.expiresAt ?? null }));
+    return c.json({ ok: true, login });
   });
 }
 
-function startPage(): string {
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>sfo — connect GitHub</title>
-<style>body{font:16px -apple-system,system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#111;background:#fff}@media (prefers-color-scheme:dark){body{color:#eee;background:#111}}button{font:inherit;padding:.6rem 1rem}</style>
-<script src="https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js"></script></head>
-<body><h1>Connect GitHub</h1><p>Sign in with the Apple account you use for sfo, then approve sfo on GitHub.</p>
-<p><button id="go">Sign in with Apple and continue</button></p><p id="msg"></p>
-<script>
-AppleID.auth.init({clientId:"com.youstra.sfo.web",scope:"",redirectURI:location.origin+"/approve",usePopup:true});
-document.getElementById("go").onclick=async()=>{
-  const msg=document.getElementById("msg");
-  try{
-    const r=await AppleID.auth.signIn();
-    const res=await fetch("/github/start",{method:"POST",headers:{"content-type":"application/json"},
-      body:JSON.stringify({flow:new URLSearchParams(location.search).get("flow"),idToken:r.authorization.id_token})});
-    const body=await res.json();
-    if(res.ok) location.href=body.redirect; else msg.textContent=body.error;
-  }catch(e){msg.textContent="Sign-in did not finish: "+(e.error||e.message||e);}
-};
-</script></body></html>`;
-}
-
-function page(message: string): string {
-  const safe = message.replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch] ?? ch);
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>sfo</title>
-<style>body{font:16px -apple-system,system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#111;background:#fff}@media (prefers-color-scheme:dark){body{color:#eee;background:#111}}</style>
-</head><body><p>${safe}</p></body></html>`;
-}

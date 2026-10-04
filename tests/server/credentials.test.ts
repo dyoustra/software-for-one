@@ -5,19 +5,25 @@ import { createApp } from "../../src/server/app.js";
 import { Vault, githubToken, type GitHubOAuth, type GitHubTokens } from "../../src/server/credentials.js";
 
 const CLAUDE = "sk-ant-oat01-secret-value";
+const APP_RETURN = "sfo://github";
 
 function server() {
   const db = openDb(":memory:");
   const vault = new Vault(db, randomBytes(32).toString("base64"));
   const exchanged: unknown[] = [];
   const github: GitHubOAuth = {
-    authorizeUrl: (state) => `https://github.test/authorize?state=${state}`,
+    clientId: "Iv-test",
+    authorizeUrl: (state, redirect) => `https://github.test/authorize?state=${state}&redirect_uri=${redirect}`,
     exchange: async (grant) => {
       exchanged.push(grant);
       return { accessToken: "code" in grant ? "ghu_first" : "ghu_fresh", refreshToken: "ghr_x", expiresAt: new Date(Date.now() + 8 * 3600_000).toISOString() };
     },
+    whoami: async (t) => {
+      if (t !== "ghu_real") throw new Error("401");
+      return "dyoustra";
+    },
   };
-  const app = createApp({ db, version: "t", verifyApple: async (t) => ({ sub: t }), allowed: new Set(["me", "you"]), publicUrl: "https://cp.test", holdMs: 50, vault, github });
+  const app = createApp({ db, version: "t", verifyApple: async (t) => ({ sub: t }), allowed: new Set(["me", "you"]), publicUrl: "https://cp.test", holdMs: 50, vault, github, githubRedirects: [APP_RETURN] });
   const call = (method: string, path: string, token?: string, body?: unknown) =>
     app.request(path, { method, headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
   const signIn = async (who: string) => ((await (await call("POST", "/auth/apple", undefined, { idToken: who })).json()) as { token: string }).token;
@@ -67,63 +73,72 @@ describe("credentials", () => {
   });
 });
 
-describe("connecting GitHub", () => {
-  /** Starts a connection as `who`, then finishes it in a browser signed in as `browser`. */
-  async function connect(s: ReturnType<typeof server>, who: string, browser: string) {
+describe("connecting GitHub from the app", () => {
+  /** The app starts a connection; GitHub returns `state` to it, and it finishes. */
+  async function start(s: ReturnType<typeof server>, who: string) {
     const token = await s.signIn(who);
-    const { url } = (await (await s.call("POST", "/github/connect", token)).json()) as { url: string };
-    const flow = new URL(url).searchParams.get("flow") ?? "";
-    const start = await s.call("POST", "/github/start", undefined, { flow, idToken: browser });
-    const cookie = (start.headers.get("set-cookie") ?? "").split(";")[0];
-    return { token, flow, start, cookie };
+    const res = await s.call("POST", "/github/connect", token, { redirectUri: APP_RETURN });
+    const state = new URL(((await res.json()) as { url: string }).url).searchParams.get("state") ?? "";
+    return { token, state };
   }
-  const callback = (s: ReturnType<typeof server>, flow: string, cookie: string) =>
-    s.app.request(`/github/callback?code=abc&state=${encodeURIComponent(flow)}`, { headers: cookie ? { cookie } : {} });
+  const finish = (s: ReturnType<typeof server>, token: string, state: string) =>
+    s.call("POST", "/github/complete", token, { code: "abc", state, redirectUri: APP_RETURN });
 
-  it("stores the account's tokens when the same person finishes in their browser", async () => {
+  it("stores the account's tokens when the person who started it finishes it", async () => {
     const s = server();
-    const { token, flow, start, cookie } = await connect(s, "me", "me");
-    expect(start.status).toBe(200);
-    expect(cookie).toMatch(/^sfo_github_flow=/);
-    expect(await (await callback(s, flow, cookie)).text()).toContain("GitHub is connected");
+    const { token, state } = await start(s, "me");
+    expect((await finish(s, token, state)).status).toBe(200);
     expect(await (await s.call("GET", "/credentials", token)).json()).toEqual({ have: ["github_installation"] });
   });
 
-  it("refuses a link someone else started, so your GitHub cannot be linked to their account", async () => {
+  it("refuses a connection someone else started, so your GitHub cannot be linked to their account", async () => {
     const s = server();
-    const { start } = await connect(s, "you", "me");
-    expect(start.status).toBe(403);
-    expect(start.headers.get("set-cookie")).toBeNull();
-  });
-
-  it("refuses GitHub's return in a browser that did not start the flow", async () => {
-    const s = server();
-    const { flow } = await connect(s, "me", "me");
-    expect((await callback(s, flow, "")).status).toBe(400);
+    const theirs = await start(s, "you");
+    const mine = await s.signIn("me");
+    expect((await finish(s, mine, theirs.state)).status).toBe(403);
     expect(s.exchanged).toEqual([]);
   });
 
-  it("works once: a replayed return is refused", async () => {
+  it("works once: a replay is refused", async () => {
     const s = server();
-    const { flow, cookie } = await connect(s, "me", "me");
-    await callback(s, flow, cookie);
-    expect((await callback(s, flow, cookie)).status).toBe(400);
+    const { token, state } = await start(s, "me");
+    await finish(s, token, state);
+    expect((await finish(s, token, state)).status).toBe(400);
     expect(s.exchanged).toHaveLength(1);
   });
 
-  it("refuses a flow it never started", async () => {
+  it("only sends GitHub's answer back to the app's own addresses", async () => {
     const s = server();
-    await s.signIn("me");
-    expect((await callback(s, "made-up", "sfo_github_flow=made-up")).status).toBe(400);
-    expect(s.exchanged).toEqual([]);
+    const token = await s.signIn("me");
+    expect((await s.call("POST", "/github/connect", token, { redirectUri: "https://evil.test/steal" })).status).toBe(400);
   });
 
+  it("refuses a connection it never started", async () => {
+    const s = server();
+    const token = await s.signIn("me");
+    expect((await finish(s, token, "made-up")).status).toBe(400);
+  });
+});
+
+describe("connecting GitHub from the CLI", () => {
+  it("keeps device-flow tokens only once GitHub confirms them", async () => {
+    const s = server();
+    const token = await s.signIn("me");
+    expect((await s.call("PUT", "/credentials/github", token, { accessToken: "ghu_fake" })).status).toBe(400);
+    const ok = await s.call("PUT", "/credentials/github", token, { accessToken: "ghu_real", refreshToken: "ghr_1", expiresAt: null });
+    expect(await ok.json()).toEqual({ ok: true, login: "dyoustra" });
+  });
+
+  it("tells the CLI which GitHub App to sign in to", async () => {
+    const s = server();
+    expect(await (await s.call("GET", "/github/app")).json()).toEqual({ clientId: "Iv-test" });
+  });
   it("refreshes a token about to expire before handing it out", async () => {
     const s = server();
     s.db.prepare("INSERT INTO users (id, apple_sub, created_at) VALUES ('u', 'me', 't')").run();
     const expiring: GitHubTokens = { accessToken: "ghu_old", refreshToken: "ghr_x", expiresAt: new Date(Date.now() + 60_000).toISOString() };
     s.vault.put("u", "github_installation", JSON.stringify(expiring));
-    const gh: GitHubOAuth = { authorizeUrl: () => "", exchange: async () => ({ accessToken: "ghu_fresh", refreshToken: "ghr_y", expiresAt: null }) };
+    const gh: GitHubOAuth = { clientId: "x", authorizeUrl: () => "", whoami: async () => "x", exchange: async () => ({ accessToken: "ghu_fresh", refreshToken: "ghr_y", expiresAt: null }) };
 
     expect(await githubToken(s.vault, gh, "u")).toBe("ghu_fresh");
     expect(JSON.parse(s.vault.get("u", "github_installation") ?? "{}").accessToken).toBe("ghu_fresh");
