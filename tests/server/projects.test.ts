@@ -116,6 +116,15 @@ describe("a project", () => {
     expect(fb?.args).toEqual(["feedback", "moon-abc123", "make it $(rm -rf ~) smaller"]);
   });
 
+  it("builds past research's verdict only when asked to", async () => {
+    const s = server();
+    const { token } = await withProject(s);
+    await s.call("POST", "/projects/moon-abc123/run", token, {});
+    expect(s.fake.calls.at(-1)?.args).toEqual(["run", "moon-abc123"]);
+    await s.call("POST", "/projects/moon-abc123/run", token, { anyway: true });
+    expect(s.fake.calls.at(-1)?.args).toEqual(["run", "moon-abc123", "--anyway"]);
+  });
+
   it("reports only what cannot change it", async () => {
     const s = server();
     const { token } = await withProject(s);

@@ -166,7 +166,9 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
     app.post(`/projects/:id/${action}`, auth, async (c: Context<Env>) => {
       const row = owned(c);
       if (!row) return c.json({ error: "no such project" }, 404);
-      const r = await sfo(row, [action, row.id]);
+      // Building past research's verdict is the person's call, made here explicitly.
+      const { anyway } = (await c.req.json().catch(() => ({}))) as { anyway?: boolean };
+      const r = await sfo(row, [action, row.id, ...(action === "run" && anyway === true ? ["--anyway"] : [])]);
       return r.status === 0 ? c.json({ ok: true, message: r.stdout.trim() }) : c.json({ error: r.stdout.trim() }, 400);
     });
   }

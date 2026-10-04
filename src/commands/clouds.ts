@@ -203,7 +203,7 @@ export function controlPlane(at: { url: string; token: string }, env: Env = proc
         case "run":
         case "retry":
         case "stop":
-          return say(await api(`/projects/${id}/${command}`, { method: "POST" }));
+          return say(await api(`/projects/${id}/${command}`, { method: "POST", body: JSON.stringify({ anyway: command === "run" && rest.includes("--anyway") }) }));
         case "answer":
           return answer(id, argv);
         case "feedback":
