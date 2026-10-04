@@ -75,6 +75,13 @@ const MIGRATIONS: string[] = [
     PRIMARY KEY (project_id, kind, path)
   );
   `,
+  // A device code carries its device's name to the approval page, and the
+  // token waits on it until the CLI collects it (then the row is deleted).
+  `
+  ALTER TABLE device_codes ADD COLUMN device_name TEXT NOT NULL DEFAULT 'a device';
+  ALTER TABLE device_codes ADD COLUMN status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'denied'));
+  ALTER TABLE device_codes ADD COLUMN token TEXT;
+  `,
 ];
 
 export type Db = DatabaseSync;

@@ -249,6 +249,22 @@ export function buildProgram(): Command {
     }));
 
   program
+    .command("login")
+    .description("Sign this machine in to the control plane, approving it where you are signed in with Apple")
+    .action(guarded(async () => {
+      const { login } = await import("./commands/login.js");
+      await login();
+    }));
+
+  program
+    .command("logout")
+    .description("Sign this machine out of the control plane and revoke its token")
+    .action(guarded(async () => {
+      const { logout } = await import("./commands/login.js");
+      console.log(await logout());
+    }));
+
+  program
     .command("install")
     .description("Put a project where you use it, on this machine (a cloud project is pulled here first)")
     .argument("<id>", "project id")

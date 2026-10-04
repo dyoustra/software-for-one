@@ -1,10 +1,17 @@
 import { serve } from "@hono/node-server";
 import { openDb } from "./db.js";
 import { createApp } from "./app.js";
+import { verifyApple } from "./apple.js";
 
 const port = Number(process.env.PORT ?? 8080);
 const db = openDb(process.env.SFO_DB ?? "/data/sfo.db");
-const app = createApp({ db, version: process.env.SFO_VERSION ?? "dev" });
+const app = createApp({
+  db,
+  version: process.env.SFO_VERSION ?? "dev",
+  verifyApple,
+  allowed: new Set((process.env.SFO_ALLOWED_APPLE_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean)),
+  publicUrl: process.env.SFO_PUBLIC_URL ?? "https://sfo-control.fly.dev",
+});
 
 const server = serve({ fetch: app.fetch, port }, () => console.log(`sfo control plane on :${port}`));
 

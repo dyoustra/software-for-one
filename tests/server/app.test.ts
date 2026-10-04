@@ -7,10 +7,10 @@ import { createApp } from "../../src/server/app.js";
 
 describe("control plane", () => {
   it("answers its health check with what is running", async () => {
-    const app = createApp({ db: openDb(":memory:"), version: "abc1234" });
+    const app = createApp({ db: openDb(":memory:"), version: "abc1234", verifyApple: async () => ({ sub: "x" }), allowed: new Set(), publicUrl: "http://t" });
     const res = await app.request("/health");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, version: "abc1234", schema: 1 });
+    expect(await res.json()).toEqual({ ok: true, version: "abc1234", schema: 2 });
   });
 
   it("brings a database up to date once, and leaves it there on reopen", () => {
@@ -20,7 +20,7 @@ describe("control plane", () => {
     db.close();
 
     const again = openDb(file);
-    expect(schemaVersion(again)).toBe(1);
+    expect(schemaVersion(again)).toBe(2);
     expect(again.prepare("SELECT count(*) AS n FROM users").get()).toEqual({ n: 1 });
   });
 
