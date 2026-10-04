@@ -150,6 +150,7 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
     const saved = await sfo(row, ["answer", row.id, "--from", "-"], JSON.stringify(answers));
     if (saved.status !== 0) return c.json({ error: saved.stdout.trim() }, 400);
     const ran = await sfo(row, ["run", row.id]);
+    await refresh(row);
     return c.json({ ok: true, resumed: ran.status === 0, message: ran.stdout.trim() });
   });
 
@@ -159,6 +160,7 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
     const { text } = (await c.req.json().catch(() => ({}))) as { text?: string };
     if (!text?.trim()) return c.json({ error: "text is required" }, 400);
     const r = await sfo(row, ["feedback", row.id, text]);
+    await refresh(row);
     return r.status === 0 ? c.json({ ok: true, message: r.stdout.trim() }) : c.json({ error: r.stdout.trim() }, 400);
   });
 
@@ -169,6 +171,8 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
       // Building past research's verdict is the person's call, made here explicitly.
       const { anyway } = (await c.req.json().catch(() => ({}))) as { anyway?: boolean };
       const r = await sfo(row, [action, row.id, ...(action === "run" && anyway === true ? ["--anyway"] : [])]);
+      // What changed is what status shows next: it only re-asks running projects.
+      await refresh(row);
       return r.status === 0 ? c.json({ ok: true, message: r.stdout.trim() }) : c.json({ error: r.stdout.trim() }, 400);
     });
   }
