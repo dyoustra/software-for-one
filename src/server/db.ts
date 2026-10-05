@@ -108,6 +108,11 @@ const MIGRATIONS: string[] = [
     updated_at TEXT NOT NULL
   );
   `,
+  // A push token belongs to the signed-in device that registered it: revoked
+  // or signed out, the device is told nothing more.
+  `
+  ALTER TABLE push_tokens ADD COLUMN device_id TEXT REFERENCES devices(id);
+  `,
 ];
 
 export type Db = DatabaseSync;

@@ -38,7 +38,9 @@ export function workerRoutes(app: Hono<Env>, deps: { db: Db; sprites: SpriteCli;
   app.post("/push-tokens", requireDevice(db), async (c: Context<Env>) => {
     const { token } = (await c.req.json().catch(() => ({}))) as { token?: string };
     if (!token || !/^ExponentPushToken\[[\w-]+\]$/.test(token)) return c.json({ error: "not an Expo push token" }, 400);
-    db.prepare("INSERT OR IGNORE INTO push_tokens (user_id, expo_token, created_at) VALUES (?, ?, ?)").run(c.get("userId"), token, new Date().toISOString());
+    // One phone, one account at a time: registering moves the token here.
+    db.prepare("DELETE FROM push_tokens WHERE expo_token = ?").run(token);
+    db.prepare("INSERT INTO push_tokens (user_id, expo_token, created_at, device_id) VALUES (?, ?, ?, ?)").run(c.get("userId"), token, new Date().toISOString(), c.get("deviceId"));
     return c.json({ ok: true });
   });
 
@@ -68,7 +70,12 @@ export function workerRoutes(app: Hono<Env>, deps: { db: Db; sprites: SpriteCli;
       }
     }
 
-    const tokens = (db.prepare("SELECT expo_token FROM push_tokens WHERE user_id = ?").all(row.user_id) as { expo_token: string }[]).map((t) => t.expo_token);
+    // Only to phones still signed in to this account.
+    const tokens = (
+      db
+        .prepare("SELECT t.expo_token FROM push_tokens t JOIN devices d ON d.id = t.device_id WHERE t.user_id = ? AND d.user_id = t.user_id AND d.revoked_at IS NULL")
+        .all(row.user_id) as { expo_token: string }[]
+    ).map((t) => t.expo_token);
     await deps
       .push(tokens.map((to) => ({ to, title: title.replace(/^sfo: /, "").slice(0, 100), body: message.slice(0, 1000), data: { projectId: row.id }, sound: "default" as const })))
       .catch((err) => log(`push for ${row.id} not sent: ${err instanceof Error ? err.message : String(err)}`));

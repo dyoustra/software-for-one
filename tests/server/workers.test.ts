@@ -26,7 +26,7 @@ function server() {
   };
   const pushed: PushMessage[] = [];
   const oauth: GitHubOAuth = { clientId: "x", authorizeUrl: () => "", whoami: async () => "x", exchange: async () => ({ accessToken: "", refreshToken: null, expiresAt: null }) };
-  const app = createApp({ db, version: "t", verifyApple: async (t) => ({ sub: t }), allowed: new Set(["me"]), publicUrl: "https://cp.test", vault, github: oauth, githubRedirects: [], sprites, push: async (m) => void pushed.push(...m) });
+  const app = createApp({ db, version: "t", verifyApple: async (t) => ({ sub: t }), allowed: new Set(["me", "you"]), publicUrl: "https://cp.test", vault, github: oauth, githubRedirects: [], sprites, push: async (m) => void pushed.push(...m) });
   const call = (method: string, path: string, token?: string, body?: unknown) =>
     app.request(path, { method, headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
   return { db, calls, pushed, call };
@@ -77,6 +77,26 @@ describe("a project's Sprite", () => {
 });
 
 describe("push tokens", () => {
+  it("stop receiving once their device is signed out", async () => {
+    const s = server();
+    const { token, worker } = await projectWithWorker(s);
+    await s.call("POST", "/push-tokens", token, { token: PUSH });
+    await s.call("DELETE", "/devices/current", token);
+    await s.call("POST", "/workers/events", worker, { title: "sfo: Moon", message: "done" });
+    expect(s.pushed).toEqual([]);
+  });
+
+  it("belong to one account at a time: registering moves them", async () => {
+    const s = server();
+    const { token, worker } = await projectWithWorker(s);
+    await s.call("POST", "/push-tokens", token, { token: PUSH });
+    const other = ((await (await s.call("POST", "/auth/apple", undefined, { idToken: "you" })).json()) as { token: string }).token;
+    expect((await s.call("POST", "/push-tokens", other, { token: PUSH })).status).toBe(200);
+    await s.call("POST", "/workers/events", worker, { title: "sfo: Moon", message: "done" });
+    expect(s.pushed).toEqual([]);
+  });
+
+
   it("are only Expo's", async () => {
     const s = server();
     const token = ((await (await s.call("POST", "/auth/apple", undefined, { idToken: "me" })).json()) as { token: string }).token;
