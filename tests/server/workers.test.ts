@@ -86,14 +86,14 @@ describe("push tokens", () => {
     expect(s.pushed).toEqual([]);
   });
 
-  it("belong to one account at a time: registering moves them", async () => {
+  it("cannot be taken by another account that learns them", async () => {
     const s = server();
     const { token, worker } = await projectWithWorker(s);
     await s.call("POST", "/push-tokens", token, { token: PUSH });
     const other = ((await (await s.call("POST", "/auth/apple", undefined, { idToken: "you" })).json()) as { token: string }).token;
-    expect((await s.call("POST", "/push-tokens", other, { token: PUSH })).status).toBe(200);
+    await s.call("POST", "/push-tokens", other, { token: PUSH });
     await s.call("POST", "/workers/events", worker, { title: "sfo: Moon", message: "done" });
-    expect(s.pushed).toEqual([]);
+    expect(s.pushed.map((m) => m.to)).toEqual([PUSH]);
   });
 
 

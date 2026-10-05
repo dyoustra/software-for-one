@@ -38,9 +38,14 @@ export function workerRoutes(app: Hono<Env>, deps: { db: Db; sprites: SpriteCli;
   app.post("/push-tokens", requireDevice(db), async (c: Context<Env>) => {
     const { token } = (await c.req.json().catch(() => ({}))) as { token?: string };
     if (!token || !/^ExponentPushToken\[[\w-]+\]$/.test(token)) return c.json({ error: "not an Expo push token" }, 400);
-    // One phone, one account at a time: registering moves the token here.
-    db.prepare("DELETE FROM push_tokens WHERE expo_token = ?").run(token);
-    db.prepare("INSERT INTO push_tokens (user_id, expo_token, created_at, device_id) VALUES (?, ?, ?, ?)").run(c.get("userId"), token, new Date().toISOString(), c.get("deviceId"));
+    // Kept for this account and the device that registered it. Registering
+    // never takes a token from another account: knowing someone's token must
+    // not let anyone silence their notifications. A phone that changes
+    // accounts signs out first, which revokes its device, and pushes go only
+    // to devices still signed in.
+    db.prepare(
+      "INSERT INTO push_tokens (user_id, expo_token, created_at, device_id) VALUES (?, ?, ?, ?) ON CONFLICT (user_id, expo_token) DO UPDATE SET device_id = excluded.device_id",
+    ).run(c.get("userId"), token, new Date().toISOString(), c.get("deviceId"));
     return c.json({ ok: true });
   });
 
