@@ -20,6 +20,16 @@ export async function registerForPush(api: <T>(path: string, init?: { method?: s
   const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
   if (!projectId) return;
   const { data } = await Notifications.getExpoPushTokenAsync({ projectId });
+  // The control plane pushes a one-time code to this token and uses it only
+  // once the code comes back: proof this phone receives on it.
+  const received = Notifications.addNotificationReceivedListener((n) => {
+    const code = n.request.content.data?.sfoVerify;
+    if (typeof code === 'string') {
+      api('/push-tokens/verify', { method: 'POST', body: { token: data, code } }).catch(() => undefined);
+      received.remove();
+    }
+  });
+  setTimeout(() => received.remove(), 60_000);
   await api('/push-tokens', { method: 'POST', body: { token: data } });
 }
 

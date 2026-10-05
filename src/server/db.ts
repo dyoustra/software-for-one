@@ -113,6 +113,12 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE push_tokens ADD COLUMN device_id TEXT REFERENCES devices(id);
   `,
+  // A token is used only once the phone proves it receives on it: the server
+  // pushes a one-time code to it, and the app sends the code back.
+  `
+  ALTER TABLE push_tokens ADD COLUMN code_hash TEXT;
+  ALTER TABLE push_tokens ADD COLUMN verified_at TEXT;
+  `,
 ];
 
 export type Db = DatabaseSync;

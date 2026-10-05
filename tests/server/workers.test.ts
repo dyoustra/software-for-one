@@ -32,6 +32,14 @@ function server() {
   return { db, calls, pushed, call };
 }
 
+/** Registers a push token, and proves it as the phone would: by echoing the code pushed to it. */
+async function registerVerified(s: ReturnType<typeof server>, device: string, token = PUSH) {
+  await s.call("POST", "/push-tokens", device, { token });
+  const sent = s.pushed.pop();
+  const code = sent && "sfoVerify" in sent.data ? sent.data.sfoVerify : "";
+  return s.call("POST", "/push-tokens/verify", device, { token, code });
+}
+
 async function projectWithWorker(s: ReturnType<typeof server>) {
   const token = ((await (await s.call("POST", "/auth/apple", undefined, { idToken: "me" })).json()) as { token: string }).token;
   await s.call("PUT", "/credentials/claude", token, { value: "sk-ant-oat01-x" });
@@ -53,7 +61,7 @@ describe("a project's Sprite", () => {
   it("reports a run stopping, and the person's phone is told, tapping through to the project", async () => {
     const s = server();
     const { token, worker } = await projectWithWorker(s);
-    expect((await s.call("POST", "/push-tokens", token, { token: PUSH })).status).toBe(200);
+    expect((await registerVerified(s, token)).status).toBe(200);
 
     const res = await s.call("POST", "/workers/events", worker, { title: "sfo: Moon", message: "needs you — `sfo answer moon-abc123`" });
     expect(res.status).toBe(200);
@@ -77,25 +85,46 @@ describe("a project's Sprite", () => {
 });
 
 describe("push tokens", () => {
-  it("stop receiving once their device is signed out", async () => {
+  it("get nothing until the phone proves it receives on them", async () => {
     const s = server();
     const { token, worker } = await projectWithWorker(s);
     await s.call("POST", "/push-tokens", token, { token: PUSH });
+    expect(s.pushed.pop()?.data).toHaveProperty("sfoVerify");
+    expect((await s.call("POST", "/push-tokens/verify", token, { token: PUSH, code: "guessed" })).status).toBe(400);
+    await s.call("POST", "/workers/events", worker, { title: "sfo: Moon", message: "done" });
+    expect(s.pushed).toEqual([]);
+  });
+
+  it("stop receiving once their device is signed out", async () => {
+    const s = server();
+    const { token, worker } = await projectWithWorker(s);
+    await registerVerified(s, token);
     await s.call("DELETE", "/devices/current", token);
     await s.call("POST", "/workers/events", worker, { title: "sfo: Moon", message: "done" });
     expect(s.pushed).toEqual([]);
   });
 
-  it("cannot be taken by another account that learns them", async () => {
+  it("cannot be taken, or pointed at, by another account that only knows them", async () => {
     const s = server();
     const { token, worker } = await projectWithWorker(s);
-    await s.call("POST", "/push-tokens", token, { token: PUSH });
+    await registerVerified(s, token);
     const other = ((await (await s.call("POST", "/auth/apple", undefined, { idToken: "you" })).json()) as { token: string }).token;
     await s.call("POST", "/push-tokens", other, { token: PUSH });
+    s.pushed.pop();
+    expect((await s.call("POST", "/push-tokens/verify", other, { token: PUSH, code: "guessed" })).status).toBe(400);
     await s.call("POST", "/workers/events", worker, { title: "sfo: Moon", message: "done" });
     expect(s.pushed.map((m) => m.to)).toEqual([PUSH]);
   });
 
+  it("move to the account whose phone proves it has them", async () => {
+    const s = server();
+    const { token, worker } = await projectWithWorker(s);
+    await registerVerified(s, token);
+    const other = ((await (await s.call("POST", "/auth/apple", undefined, { idToken: "you" })).json()) as { token: string }).token;
+    expect((await registerVerified(s, other)).status).toBe(200);
+    await s.call("POST", "/workers/events", worker, { title: "sfo: Moon", message: "done" });
+    expect(s.pushed).toEqual([]);
+  });
 
   it("are only Expo's", async () => {
     const s = server();
