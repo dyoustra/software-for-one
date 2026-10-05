@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { Question } from '@sfo/api';
+import { Artifacts } from '@/components/artifacts';
 import { Body, Button, Card, ErrorText, Muted, Page } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -58,6 +59,7 @@ export default function Questions() {
   return (
     <Page>
       <ErrorText error={error} />
+      <Artifacts id={id} kind="drafts" />
       {questions?.map((q) => {
         const d = drafts[q.id] ?? { key: null, words: '' };
         return (

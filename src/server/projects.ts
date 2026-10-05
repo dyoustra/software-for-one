@@ -6,6 +6,7 @@ import type { Context, Hono } from "hono";
 import { stream } from "hono/streaming";
 import type { Db } from "./db.js";
 import { requireDevice, type Env } from "./auth.js";
+import { issueWorkerKey } from "./workers.js";
 import { githubToken, type GitHubOAuth, type Vault } from "./credentials.js";
 import { PROJECT_ID, provisionProject, type GitHub, type SpriteCredential } from "../core/provision.js";
 import { DEFAULT_PREFERENCES, KINDS, LANGUAGES, PreferencesSchema, WEB_DATA, WEB_HOSTS } from "../core/preferences.js";
@@ -20,6 +21,8 @@ export interface ProjectDeps {
   /** Repos and deploy keys, with the person's own GitHub token. */
   repos?: GitHub;
   oauth: GitHubOAuth;
+  /** Where a project's Sprite reports to; absent, Sprites report nowhere. */
+  controlUrl?: string;
 }
 
 type ProjectRow = { id: string; user_id: string; sprite: string; repo: string | null; status: string; summary: string | null; created_at: string; updated_at: string };
@@ -119,6 +122,7 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
     const { credentials, profileJson } = spriteCredentials(vault, userId);
     if (credentials.length === 0) return c.json({ error: "no model credential stored — `sfo login` from your Mac to upload one, or add an API key" }, 400);
     const token = await githubToken(vault, deps.oauth, userId).catch(() => null);
+    const worker = issueWorkerKey();
 
     return stream(c, async (out) => {
       const say = (line: Record<string, unknown>) => out.write(`${JSON.stringify(line)}\n`);
@@ -133,6 +137,7 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
             preferencesJson: body.preferencesJson ?? JSON.stringify(stored(userId).preferences),
             sfoMd: body.sfoMd ?? stored(userId).sfoMd,
             githubToken: token,
+            ...(deps.controlUrl ? { control: { url: deps.controlUrl, token: worker.token } } : {}),
           },
           { cli: sprites, github: deps.repos, log: (message) => void say({ progress: message }) },
         );
@@ -144,6 +149,7 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
           now(),
           now(),
         );
+        db.prepare("INSERT INTO worker_keys (project_id, token_hash) VALUES (?, ?)").run(made.id, worker.hash);
         const row = await refresh(db.prepare("SELECT * FROM projects WHERE id = ?").get(made.id) as ProjectRow);
         await say({ done: true, project: present(row), started: made.started });
       } catch (err) {
@@ -217,6 +223,33 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
     if (!REPORTS.has(command)) return c.json({ error: `one of: ${[...REPORTS].join(", ")}` }, 400);
     const r = await sfo(row, [command, row.id, ...(command === "logs" && c.req.query("raw") ? ["--raw"] : [])]);
     return c.json({ status: r.status, output: r.stdout });
+  });
+
+  // Drafts (drawn at spec, for questions about how it should look) and
+  // renders (screenshots after smoke), fetched from the Sprite when asked for.
+  const ARTIFACT = /^(drafts|renders)\/[\w.-]+\.(png|jpg|jpeg|txt)$/;
+  app.get("/projects/:id/artifacts", auth, async (c: Context<Env>) => {
+    const row = owned(c);
+    if (!row) return c.json({ error: "no such project" }, 404);
+    const r = await sprites.exec(row.sprite, `cd ~/.sfo/"$1"/.sfo 2>/dev/null || exit 0; for d in drafts renders; do [ -d "$d" ] && ls -1 "$d" | sed "s|^|$d/|"; done; true`, [row.id]);
+    return c.json(r.stdout.split("\n").map((l) => l.trim()).filter((l) => ARTIFACT.test(l)));
+  });
+
+  app.get("/projects/:id/artifact", auth, async (c: Context<Env>) => {
+    const row = owned(c);
+    const which = c.req.query("path") ?? "";
+    if (!row) return c.json({ error: "no such project" }, 404);
+    if (!ARTIFACT.test(which)) return c.json({ error: "not a draft or render" }, 400);
+    const local = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "sfo-art-")), path.basename(which));
+    try {
+      await sprites.pull(row.sprite, `/home/sprite/.sfo/${row.id}/.sfo/${which}`, local);
+      const type = which.endsWith(".txt") ? "text/plain; charset=utf-8" : which.endsWith(".png") ? "image/png" : "image/jpeg";
+      return c.body(new Uint8Array(fs.readFileSync(local)), 200, { "content-type": type, "cache-control": "private, max-age=300" });
+    } catch {
+      return c.json({ error: "not found" }, 404);
+    } finally {
+      fs.rmSync(path.dirname(local), { recursive: true, force: true });
+    }
   });
 
   // The delivery summary, as the run wrote it; empty until delivery.

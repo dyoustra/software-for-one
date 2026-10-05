@@ -3,6 +3,7 @@ import { useCallback, useRef, useState } from 'react';
 import { Alert, Linking, StyleSheet, TextInput, View } from 'react-native';
 
 import type { Project, Question } from '@sfo/api';
+import { Artifacts } from '@/components/artifacts';
 import { Body, Button, Card, Code, ErrorText, Muted, Page, Tone } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -138,6 +139,8 @@ export default function ProjectScreen() {
           />
         </Card>
       )}
+
+      {status === 'done' && <Artifacts id={id} kind="renders" />}
 
       <View style={styles.reports}>
         {REPORTS.map((r) => (

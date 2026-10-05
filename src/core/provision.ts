@@ -24,6 +24,7 @@ cat > ~/.sfo-env <<'EOF'
 export SFO_CONFINEMENT=vm
 [ -r ~/.config/sfo/claude-token ] && export CLAUDE_CODE_OAUTH_TOKEN="$(cat ~/.config/sfo/claude-token)"
 [ -r ~/.config/sfo/api-key ] && export ANTHROPIC_API_KEY="$(cat ~/.config/sfo/api-key)"
+[ -r ~/.config/sfo/control-url ] && export SFO_CONTROL_URL="$(cat ~/.config/sfo/control-url)"
 EOF
 for f in ~/.profile ~/.bashrc; do grep -q sfo-env "$f" 2>/dev/null || echo 'source ~/.sfo-env' >> "$f"; done
 mkdir -p ~/.sfo && printf '%s\\n' "$2" > ~/.sfo/profile.json
@@ -84,6 +85,8 @@ export interface ProvisionSpec {
   preferencesJson: string;
   sfoMd: string | null;
   githubToken: string | null;
+  /** Where sfo on the Sprite reports runs stopping or ending, and its token for that. */
+  control?: { url: string; token: string };
 }
 
 export interface Provisioned {
@@ -114,6 +117,11 @@ export async function provisionProject(
     if (setup.status !== 0) throw new Error(`setting up ${sprite} failed: ${setup.stdout.trim().split("\n").slice(-3).join(" ")}`);
     for (const c of spec.credentials) {
       if ((await cli.exec(sprite, STORE_SECRET, [c.file], { input: c.value })).status !== 0) throw new Error(`could not store the credential on ${sprite}`);
+    }
+    if (spec.control) {
+      for (const [file, value] of [["control-url", spec.control.url], ["control-token", spec.control.token]] as const) {
+        if ((await cli.exec(sprite, STORE_SECRET, [file], { input: value })).status !== 0) throw new Error(`could not tell ${sprite} where to report`);
+      }
     }
     // Where `sfo new` on the Sprite snapshots them from.
     for (const [file, text] of [["preferences.json", spec.preferencesJson], ["SFO.md", spec.sfoMd]] as const) {

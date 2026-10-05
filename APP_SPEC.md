@@ -75,9 +75,12 @@ project's repo alone (an hour long, refreshed by the control plane), a
 control-plane token valid only for that run, and the model credential the
 stage needs anyway.
 
-**Logs, renders and drafts** go to object storage (Fly's Tigris, which is
-S3-compatible), so the app can show screenshots and logs without a worker
-running.
+**Logs, renders and drafts** are fetched from the project's Sprite when the
+app asks for them (the control plane pulls the file and serves it), which
+wakes the Sprite for a second or two. The first version does this instead of
+the worker uploading to object storage; uploads come back if waking Sprites
+to look at images proves slow, or once Sprites are deleted while their
+images are still wanted.
 
 ## 3. Worker lifecycle: Sprites
 

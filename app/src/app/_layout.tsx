@@ -4,15 +4,24 @@ import { useEffect } from 'react';
 import { useColorScheme } from 'react-native';
 
 import { AuthProvider, useAuth } from '@/lib/auth';
+import { followNotificationTaps, registerForPush } from '@/lib/push';
 
 SplashScreen.preventAutoHideAsync();
 
 function Routes() {
-  const { token } = useAuth();
+  const { token, api } = useAuth();
 
   useEffect(() => {
     if (token !== undefined) SplashScreen.hideAsync();
   }, [token]);
+
+  // Once signed in: this phone can be told when a run needs the person, and a
+  // tap on that opens the project.
+  useEffect(() => {
+    if (!token) return;
+    registerForPush(api).catch(() => undefined);
+    return followNotificationTaps();
+  }, [token, api]);
 
   // The splash screen stays up until the stored token has been read.
   if (token === undefined) return null;

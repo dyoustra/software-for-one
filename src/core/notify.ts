@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { spawnSync } from "node:child_process";
 
 export type Notifier = (title: string, message: string) => void;
@@ -45,6 +48,9 @@ export function notificationCommands(title: string, message: string, env: NodeJS
  */
 export const desktopNotifier: Notifier = (title, message) => {
   if (process.env.SFO_NOTIFY === "0" || process.env.VITEST) return;
+  // On a project's Sprite nobody is at the screen: the control plane hears it
+  // and pushes it to the person's phone.
+  if (reportToControlPlane(title, message)) return;
   const commands =
     process.platform === "darwin"
       ? notificationCommands(title, message)
@@ -56,3 +62,29 @@ export const desktopNotifier: Notifier = (title, message) => {
     if (!r.error && r.status === 0) return;
   }
 };
+
+const CONTROL_TOKEN = path.join(os.homedir(), ".config", "sfo", "control-token");
+
+/**
+ * Tells the control plane, when this machine is a project's Sprite. Waits for
+ * the answer: a run reports how it ended as it exits, and a request left
+ * pending would die with the process. The token is read from its file by the
+ * child, never passed as an argument.
+ */
+export function reportToControlPlane(title: string, message: string, env: NodeJS.ProcessEnv = process.env, tokenFile = CONTROL_TOKEN): boolean {
+  const url = env.SFO_CONTROL_URL;
+  if (!url || !fs.existsSync(tokenFile)) return false;
+  const script = `const [url, file] = process.argv.slice(1);
+let body = "";
+process.stdin.on("data", (d) => (body += d)).on("end", async () => {
+  const token = require("fs").readFileSync(file, "utf8").trim();
+  try {
+    const r = await fetch(url + "/workers/events", { method: "POST", headers: { authorization: "Bearer " + token, "content-type": "application/json" }, body, signal: AbortSignal.timeout(15000) });
+    process.exit(r.ok ? 0 : 1);
+  } catch {
+    process.exit(1);
+  }
+});`;
+  const r = spawnSync(process.execPath, ["-e", script, url, tokenFile], { input: JSON.stringify({ title, message }), timeout: 20_000, stdio: ["pipe", "ignore", "ignore"] });
+  return r.status === 0;
+}
