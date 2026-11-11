@@ -55,9 +55,10 @@ async function request(url: string, init: RequestInit = {}): Promise<{ status: n
 
 /**
  * Signs this machine in to the control plane: shows a code, opens the page to
- * approve it, and waits — on a request the server holds open — for the token.
+ * approve it (the control plane's, signed in with Apple, or GitHub's), and
+ * waits — on a request the server holds open — for the token.
  */
-export async function login(env: Env = process.env, log: (m: string) => void = console.log): Promise<void> {
+export async function login(env: Env = process.env, log: (m: string) => void = console.log, opts: { github?: boolean } = {}): Promise<void> {
   const base = controlUrl(env);
   if (readControlToken() && (await authed("/devices", {}, env).catch(() => ({ status: 0 }))).status === 200) {
     log(`already signed in to ${base}`);
@@ -65,10 +66,21 @@ export async function login(env: Env = process.env, log: (m: string) => void = c
     await importCloudProjects(env, log);
     return;
   }
+  const token = opts.github ? await viaGitHub(base, log) : await viaApprovalPage(base, log);
+  storeControlToken(token);
+  writeControlFile({ ...readControlFile(env), url: base }, env);
+  log(`signed in to ${base}`);
+  await offerCredentials(env, log);
+  await importCloudProjects(env, log);
+}
+
+const machineName = () => os.hostname().replace(/\.local$/, "");
+
+async function viaApprovalPage(base: string, log: (m: string) => void): Promise<string> {
   const started = await request(`${base}/auth/device`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ name: os.hostname().replace(/\.local$/, "") }),
+    body: JSON.stringify({ name: machineName() }),
   });
   if (started.status !== 200) throw new Error(`the control plane at ${base} did not start a sign-in (${started.status})`);
   const { deviceCode, userCode, verifyUrl } = started.body as { deviceCode: string; userCode: string; verifyUrl: string };
@@ -85,12 +97,33 @@ export async function login(env: Env = process.env, log: (m: string) => void = c
       continue;
     }
     if (r.status !== 200) throw new Error(String(r.body.error ?? `sign-in failed (${r.status})`));
-    storeControlToken(String(r.body.token));
-    writeControlFile({ ...readControlFile(env), url: base }, env);
-    log(`signed in to ${base}`);
-    await offerCredentials(env, log);
-    await importCloudProjects(env, log);
-    return;
+    return String(r.body.token);
+  }
+}
+
+async function viaGitHub(base: string, log: (m: string) => void): Promise<string> {
+  const started = await request(`${base}/auth/github/start`, { method: "POST" });
+  if (started.status !== 200) throw new Error(String(started.body.error ?? `the control plane at ${base} did not start a GitHub sign-in (${started.status})`));
+  const { flow, userCode, verificationUri } = started.body as { flow: string; userCode: string; verificationUri: string };
+
+  log(`Your GitHub code: ${userCode}\nEnter it at ${verificationUri} (opening it now) and authorize`);
+  if (process.platform === "darwin") spawnSync("open", [verificationUri], { stdio: "ignore" });
+
+  for (;;) {
+    const r = await request(`${base}/auth/github/wait`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ flow, deviceName: machineName() }),
+    }).catch(() => null);
+    if (r === null || r.status >= 500) {
+      await new Promise((done) => setTimeout(done, 2000));
+      continue;
+    }
+    if (r.status === 202) continue;
+    // Unlike the approval page's code, GitHub flows live in the server's
+    // memory: a restart mid-sign-in ends one (410), and it starts over.
+    if (r.status !== 200) throw new Error(String(r.body.error ?? `sign-in failed (${r.status})`));
+    return String(r.body.token);
   }
 }
 
