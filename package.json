@@ -9,7 +9,8 @@
     "build": "tsc && node scripts/copy-assets.mjs",
     "test": "vitest run",
     "sfo": "tsx src/cli.ts",
-    "typecheck": "tsc --noEmit -p tsconfig.test.json"
+    "typecheck": "tsc --noEmit -p tsconfig.test.json",
+    "deploy": "fly deploy --remote-only --build-arg SFO_VERSION=$(git rev-parse --short HEAD)"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.120.0",
