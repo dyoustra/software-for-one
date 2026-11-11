@@ -61,6 +61,11 @@ async function request(url: string, init: RequestInit = {}): Promise<{ status: n
 export async function login(env: Env = process.env, log: (m: string) => void = console.log, opts: { github?: boolean } = {}): Promise<void> {
   const base = controlUrl(env);
   if (readControlToken() && (await authed("/devices", {}, env).catch(() => ({ status: 0 }))).status === 200) {
+    if (opts.github) {
+      await viaGitHub(base, log, readControlToken());
+      log(`GitHub added: it signs in to this account now`);
+      return;
+    }
     log(`already signed in to ${base}`);
     await offerCredentials(env, log);
     await importCloudProjects(env, log);
@@ -101,7 +106,8 @@ async function viaApprovalPage(base: string, log: (m: string) => void): Promise<
   }
 }
 
-async function viaGitHub(base: string, log: (m: string) => void): Promise<string> {
+/** The new token, or, given this machine's token, adds GitHub to its account instead. */
+async function viaGitHub(base: string, log: (m: string) => void, linkTo: string | null = null): Promise<string> {
   const started = await request(`${base}/auth/github/start`, { method: "POST" });
   if (started.status !== 200) throw new Error(String(started.body.error ?? `the control plane at ${base} did not start a GitHub sign-in (${started.status})`));
   const { flow, userCode, verificationUri } = started.body as { flow: string; userCode: string; verificationUri: string };
@@ -112,8 +118,8 @@ async function viaGitHub(base: string, log: (m: string) => void): Promise<string
   for (;;) {
     const r = await request(`${base}/auth/github/wait`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ flow, deviceName: machineName() }),
+      headers: { "content-type": "application/json", ...(linkTo ? { authorization: `Bearer ${linkTo}` } : {}) },
+      body: JSON.stringify({ flow, deviceName: machineName(), link: linkTo !== null }),
     }).catch(() => null);
     if (r === null || r.status >= 500) {
       await new Promise((done) => setTimeout(done, 2000));

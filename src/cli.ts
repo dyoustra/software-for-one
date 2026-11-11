@@ -252,7 +252,7 @@ export function buildProgram(): Command {
   program
     .command("login")
     .description("Sign this machine in to the control plane, approving it where you are signed in with Apple")
-    .option("--github", "sign in with GitHub instead")
+    .option("--github", "sign in with GitHub instead; already signed in, add GitHub to this account")
     .action(guarded(async (opts: { github?: boolean }) => {
       const { login } = await import("./commands/login.js");
       await login(process.env, console.log, { github: opts.github });

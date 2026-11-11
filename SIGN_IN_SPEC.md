@@ -1,6 +1,6 @@
 # Sign-in — Spec
 
-**Status:** Design approved, pre-implementation
+**Status:** GitHub sign-in built; passkeys wait for a domain
 **Date:** 2026-11-11
 **Changes:** CONTROL_PLANE_SPEC.md §2 (sign-in), §5 (auth routes)
 
@@ -61,8 +61,9 @@ signs in with GitHub directly instead (`sfo login --github`).
   only) and Sign in with GitHub (everywhere): it shows GitHub's code, opens
   github.com/login/device, and waits. Settings lists the linked methods and
   adds GitHub.
-- **CLI**: `sfo login --github` shows GitHub's code and waits; `sfo login`
-  (Apple, through the approval page) unchanged.
+- **CLI**: `sfo login --github` shows GitHub's code and waits; already signed
+  in, it adds GitHub to the account instead. `sfo login` (Apple, through the
+  approval page) unchanged.
 
 ## 6. Build order
 
