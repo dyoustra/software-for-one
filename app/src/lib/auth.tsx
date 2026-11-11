@@ -1,16 +1,38 @@
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as Device from 'expo-device';
-import * as SecureStore from 'expo-secure-store';
 import { createContext, use, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { Platform } from 'react-native';
 
 import { API_URL, ApiError, call } from '@/lib/api';
+import { tokenStore } from '@/lib/token-store';
 
-const TOKEN_KEY = 'sfo-device-token';
+/** GitHub's code for the person to enter, and where. */
+export type GitHubCode = { userCode: string; verificationUri: string };
+
+const deviceName = () => (Platform.OS === 'web' ? 'Web browser' : (Device.deviceName ?? 'iPhone'));
+
+async function post<T>(path: string, body: unknown, init: { token?: string | null; signal?: AbortSignal } = {}): Promise<{ status: number; body: T & { error?: string } }> {
+  const res = await fetch(`${API_URL}${path}`, {
+    method: 'POST',
+    signal: init.signal,
+    headers: { 'content-type': 'application/json', ...(init.token ? { authorization: `Bearer ${init.token}` } : {}) },
+    body: JSON.stringify(body),
+  });
+  const parsed = (await res.json().catch(() => ({}))) as T & { error?: string };
+  if (!res.ok) throw new ApiError(parsed.error ?? `The control plane answered ${res.status}`, res.status);
+  return { status: res.status, body: parsed };
+}
 
 type Auth = {
   /** Undefined while the stored token is being read; null when signed out. */
   token: string | null | undefined;
   signIn(): Promise<void>;
+  /**
+   * GitHub's device flow: shows `onCode` GitHub's code, then waits until the
+   * person approves it on GitHub. Signs this device in, or with `link` adds
+   * that GitHub account to the signed-in one.
+   */
+  gitHub(opts: { link?: boolean; onCode: (code: GitHubCode) => void; signal: AbortSignal }): Promise<void>;
   signOut(): Promise<void>;
   /** An authenticated call; a token that stops working signs this device out. */
   api<T>(path: string, init?: { method?: string; body?: unknown }): Promise<T>;
@@ -22,27 +44,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null | undefined>(undefined);
 
   useEffect(() => {
-    SecureStore.getItemAsync(TOKEN_KEY).then((t) => setToken(t ?? null));
+    tokenStore.get().then((t) => setToken(t ?? null));
   }, []);
 
   const signIn = useCallback(async () => {
     const credential = await AppleAuthentication.signInAsync({ requestedScopes: [] });
     if (!credential.identityToken) throw new Error('Apple did not return an identity token');
-    const res = await fetch(`${API_URL}/auth/apple`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ idToken: credential.identityToken, deviceName: Device.deviceName ?? 'iPhone' }),
-    });
-    const body = (await res.json().catch(() => ({}))) as { token?: string; error?: string };
-    if (!res.ok || !body.token) throw new ApiError(body.error ?? `Sign-in failed (${res.status})`, res.status);
-    await SecureStore.setItemAsync(TOKEN_KEY, body.token);
+    const { body } = await post<{ token: string }>('/auth/apple', { idToken: credential.identityToken, deviceName: deviceName() });
+    await tokenStore.set(body.token);
     setToken(body.token);
   }, []);
 
+  const gitHub = useCallback<Auth['gitHub']>(
+    async ({ link, onCode, signal }) => {
+      const started = await post<GitHubCode & { flow: string }>('/auth/github/start', {}, { signal });
+      onCode({ userCode: started.body.userCode, verificationUri: started.body.verificationUri });
+      // The server holds each wait about 50 s and answers 202 to be asked again.
+      for (;;) {
+        const r = await post<{ token?: string }>('/auth/github/wait', { flow: started.body.flow, deviceName: deviceName(), link }, { token: link ? token : null, signal });
+        if (r.status === 202) continue;
+        if (!link && r.body.token) {
+          await tokenStore.set(r.body.token);
+          setToken(r.body.token);
+        }
+        return;
+      }
+    },
+    [token],
+  );
+
   const signOut = useCallback(async () => {
-    const current = await SecureStore.getItemAsync(TOKEN_KEY);
+    const current = await tokenStore.get();
     if (current) await call(current, '/devices/current', { method: 'DELETE' }).catch(() => undefined);
-    await SecureStore.deleteItemAsync(TOKEN_KEY);
+    await tokenStore.clear();
     setToken(null);
   }, []);
 
@@ -53,7 +87,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return await call<T>(token, path, init);
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
-          await SecureStore.deleteItemAsync(TOKEN_KEY);
+          await tokenStore.clear();
           setToken(null);
         }
         throw err;
@@ -62,7 +96,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [token],
   );
 
-  const value = useMemo(() => ({ token, signIn, signOut, api }), [token, signIn, signOut, api]);
+  const value = useMemo(() => ({ token, signIn, gitHub, signOut, api }), [token, signIn, gitHub, signOut, api]);
   return <AuthContext value={value}>{children}</AuthContext>;
 }
 

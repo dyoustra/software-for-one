@@ -60,6 +60,12 @@ export interface Device {
   lastUsedAt: string | null;
 }
 
+/** A way to sign in to an account. */
+export interface Identity {
+  provider: "apple" | "github";
+  createdAt: string;
+}
+
 export type LanguageKind = "cli" | "web" | "mobile" | "firmware" | "default";
 
 export interface Preferences {

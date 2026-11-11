@@ -2,7 +2,8 @@ import * as AppleAuthentication from 'expo-apple-authentication';
 import { useEffect, useState } from 'react';
 import { StyleSheet, useColorScheme, View } from 'react-native';
 
-import { Body, ErrorText, Heading, Muted } from '@/components/ui';
+import { GitHubSignIn } from '@/components/github-sign-in';
+import { Body, Button, ErrorText, Heading } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth';
@@ -13,6 +14,7 @@ export default function SignIn() {
   const scheme = useColorScheme();
   const [available, setAvailable] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const [withGitHub, setWithGitHub] = useState(false);
 
   useEffect(() => {
     AppleAuthentication.isAvailableAsync().then(setAvailable);
@@ -23,7 +25,7 @@ export default function SignIn() {
       <View style={styles.column}>
         <Heading>Software For One</Heading>
         <Body>Say what you want built. sfo builds it in the cloud, asks when it needs you, and tells you when it is done.</Body>
-        {available ? (
+        {available && !withGitHub && (
           <AppleAuthentication.AppleAuthenticationButton
             buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
             buttonStyle={scheme === 'dark' ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE : AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
@@ -36,8 +38,11 @@ export default function SignIn() {
               });
             }}
           />
+        )}
+        {withGitHub ? (
+          <GitHubSignIn onCancel={() => setWithGitHub(false)} />
         ) : (
-          <Muted>Sign in with Apple is not available on this device.</Muted>
+          <Button title="Sign in with GitHub" kind={available ? 'secondary' : 'primary'} onPress={() => setWithGitHub(true)} />
         )}
         <ErrorText error={error} />
       </View>

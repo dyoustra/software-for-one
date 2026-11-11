@@ -2,11 +2,14 @@ import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import type { CredentialKind, Device, LanguageKind, Preferences, PreferencesResponse } from '@sfo/api';
+import type { CredentialKind, Device, Identity, LanguageKind, Preferences, PreferencesResponse } from '@sfo/api';
+import { GitHubSignIn } from '@/components/github-sign-in';
 import { Body, Button, Card, ErrorText, Heading, Muted, Page } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth';
+
+const PROVIDER_NAMES: Record<Identity['provider'], string> = { apple: 'Apple', github: 'GitHub' };
 
 const KIND_NAMES: Record<LanguageKind, string> = { cli: 'Command-line tools', web: 'Web apps', mobile: 'Mobile apps', firmware: 'Firmware', default: 'Anything else' };
 
@@ -28,6 +31,8 @@ export default function Settings() {
   const { api, signOut } = useAuth();
   const theme = useTheme();
   const [devices, setDevices] = useState<Device[]>([]);
+  const [identities, setIdentities] = useState<Identity[]>([]);
+  const [linking, setLinking] = useState(false);
   const [have, setHave] = useState<CredentialKind[]>([]);
   const [prefs, setPrefs] = useState<PreferencesResponse | null>(null);
   const [rankings, setRankings] = useState<Record<string, string>>({});
@@ -38,12 +43,14 @@ export default function Settings() {
 
   const load = useCallback(async () => {
     try {
-      const [d, c, p] = await Promise.all([
+      const [d, i, c, p] = await Promise.all([
         api<Device[]>('/devices'),
+        api<Identity[]>('/identities'),
         api<{ have: CredentialKind[] }>('/credentials'),
         api<PreferencesResponse>('/preferences'),
       ]);
       setDevices(d);
+      setIdentities(i);
       setHave(c.have);
       setPrefs(p);
       setRankings(Object.fromEntries(Object.entries(p.preferences.languages).map(([k, v]) => [k, v.join(', ')])));
@@ -148,6 +155,28 @@ export default function Settings() {
           <Button title={saved ? 'Saved' : 'Save preferences'} onPress={save} busy={saving} />
         </Card>
       )}
+
+      <Card>
+        <Body style={styles.section}>Ways to sign in</Body>
+        {identities.map((i) => (
+          <Muted key={i.provider}>
+            {PROVIDER_NAMES[i.provider]} · added {new Date(i.createdAt).toLocaleDateString()}
+          </Muted>
+        ))}
+      </Card>
+      {!identities.some((i) => i.provider === 'github') &&
+        (linking ? (
+          <GitHubSignIn
+            link
+            onDone={() => {
+              setLinking(false);
+              load();
+            }}
+            onCancel={() => setLinking(false)}
+          />
+        ) : (
+          <Button title="Add Sign in with GitHub" kind="secondary" onPress={() => setLinking(true)} />
+        ))}
 
       <Card>
         <Body style={styles.section}>Signed-in devices</Body>
