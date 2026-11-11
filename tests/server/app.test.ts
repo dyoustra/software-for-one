@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { openDb, schemaVersion } from "../../src/server/db.js";
 import { createApp } from "../../src/server/app.js";
-import { noSprites } from "./fakes.js";
+import { noSprites, noGitHubDevice } from "./fakes.js";
 import { Vault } from "../../src/server/credentials.js";
 import { randomBytes } from "node:crypto";
 
@@ -12,21 +12,34 @@ describe("control plane", () => {
   it("answers its health check with what is running", async () => {
     const db = openDb(":memory:");
     const github = { clientId: "x", authorizeUrl: () => "", whoami: async () => "x", exchange: async () => ({ accessToken: "", refreshToken: null, expiresAt: null }) };
-    const app = createApp({ db, version: "abc1234", verifyApple: async () => ({ sub: "x" }), allowed: new Set(), publicUrl: "http://t", vault: new Vault(db, randomBytes(32).toString("base64")), github, githubRedirects: [], sprites: noSprites });
+    const app = createApp({ db, version: "abc1234", verifyApple: async () => ({ sub: "x" }), allowed: new Set(), publicUrl: "http://t", vault: new Vault(db, randomBytes(32).toString("base64")), github, githubRedirects: [], sprites: noSprites, githubDevice: noGitHubDevice, allowedGithub: new Set() });
     const res = await app.request("/health");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, version: "abc1234", schema: 7 });
+    expect(await res.json()).toEqual({ ok: true, version: "abc1234", schema: 8 });
   });
 
   it("brings a database up to date once, and leaves it there on reopen", () => {
     const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "sfo-db-")), "sfo.db");
     const db = openDb(file);
-    db.prepare("INSERT INTO users (id, apple_sub, created_at) VALUES (?, ?, ?)").run("u1", "apple-1", "2026-10-04");
+    db.prepare("INSERT INTO users (id, created_at) VALUES (?, ?)").run("u1", "2026-10-04");
     db.close();
 
     const again = openDb(file);
-    expect(schemaVersion(again)).toBe(7);
+    expect(schemaVersion(again)).toBe(8);
     expect(again.prepare("SELECT count(*) AS n FROM users").get()).toEqual({ n: 1 });
+  });
+
+  it("moves each Apple id into identities, keeping the account and everything that refers to it", () => {
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "sfo-db-")), "sfo.db");
+    const old = openDb(file, 7);
+    old.prepare("INSERT INTO users (id, apple_sub, created_at) VALUES ('u1', 'apple-1', '2026-10-04')").run();
+    old.prepare("INSERT INTO devices (id, user_id, name, token_hash, created_at) VALUES ('d1', 'u1', 'mac', 'h', '2026-10-04')").run();
+    old.close();
+
+    const db = openDb(file);
+    expect(db.prepare("SELECT user_id, provider, subject FROM identities").all()).toEqual([{ user_id: "u1", provider: "apple", subject: "apple-1" }]);
+    expect(db.prepare("SELECT name FROM pragma_table_info('users')").all().map((c) => (c as { name: string }).name)).toEqual(["id", "created_at"]);
+    expect(db.prepare("SELECT user_id FROM devices").get()).toEqual({ user_id: "u1" });
   });
 
   it("enforces that every project belongs to a user", () => {

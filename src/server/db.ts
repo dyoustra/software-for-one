@@ -119,17 +119,37 @@ const MIGRATIONS: string[] = [
   ALTER TABLE push_tokens ADD COLUMN code_hash TEXT;
   ALTER TABLE push_tokens ADD COLUMN verified_at TEXT;
   `,
+  // An account is no longer an Apple id: each way of signing in is an
+  // identity of it. users loses apple_sub, so the table is rebuilt (foreign
+  // keys are off while migrations run, and checked after).
+  `
+  CREATE TABLE identities (
+    user_id TEXT NOT NULL REFERENCES users(id),
+    provider TEXT NOT NULL CHECK (provider IN ('apple', 'github')),
+    subject TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (provider, subject)
+  );
+  INSERT INTO identities (user_id, provider, subject, created_at) SELECT id, 'apple', apple_sub, created_at FROM users;
+  CREATE TABLE users_rebuilt (id TEXT PRIMARY KEY, created_at TEXT NOT NULL);
+  INSERT INTO users_rebuilt (id, created_at) SELECT id, created_at FROM users;
+  DROP TABLE users;
+  ALTER TABLE users_rebuilt RENAME TO users;
+  `,
 ];
 
 export type Db = DatabaseSync;
 
-/** Opens the database at `file` (":memory:" for tests) and brings it up to date. */
-export function openDb(file: string): Db {
+/**
+ * Opens the database at `file` (":memory:" for tests) and brings it up to
+ * date, or only to `upTo`, for a test of a migration.
+ */
+export function openDb(file: string, upTo = MIGRATIONS.length): Db {
   if (file !== ":memory:") fs.mkdirSync(path.dirname(file), { recursive: true });
   const db = new DatabaseSync(file);
   // WAL is what Litestream replicates; foreign keys are off in SQLite unless asked.
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
-  migrate(db);
+  migrate(db, upTo);
   return db;
 }
 
@@ -137,8 +157,11 @@ export function schemaVersion(db: Db): number {
   return (db.prepare("PRAGMA user_version").get() as { user_version: number }).user_version;
 }
 
-function migrate(db: Db): void {
-  for (let v = schemaVersion(db); v < MIGRATIONS.length; v++) {
+function migrate(db: Db, upTo: number): void {
+  // Off while migrating, since one rebuilds a table others refer to; on again
+  // and checked after, so a migration that broke a reference fails here.
+  db.exec("PRAGMA foreign_keys = OFF");
+  for (let v = schemaVersion(db); v < upTo; v++) {
     db.exec("BEGIN");
     try {
       db.exec(MIGRATIONS[v]);
@@ -149,4 +172,7 @@ function migrate(db: Db): void {
       throw err;
     }
   }
+  db.exec("PRAGMA foreign_keys = ON");
+  const broken = db.prepare("PRAGMA foreign_key_check").all();
+  if (broken.length > 0) throw new Error(`migration left ${broken.length} broken references: ${JSON.stringify(broken.slice(0, 3))}`);
 }

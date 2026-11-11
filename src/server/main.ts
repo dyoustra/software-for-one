@@ -5,6 +5,7 @@ import { verifyApple } from "./apple.js";
 import { Vault, githubOAuth } from "./credentials.js";
 import { spriteApi } from "../core/spriteApi.js";
 import { expoPush } from "./workers.js";
+import { githubDevice } from "./github-signin.js";
 
 const port = Number(process.env.PORT ?? 8080);
 const db = openDb(process.env.SFO_DB ?? "/data/sfo.db");
@@ -27,6 +28,9 @@ const app = createApp({
   publicUrl,
   sprites: spriteApi(required("SPRITES_TOKEN")),
   push: expoPush,
+  githubDevice: githubDevice(process.env.GITHUB_CLIENT_ID ?? "Iv23liGwo5OqMwme5fVq"),
+  allowedGithub: new Set((process.env.SFO_ALLOWED_GITHUB_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean)),
+  webOrigins: (process.env.SFO_WEB_ORIGINS ?? "http://localhost:8081").split(",").map((s) => s.trim()).filter(Boolean),
 });
 
 const server = serve({ fetch: app.fetch, port }, () => console.log(`sfo control plane on :${port}`));

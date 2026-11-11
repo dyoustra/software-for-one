@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { createHash, randomBytes } from "node:crypto";
 import { openDb } from "../../src/server/db.js";
 import { createApp } from "../../src/server/app.js";
-import { noSprites } from "./fakes.js";
+import { noSprites, noGitHubDevice } from "./fakes.js";
 import { Vault, githubToken, type GitHubOAuth, type GitHubTokens } from "../../src/server/credentials.js";
 
 const CLAUDE = "sk-ant-oat01-secret-value";
@@ -24,7 +24,7 @@ function server() {
       return "dyoustra";
     },
   };
-  const app = createApp({ db, version: "t", verifyApple: async (t) => ({ sub: t }), allowed: new Set(["me", "you"]), publicUrl: "https://cp.test", holdMs: 50, vault, github, githubRedirects: [APP_RETURN], sprites: noSprites });
+  const app = createApp({ db, version: "t", verifyApple: async (t) => ({ sub: t }), allowed: new Set(["me", "you"]), publicUrl: "https://cp.test", holdMs: 50, vault, github, githubRedirects: [APP_RETURN], sprites: noSprites, githubDevice: noGitHubDevice, allowedGithub: new Set() });
   const call = (method: string, path: string, token?: string, body?: unknown) =>
     app.request(path, { method, headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, ...(body ? { body: JSON.stringify(body) } : {}) });
   const signIn = async (who: string) => ((await (await call("POST", "/auth/apple", undefined, { idToken: who })).json()) as { token: string }).token;
@@ -68,7 +68,7 @@ describe("credentials", () => {
 
   it("cannot be opened with another key", () => {
     const db = openDb(":memory:");
-    db.prepare("INSERT INTO users (id, apple_sub, created_at) VALUES ('u', 'me', 't')").run();
+    db.prepare("INSERT INTO users (id, created_at) VALUES ('u', 't')").run();
     new Vault(db, randomBytes(32).toString("base64")).put("u", "claude_token", CLAUDE);
     expect(() => new Vault(db, randomBytes(32).toString("base64")).get("u", "claude_token")).toThrow();
   });
@@ -147,7 +147,7 @@ describe("connecting GitHub from the CLI", () => {
   });
   it("refreshes a token about to expire before handing it out", async () => {
     const s = server();
-    s.db.prepare("INSERT INTO users (id, apple_sub, created_at) VALUES ('u', 'me', 't')").run();
+    s.db.prepare("INSERT INTO users (id, created_at) VALUES ('u', 't')").run();
     const expiring: GitHubTokens = { accessToken: "ghu_old", refreshToken: "ghr_x", expiresAt: new Date(Date.now() + 60_000).toISOString() };
     s.vault.put("u", "github_installation", JSON.stringify(expiring));
     const gh: GitHubOAuth = { clientId: "x", authorizeUrl: () => "", whoami: async () => "x", exchange: async () => ({ accessToken: "ghu_fresh", refreshToken: "ghr_y", expiresAt: null }) };

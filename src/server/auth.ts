@@ -31,23 +31,40 @@ function userCode(): string {
   return `${chars.slice(0, 4).join("")}-${chars.slice(4).join("")}`;
 }
 
-/** The person behind an Apple sign-in, created on first sight, or null if they are not allowed in. */
-export async function personFor(deps: Pick<AuthDeps, "db" | "verifyApple" | "allowed" | "log">, idToken: string): Promise<string | null> {
-  const who = await deps.verifyApple(idToken);
-  if (!deps.allowed.has(who.sub)) {
-    // Apple's opaque id only: it is what the allowlist needs, and names no one.
-    (deps.log ?? console.log)(`sign-in refused for Apple id ${who.sub} — to allow it: fly secrets set SFO_ALLOWED_APPLE_IDS=${who.sub}`);
+export type Provider = "apple" | "github";
+
+const PROVIDERS: Record<Provider, { name: string; allowlist: string }> = {
+  apple: { name: "Apple", allowlist: "SFO_ALLOWED_APPLE_IDS" },
+  github: { name: "GitHub", allowlist: "SFO_ALLOWED_GITHUB_IDS" },
+};
+
+/**
+ * The account a sign-in method belongs to, created on first sight for an
+ * allowed identity, or null if it is not allowed in. A refused one is logged
+ * by its provider's opaque id (never a name or email), which is what the
+ * allowlist needs.
+ */
+export function accountFor(db: Db, provider: Provider, subject: string, allowed: Set<string>, log: (m: string) => void = console.log): string | null {
+  const found = db.prepare("SELECT user_id FROM identities WHERE provider = ? AND subject = ?").get(provider, subject) as { user_id: string } | undefined;
+  if (found) return found.user_id;
+  if (!allowed.has(subject)) {
+    log(`sign-in refused for ${PROVIDERS[provider].name} id ${subject} — to allow it: fly secrets set ${PROVIDERS[provider].allowlist}=${subject}`);
     return null;
   }
-  const found = deps.db.prepare("SELECT id FROM users WHERE apple_sub = ?").get(who.sub) as { id: string } | undefined;
-  if (found) return found.id;
   const id = randomUUID();
-  deps.db.prepare("INSERT INTO users (id, apple_sub, created_at) VALUES (?, ?, ?)").run(id, who.sub, now());
+  db.prepare("INSERT INTO users (id, created_at) VALUES (?, ?)").run(id, now());
+  db.prepare("INSERT INTO identities (user_id, provider, subject, created_at) VALUES (?, ?, ?, ?)").run(id, provider, subject, now());
   return id;
 }
 
+/** The person behind an Apple sign-in, or null if they are not allowed in. */
+export async function personFor(deps: Pick<AuthDeps, "db" | "verifyApple" | "allowed" | "log">, idToken: string): Promise<string | null> {
+  const who = await deps.verifyApple(idToken);
+  return accountFor(deps.db, "apple", who.sub, deps.allowed, deps.log);
+}
+
 /** A new signed-in device for this person, and the token it uses; only the token's hash is kept. */
-function issueDevice(db: Db, userId: string, name: string): { deviceId: string; token: string } {
+export function issueDevice(db: Db, userId: string, name: string): { deviceId: string; token: string } {
   const token = `sfo_${randomBytes(32).toString("base64url")}`;
   const deviceId = randomUUID();
   db.prepare("INSERT INTO devices (id, user_id, name, token_hash, created_at) VALUES (?, ?, ?, ?, ?)").run(deviceId, userId, name, hashToken(token), now());
@@ -135,6 +152,10 @@ export function authRoutes(app: Hono<Env>, deps: AuthDeps): void {
     db.prepare("UPDATE device_codes SET status = 'approved', user_id = ? WHERE device_code = ?").run(userId, row.device_code);
     return c.json({ ok: true, approved: true, device: row.device_name });
   });
+
+  app.get("/identities", requireDevice(db), (c: Context<Env>) =>
+    c.json(db.prepare("SELECT provider, created_at AS createdAt FROM identities WHERE user_id = ? ORDER BY created_at").all(c.get("userId"))),
+  );
 
   app.get("/devices", requireDevice(db), (c: Context<Env>) =>
     c.json(

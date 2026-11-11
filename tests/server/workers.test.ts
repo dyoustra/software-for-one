@@ -1,3 +1,4 @@
+import { noGitHubDevice } from "./fakes.js";
 import { describe, it, expect } from "vitest";
 import { randomBytes } from "node:crypto";
 import { openDb } from "../../src/server/db.js";
@@ -26,7 +27,7 @@ function server() {
   };
   const pushed: PushMessage[] = [];
   const oauth: GitHubOAuth = { clientId: "x", authorizeUrl: () => "", whoami: async () => "x", exchange: async () => ({ accessToken: "", refreshToken: null, expiresAt: null }) };
-  const app = createApp({ db, version: "t", verifyApple: async (t) => ({ sub: t }), allowed: new Set(["me", "you"]), publicUrl: "https://cp.test", vault, github: oauth, githubRedirects: [], sprites, push: async (m) => void pushed.push(...m) });
+  const app = createApp({ db, version: "t", verifyApple: async (t) => ({ sub: t }), allowed: new Set(["me", "you"]), publicUrl: "https://cp.test", vault, github: oauth, githubRedirects: [], sprites, push: async (m) => void pushed.push(...m), githubDevice: noGitHubDevice, allowedGithub: new Set() });
   const call = (method: string, path: string, token?: string, body?: unknown) =>
     app.request(path, { method, headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
   return { db, calls, pushed, call };
