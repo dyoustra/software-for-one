@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { Context, Hono } from "hono";
 import type { Db } from "./db.js";
-import { accountFor, hashToken, issueDevice, type Env } from "./auth.js";
+import { accountFor, hashToken, issueDevice, type Allowlists, type Env } from "./auth.js";
 
 /** GitHub's device flow, as this server drives it; injectable for tests. */
 export interface GitHubDevice {
@@ -54,7 +54,7 @@ type Flow = { deviceCode: string; intervalMs: number; expires: number; nextPollA
  */
 export function githubSignInRoutes(
   app: Hono<Env>,
-  deps: { db: Db; github: GitHubDevice; allowed: Set<string>; holdMs?: number; log?: (m: string) => void },
+  deps: { db: Db; github: GitHubDevice; allowlists: Allowlists; holdMs?: number; log?: (m: string) => void },
 ): void {
   const { db, github } = deps;
   const holdMs = deps.holdMs ?? 50_000;
@@ -115,7 +115,7 @@ export function githubSignInRoutes(
       if (!owner) db.prepare("INSERT INTO identities (user_id, provider, subject, created_at) VALUES (?, 'github', ?, ?)").run(device.user_id, githubId, new Date().toISOString());
       return c.json({ ok: true, linked: "github" });
     }
-    const userId = accountFor(db, "github", githubId, deps.allowed, deps.log);
+    const userId = accountFor(db, "github", githubId, deps.allowlists, deps.log);
     if (!userId) return c.json({ error: "this GitHub account is not allowed in" }, 403);
     return c.json({ token: issueDevice(db, userId, (body.deviceName || "a device").slice(0, 80)).token });
   }

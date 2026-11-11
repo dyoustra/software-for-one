@@ -8,6 +8,8 @@ export interface AuthDeps {
   verifyApple: VerifyApple;
   /** Apple ids allowed in. Everyone else is refused, and their id logged so it can be added. */
   allowed: Set<string>;
+  /** GitHub accounts (numeric ids) allowed in, likewise. */
+  allowedGithub: Set<string>;
   /** Where the approval page is, as the CLI should be told. */
   publicUrl: string;
   /** How long a device-code request is held open before the CLI asks again. */
@@ -38,16 +40,25 @@ const PROVIDERS: Record<Provider, { name: string; allowlist: string }> = {
   github: { name: "GitHub", allowlist: "SFO_ALLOWED_GITHUB_IDS" },
 };
 
+export type Allowlists = Record<Provider, Set<string>>;
+
 /**
  * The account a sign-in method belongs to, created on first sight for an
- * allowed identity, or null if it is not allowed in. A refused one is logged
- * by its provider's opaque id (never a name or email), which is what the
- * allowlist needs.
+ * allowed identity, or null if it is not allowed in. An existing account gets
+ * in while any of its methods is still allowlisted: a linked method needs no
+ * entry of its own, and taking a person's ids off the allowlists locks them
+ * out. A refused one is logged by its provider's opaque id (never a name or
+ * email), which is what the allowlist needs.
  */
-export function accountFor(db: Db, provider: Provider, subject: string, allowed: Set<string>, log: (m: string) => void = console.log): string | null {
+export function accountFor(db: Db, provider: Provider, subject: string, allowlists: Allowlists, log: (m: string) => void = console.log): string | null {
   const found = db.prepare("SELECT user_id FROM identities WHERE provider = ? AND subject = ?").get(provider, subject) as { user_id: string } | undefined;
-  if (found) return found.user_id;
-  if (!allowed.has(subject)) {
+  const permitted = found
+    ? (db.prepare("SELECT provider, subject FROM identities WHERE user_id = ?").all(found.user_id) as { provider: Provider; subject: string }[]).some((i) =>
+        allowlists[i.provider].has(i.subject),
+      )
+    : allowlists[provider].has(subject);
+  if (found && permitted) return found.user_id;
+  if (!permitted) {
     log(`sign-in refused for ${PROVIDERS[provider].name} id ${subject} — to allow it: fly secrets set ${PROVIDERS[provider].allowlist}=${subject}`);
     return null;
   }
@@ -58,9 +69,9 @@ export function accountFor(db: Db, provider: Provider, subject: string, allowed:
 }
 
 /** The person behind an Apple sign-in, or null if they are not allowed in. */
-export async function personFor(deps: Pick<AuthDeps, "db" | "verifyApple" | "allowed" | "log">, idToken: string): Promise<string | null> {
+export async function personFor(deps: Pick<AuthDeps, "db" | "verifyApple" | "allowed" | "allowedGithub" | "log">, idToken: string): Promise<string | null> {
   const who = await deps.verifyApple(idToken);
-  return accountFor(deps.db, "apple", who.sub, deps.allowed, deps.log);
+  return accountFor(deps.db, "apple", who.sub, { apple: deps.allowed, github: deps.allowedGithub }, deps.log);
 }
 
 /** A new signed-in device for this person, and the token it uses; only the token's hash is kept. */

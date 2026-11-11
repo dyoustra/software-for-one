@@ -33,10 +33,12 @@ function server(answers: Poll[], opts: { githubId?: string; allowedGithub?: stri
   const db = openDb(":memory:");
   const { github, polls } = fakeGitHub(answers, opts.githubId);
   const oauth = { clientId: "x", authorizeUrl: () => "", whoami: async () => "x", exchange: async () => ({ accessToken: "", refreshToken: null, expiresAt: null }) };
+  const allowedApple = new Set(["me", "you"]);
+  const allowedGithub = new Set(opts.allowedGithub ?? ["4242"]);
   const app = createApp({
-    db, version: "t", verifyApple: async (t) => ({ sub: t }), allowed: new Set(["me", "you"]), publicUrl: "https://cp.test", holdMs: 50,
+    db, version: "t", verifyApple: async (t) => ({ sub: t }), allowed: allowedApple, publicUrl: "https://cp.test", holdMs: 50,
     log: (m) => said.push(m), vault: new Vault(db, randomBytes(32).toString("base64")), github: oauth, githubRedirects: [], sprites: noSprites,
-    githubDevice: github, allowedGithub: new Set(opts.allowedGithub ?? ["4242"]),
+    githubDevice: github, allowedGithub,
   });
   const call = (method: string, path: string, body?: unknown, token?: string, origin?: string) =>
     app.request(path, {
@@ -46,7 +48,7 @@ function server(answers: Poll[], opts: { githubId?: string; allowedGithub?: stri
     });
   const start = async () => (await (await call("POST", "/auth/github/start")).json()) as { flow: string; userCode: string; verificationUri: string };
   const apple = async (idToken: string) => ((await (await call("POST", "/auth/apple", { idToken })).json()) as { token: string }).token;
-  return { db, said, polls, call, start, apple };
+  return { db, said, polls, call, start, apple, allowedApple, allowedGithub };
 }
 
 const approved: Poll = { token: "gho_test" };
@@ -125,6 +127,18 @@ describe("adding GitHub to an account", () => {
     const signedIn = await s.call("POST", "/auth/github/wait", { flow: (await s.start()).flow });
     expect(signedIn.status).toBe(200);
     expect(s.db.prepare("SELECT count(*) AS n FROM users").get()).toEqual({ n: 1 });
+  });
+
+  it("locks the account out, by every method, once none of its methods is allowlisted", async () => {
+    const s = server([approved], { allowedGithub: [] });
+    await s.call("POST", "/auth/github/wait", { flow: (await s.start()).flow, link: true }, await s.apple("me"));
+
+    s.allowedApple.delete("me");
+    expect((await s.call("POST", "/auth/apple", { idToken: "me" })).status).toBe(403);
+    expect((await s.call("POST", "/auth/github/wait", { flow: (await s.start()).flow })).status).toBe(403);
+
+    s.allowedGithub.add("4242");
+    expect((await s.call("POST", "/auth/apple", { idToken: "me" })).status).toBe(200);
   });
 
   it("will not take a GitHub account that already signs in to someone else", async () => {
