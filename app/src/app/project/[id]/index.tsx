@@ -131,7 +131,7 @@ export default function ProjectScreen() {
         }}
       />
       <ErrorText error={error} />
-      {!project && <Loading label="Waking the project's machine…" />}
+      {!project && !error && <Loading label="Waking the project's machine…" />}
       {project && <ProjectCard project={project} />}
       {kind === 'done' && <DeliveredFor id={id} />}
       {stoppedForPriorArt && (
