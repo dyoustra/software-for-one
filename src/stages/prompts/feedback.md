@@ -35,5 +35,9 @@ or `{"verdict":"too_big","summary":"<why, and what a bigger follow-up would invo
 
 Run the gate commands at the end of these instructions before you finish.
 
-Do not write to `.sfo/` other than `CRITERIA.jsonl`, appending decisions, and
-`FEEDBACK_RESULT.json` or `CONTEST.json`.
+If the change alters how the project is used, what it does, or what does not
+work, rewrite `.sfo/DELIVERY.json` to match, keeping its fields and their
+limits exactly as they are.
+
+Do not write to `.sfo/` other than `CRITERIA.jsonl`, appending decisions,
+`DELIVERY.json`, and `FEEDBACK_RESULT.json` or `CONTEST.json`.

@@ -95,4 +95,29 @@ Then, in order:
 Be accurate rather than reassuring. Someone reads this to decide whether to
 trust the thing you built.
 
-Write only `.sfo/SUMMARY.md`.
+Then write `.sfo/DELIVERY.json`: the same account, short enough for a phone,
+as one JSON object with exactly these fields:
+
+    {
+      "what": "<one sentence: what this is and what it does, at most 200 characters>",
+      "use": [
+        {"kind": "command", "command": "<a command to type, as it runs from a new terminal>", "label": "<what it does, optional>"},
+        {"kind": "url", "url": "<an address to open>", "label": "<optional>"},
+        {"kind": "step", "text": "<anything else needed first, such as a credential to set>"}
+      ],
+      "examples": [{"say": "<something the person might want>", "do": "<the exact command or action>"}],
+      "features": ["<what it does, a short phrase each>"],
+      "gaps": [{"text": "<one thing that does not work or was not verified>", "weight": "blocks|limits|note"}]
+    }
+
+- `use`: 1–6 entries, in the order the person needs them; only kinds that
+  apply. A command is the installed one from `.sfo/INSTALL.json` when there is
+  one.
+- `examples`: up to 4, real invocations that work.
+- `features`: 1–6, at most 140 characters each.
+- `gaps`: up to 6, most serious first, the same ones `SUMMARY.md` leads with.
+  `blocks`: it does not do something it should. `limits`: it works, with a
+  limitation. `note`: worth knowing, not wrong.
+- No Markdown in any field.
+
+Write only `.sfo/SUMMARY.md` and `.sfo/DELIVERY.json`.

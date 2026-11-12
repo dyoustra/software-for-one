@@ -6,6 +6,7 @@ import { readState } from "./state.js";
 import { readSlices, type Slice } from "./slices.js";
 import { readCriteria, writeCriteria, type Criterion } from "./criteria.js";
 import { recordCost } from "./cost.js";
+import { DELIVERY_FILE, deliveryProblem, readDeliveryFile } from "./delivery.js";
 import { appendDecision } from "./decisions.js";
 import { lockTests, readTestLock, verifyTestLock } from "./testlock.js";
 import { TEST_DIR, agentToolsForStage, gateFor, type VerifyResult } from "./verify.js";
@@ -143,6 +144,14 @@ function recordCriteriaChanges(id: string, n: number, text: string, before: Crit
   );
 }
 
+function keepValidDelivery(id: string, before: string | null, env: Env | undefined): void {
+  const now = readDeliveryFile(id, env);
+  if (now === before || !deliveryProblem(now)) return;
+  const file = artifactPath(id, DELIVERY_FILE, env);
+  if (before === null) fs.rmSync(file, { force: true });
+  else fs.writeFileSync(file, before);
+}
+
 function appendToSummary(id: string, entry: FeedbackEntry, summary: string, env: Env | undefined): void {
   const file = artifactPath(id, "SUMMARY.md", env);
   if (!fs.existsSync(file)) return;
@@ -188,6 +197,9 @@ export async function runFeedback(ctx: FeedbackContext, n: number): Promise<Feed
     return { outcome: "failed", reason };
   };
 
+  // The agent may rewrite DELIVERY.json; a rewrite that breaks its schema is
+  // undone rather than failing a change that otherwise went in.
+  const deliveryBefore = readDeliveryFile(id, env);
   let attempts = 0;
   let previous: string | null = null;
   while (attempts < MAX_FEEDBACK_ATTEMPTS) {
@@ -242,6 +254,7 @@ export async function runFeedback(ctx: FeedbackContext, n: number): Promise<Feed
 
     lockTests(id, TEST_DIR, env);
     recordCriteriaChanges(id, n, entry.text, criteriaBefore, env);
+    keepValidDelivery(id, deliveryBefore, env);
     const summary = outcome?.summary ?? "Changed as asked; the agent left no summary.";
     appendToSummary(id, entry, summary, env);
     updateFeedback(id, n, { status: "done", summary }, env);

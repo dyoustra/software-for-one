@@ -13,6 +13,7 @@ import { readEstimate, formatEstimate, type Estimate } from "./estimate.js";
 import { readDecisions, appendDecision } from "./decisions.js";
 import { commitStage, discardPaths } from "./repo.js";
 import { readPriorArt, blocksPipeline } from "./priorart.js";
+import { deliveryProblem, readDeliveryFile } from "./delivery.js";
 import { lockTests, readTestLock, verifyTestLock } from "./testlock.js";
 import { filesFor } from "./contracts.js";
 import {
@@ -1164,6 +1165,17 @@ export async function advance(
         (opts.drawDrafts ?? drawDrafts)(id, env ?? process.env);
       } catch (err) {
         console.error(`sfo: could not draw the drafts — ${reason(err)}`);
+      }
+    }
+
+    // The app shows a finished project from DELIVERY.json; one that is
+    // missing or malformed fails deliver like any broken output contract, with
+    // the reason a retry needs.
+    if (upcoming === "deliver") {
+      const problem = deliveryProblem(readDeliveryFile(id, env));
+      if (problem) {
+        fail(id, state, upcoming, problem, env);
+        return;
       }
     }
 

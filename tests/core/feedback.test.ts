@@ -95,6 +95,28 @@ describe("runFeedback", () => {
     expect(c.after).toBe(1);
   });
 
+  it("keeps a rewritten DELIVERY.json that is right, and undoes one that is not", async () => {
+    const valid = (what: string) => JSON.stringify({ what, use: [{ kind: "command", command: "tower" }], examples: [], features: ["draws a tower"], gaps: [] });
+    write(".sfo/DELIVERY.json", valid("Draws a tower."));
+
+    const first = addFeedback("p", "draw it taller", env).n;
+    await runFeedback(ctx(new Agent(() => {
+      write("tower.py", "ART = 'taller'\n");
+      write(".sfo/DELIVERY.json", valid("Draws a taller tower."));
+      result("done", "Taller.");
+    })), first);
+    expect(JSON.parse(fs.readFileSync(path.join(dir, ".sfo/DELIVERY.json"), "utf8")).what).toBe("Draws a taller tower.");
+
+    const second = addFeedback("p", "add a flag", env).n;
+    const out = await runFeedback(ctx(new Agent(() => {
+      write("tower.py", "ART = 'flag'\n");
+      write(".sfo/DELIVERY.json", '{"what": ""}');
+      result("done", "Flag added.");
+    })), second);
+    expect(out.outcome).toBe("done");
+    expect(JSON.parse(fs.readFileSync(path.join(dir, ".sfo/DELIVERY.json"), "utf8")).what).toBe("Draws a taller tower.");
+  });
+
   it("never lets it edit a locked test, and gives the next attempt the reason", async () => {
     const n = addFeedback("p", "change it", env).n;
     const agent = new Agent(() => write("tests/test_s01.py", "def test_s01() -> None: assert True\n"));

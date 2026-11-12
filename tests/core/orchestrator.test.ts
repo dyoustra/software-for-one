@@ -19,6 +19,7 @@ import { ARCHETYPE_FILE } from "../../src/core/stack.js";
 import type { VerifyStep } from "../../src/core/archetype.js";
 import { listProjects, formatStatus } from "../../src/commands/status.js";
 import type { Runner, RunStageInput, StageResult, StageUsage } from "../../src/runner/types.js";
+import { readFailure } from "../../src/core/stopped.js";
 
 
 /**
@@ -61,6 +62,7 @@ class FakeRunner implements Runner {
     this.calls.push(input);
     if (this.delayMs > 0) await new Promise((r) => setTimeout(r, this.delayMs));
     this.onRun?.(stageOf(input));
+    if (this.ok) writeDelivery(stageOf(input));
     return {
       ok: this.ok,
       exitCode: this.ok ? 0 : 1,
@@ -73,6 +75,17 @@ class FakeRunner implements Runner {
 /** The stage a call was for, read back the way the runner names its log. */
 function stageOf(input: RunStageInput): string {
   return path.basename(input.logPath, ".log");
+}
+
+/** What a real deliver agent must leave behind, or the stage fails. */
+function writeDelivery(stage: string): void {
+  if (stage !== "deliver") return;
+  const dir = path.join(env.SFO_HOME, "p", ".sfo");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "DELIVERY.json"),
+    JSON.stringify({ what: "A test tool.", use: [{ kind: "command", command: "p" }], examples: [], features: ["does one thing"], gaps: [] }),
+  );
 }
 
 const CRITERIA = [
@@ -105,6 +118,7 @@ function producesArtifacts(
   archetype: string | null = "cli-python",
 ): (stage: string) => void {
   return (stage) => {
+    writeDelivery(stage);
     if (stage === "spec") writeCriteria("p", CRITERIA, env);
     if (stage === "spec" && archetype !== null) {
       fs.writeFileSync(
@@ -313,6 +327,23 @@ describe("advance", () => {
     expect(resumedLogs[0]).toBe("clarify.log");
     expect(resumedLogs).not.toContain("research.log");
     expect(readState("p", env).status).toBe("done");
+  });
+
+  it("fails deliver, with why, when the agent leaves no DELIVERY.json", async () => {
+    seed("capture");
+    await advance("p", pipelineRunner(), env, { verify: PASSES });
+    fs.writeFileSync(path.join(env.SFO_HOME, "p", ".sfo", "ANSWERS.json"), '{"answers":[]}');
+    const base = pipelineRunner();
+    const forgetful: Runner = {
+      runStage: async (input) => {
+        const r = await base.runStage(input);
+        if (stageOf(input) === "deliver") fs.rmSync(path.join(env.SFO_HOME, "p", ".sfo", "DELIVERY.json"), { force: true });
+        return r;
+      },
+    };
+    await advance("p", forgetful, env, { verify: PASSES });
+    expect(readState("p", env)).toMatchObject({ status: "failed", currentStage: "deliver" });
+    expect(readFailure("p", env)?.reason).toBe("the deliver stage did not write .sfo/DELIVERY.json");
   });
 
   it("does not run clarify twice when advanced again after it completed", async () => {
