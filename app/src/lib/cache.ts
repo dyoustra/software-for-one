@@ -1,27 +1,11 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
 
+import { ApiError } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { has, invalidate, peek, put } from '@/lib/cache-store';
 
-/**
- * Responses from the control plane, kept in memory for this run of the app,
- * so a screen opened again shows at once and refreshes quietly behind it.
- */
-const store = new Map<string, unknown>();
-
-/** The last answer for a path, if this run of the app has one. */
-export function peek<T>(path: string): T | null {
-  return (store.get(path) as T | undefined) ?? null;
-}
-
-export function put(path: string, value: unknown): void {
-  store.set(path, value);
-}
-
-/** Forgets a path and everything under it, after the person changes that project. */
-export function invalidate(path: string): void {
-  for (const key of store.keys()) if (key === path || key.startsWith(`${path}/`) || key.startsWith(`${path}?`)) store.delete(key);
-}
+export { invalidate, peek, put };
 
 /**
  * A GET that shows its last answer at once and fetches a fresh one each time
@@ -29,19 +13,26 @@ export function invalidate(path: string): void {
  */
 export function useCached<T>(path: string | null) {
   const { api } = useAuth();
-  const [data, setData] = useState<T | null>(() => (path ? ((store.get(path) as T | undefined) ?? null) : null));
+  const [data, setData] = useState<T | null>(() => (path ? peek<T>(path) : null));
   const [error, setError] = useState<unknown>(null);
 
   const refresh = useCallback(async () => {
     if (!path) return;
     try {
       const fresh = await api<T>(path);
-      store.set(path, fresh);
+      put(path, fresh);
       setData(fresh);
       setError(null);
     } catch (err) {
-      // A cached answer is still worth showing; the error is for when there is none.
-      if (!store.has(path)) setError(err);
+      if (err instanceof ApiError && [401, 403, 404].includes(err.status)) {
+        // Gone, or no longer this person's: the old copy must not stay on screen.
+        invalidate(path);
+        setData(null);
+        setError(err);
+      } else if (!has(path)) {
+        // Otherwise (no network, say) a cached answer is still worth showing.
+        setError(err);
+      }
     }
   }, [api, path]);
 

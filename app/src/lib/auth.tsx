@@ -4,6 +4,7 @@ import { createContext, use, useCallback, useEffect, useMemo, useState, type Rea
 import { Platform } from 'react-native';
 
 import { API_URL, ApiError, call } from '@/lib/api';
+import { clear as clearCache } from '@/lib/cache-store';
 import { tokenStore } from '@/lib/token-store';
 
 /** GitHub's code for the person to enter, and where. */
@@ -48,10 +49,15 @@ type Auth = {
 const AuthContext = createContext<Auth | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  // Every setToken below is preceded by clearCache(): nothing one account
+  // fetched may show to the next.
   const [token, setToken] = useState<string | null | undefined>(undefined);
 
   useEffect(() => {
-    tokenStore.get().then((t) => setToken(t ?? null));
+    tokenStore.get().then((t) => {
+      clearCache();
+      setToken(t ?? null);
+    });
   }, []);
 
   const signIn = useCallback(async () => {
@@ -59,6 +65,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!credential.identityToken) throw new Error('Apple did not return an identity token');
     const { body } = await post<{ token: string }>('/auth/apple', { idToken: credential.identityToken, deviceName: deviceName() });
     await tokenStore.set(body.token);
+    clearCache();
     setToken(body.token);
   }, []);
 
@@ -72,6 +79,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (r.status === 202) continue;
         if (!link && r.body.token) {
           await tokenStore.set(r.body.token);
+          clearCache();
           setToken(r.body.token);
         }
         return;
@@ -84,6 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const current = await tokenStore.get();
     if (current) await call(current, '/devices/current', { method: 'DELETE' }).catch(() => undefined);
     await tokenStore.clear();
+    clearCache();
     setToken(null);
   }, []);
 
@@ -95,6 +104,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } catch (err) {
         if (err instanceof ApiError && err.status === 401) {
           await tokenStore.clear();
+          clearCache();
           setToken(null);
         }
         throw err;
