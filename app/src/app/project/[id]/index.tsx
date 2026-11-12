@@ -3,6 +3,7 @@ import { useCallback, useRef, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { Project, Question } from '@sfo/api';
+import { LiveStrip } from '@/components/activity';
 import { Artifacts } from '@/components/artifacts';
 import { ProjectCard } from '@/components/project-card';
 import { Body, Button, Card, Code, ErrorText, Field, Muted, Page, Telemetry } from '@/components/ui';
@@ -20,7 +21,6 @@ const REPORTS = [
   { kind: 'criteria', title: 'Criteria' },
   { kind: 'slices', title: 'Slices' },
   { kind: 'cost', title: 'Cost' },
-  { kind: 'logs', title: 'Current log' },
 ] as const;
 
 export default function ProjectScreen() {
@@ -137,6 +137,7 @@ export default function ProjectScreen() {
       {(status === 'failed' || (status === 'done' && /fail|unresolved/.test(summary?.note ?? ''))) && (
         <Button title="Retry what failed" busy={busy === 'retry'} onPress={() => act('retry', `/projects/${id}/retry`)} />
       )}
+      {status === 'running' && <LiveStrip projectId={id} onOpen={() => router.push({ pathname: '/project/[id]/log', params: { id } })} />}
       {status === 'running' && <Button title="Stop" kind="secondary" busy={busy === 'stop'} onPress={() => act('stop', `/projects/${id}/stop`)} />}
       {message ? <Code>{message}</Code> : null}
 
@@ -166,6 +167,7 @@ export default function ProjectScreen() {
           {REPORTS.map((r, i) => (
             <Row key={r.kind} first={i === 0} title={r.title} onPress={() => router.push({ pathname: '/project/[id]/report', params: { id, kind: r.kind } })} />
           ))}
+          <Row title="Activity" onPress={() => router.push({ pathname: '/project/[id]/log', params: { id } })} />
           {project.repo && <Row title="Open repo" detail={project.repo.replace(/^https?:\/\/(www\.)?github\.com\//, '')} onPress={() => Linking.openURL(project.repo!)} />}
         </Card>
       )}
@@ -199,6 +201,7 @@ function Row({ title, detail, first, onPress }: { title: string; detail?: string
   return (
     <Pressable
       accessibilityRole="button"
+      accessibilityLabel={detail ? `${title}, ${detail}` : title}
       onPress={onPress}
       style={({ pressed }) => [styles.row, !first && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.line }, pressed && { opacity: 0.6 }]}>
       <Text style={[Type.body, { color: theme.ink, flex: 1 }]}>{title}</Text>

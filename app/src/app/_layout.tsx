@@ -1,19 +1,19 @@
-import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from "expo-router";
-import * as SplashScreen from "expo-splash-screen";
-import { useEffect } from "react";
-import { useColorScheme } from "react-native";
+import { DarkTheme, DefaultTheme, Stack, ThemeProvider } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
+import { useEffect } from 'react';
+import { useColorScheme } from 'react-native';
 
-import { Colors } from "@/constants/theme";
-import { AuthProvider, useAuth } from "@/lib/auth";
-import { ProjectsProvider } from "@/lib/projects";
-import { followNotificationTaps, registerForPush } from "@/lib/push";
+import { Colors } from '@/constants/theme';
+import { AuthProvider, useAuth } from '@/lib/auth';
+import { ProjectsProvider } from '@/lib/projects';
+import { followNotificationTaps, registerForPush } from '@/lib/push';
 
 SplashScreen.preventAutoHideAsync();
 
 /** React Navigation's stock themes, on sfo's surfaces: headers, modals and tab bars match the screens. */
 const navigationTheme = (dark: boolean) => {
   const base = dark ? DarkTheme : DefaultTheme;
-  const c = Colors[dark ? "dark" : "light"];
+  const c = Colors[dark ? 'dark' : 'light'];
   return {
     ...base,
     colors: {
@@ -51,18 +51,10 @@ function Routes() {
       <Stack>
         <Stack.Protected guard={!!token}>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen
-            name="project/[id]/index"
-            options={{ title: "Project", headerBackTitle: "Projects" }}
-          />
-          <Stack.Screen
-            name="project/[id]/questions"
-            options={{ title: "Questions", presentation: "modal" }}
-          />
-          <Stack.Screen
-            name="project/[id]/report"
-            options={{ title: "Report" }}
-          />
+          <Stack.Screen name="project/[id]/index" options={{ title: 'Project', headerBackTitle: 'Projects' }} />
+          <Stack.Screen name="project/[id]/questions" options={{ title: 'Questions', presentation: 'modal' }} />
+          <Stack.Screen name="project/[id]/report" options={{ title: 'Report' }} />
+          <Stack.Screen name="project/[id]/log" options={{ title: 'Activity' }} />
         </Stack.Protected>
         <Stack.Protected guard={!token}>
           <Stack.Screen name="sign-in" options={{ headerShown: false }} />
@@ -75,7 +67,7 @@ function Routes() {
 export default function RootLayout() {
   const scheme = useColorScheme();
   return (
-    <ThemeProvider value={navigationTheme(scheme === "dark")}>
+    <ThemeProvider value={navigationTheme(scheme === 'dark')}>
       <AuthProvider>
         <Routes />
       </AuthProvider>

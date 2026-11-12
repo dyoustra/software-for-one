@@ -8,6 +8,7 @@ import {
   Text,
   TextInput,
   View,
+  type StyleProp,
   type TextInputProps,
   type TextStyle,
   type ViewStyle,
@@ -51,7 +52,7 @@ export function Muted({ children, style }: { children: ReactNode; style?: TextSt
 }
 
 /** A machine fact: a count, a sum of money, a duration, a stage. Monospaced, tabular. */
-export function Telemetry({ children, tone, style, numberOfLines }: { children: ReactNode; tone?: ToneName; style?: TextStyle; numberOfLines?: number }) {
+export function Telemetry({ children, tone, style, numberOfLines }: { children: ReactNode; tone?: ToneName; style?: StyleProp<TextStyle>; numberOfLines?: number }) {
   const theme = useTheme();
   return (
     <Text numberOfLines={numberOfLines} style={[Type.telemetry, { color: tone ? theme[tone] : theme.inkMuted }, style]}>
