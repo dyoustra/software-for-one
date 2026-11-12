@@ -113,6 +113,11 @@ export default function ProjectScreen() {
       <Stack.Screen options={{ title: summary?.title ?? (settingUp ? 'Setting up' : 'Project') }} />
       <ErrorText error={error} />
       {project && <ProjectCard project={project} />}
+      {summary?.note && (status === 'awaiting_human' || status === 'done') ? (
+        <Card>
+          <Body selectable>{summary.note.replace(/^stopped: /, '')}</Body>
+        </Card>
+      ) : null}
 
       {settingUp && project?.setup?.error && (
         <>
@@ -128,7 +133,7 @@ export default function ProjectScreen() {
           onPress={() => router.push({ pathname: '/project/[id]/questions', params: { id } })}
         />
       )}
-      {status === 'awaiting_human' && questions.length === 0 && <Button title="Resume" busy={busy === 'run'} onPress={() => act('run', `/projects/${id}/run`)} />}
+      {status === 'awaiting_human' && questions.length === 0 && <Button title={summary?.note?.startsWith('stopped:') ? 'Build it anyway' : 'Resume'} busy={busy === 'run'} onPress={() => act('run', `/projects/${id}/run`)} />}
       {(status === 'failed' || (status === 'done' && /fail|unresolved/.test(summary?.note ?? ''))) && (
         <Button title="Retry what failed" busy={busy === 'retry'} onPress={() => act('retry', `/projects/${id}/retry`)} />
       )}

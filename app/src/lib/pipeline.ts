@@ -93,7 +93,8 @@ export function cardModel(project: Project): CardModel {
   switch (s.status) {
     case 'awaiting_human': {
       const text = s.openQuestions ? plural(s.openQuestions, 'question') : s.currentStage === 'clarify' ? 'Questions' : 'Needs you';
-      return { ...base, kind: 'waiting', badge: { tone: 'waiting', text }, rail: { at, tone: 'waiting', halo: 'steady' }, time: 'Parked' };
+      // Without questions, the note is what it waits for: a budget, a crash, a stop, prior art.
+      return { ...base, kind: 'waiting', badge: { tone: 'waiting', text }, rail: { at, tone: 'waiting', halo: 'steady' }, time: 'Parked', line: s.openQuestions ? undefined : s.note };
     }
     case 'running':
       return { ...base, kind: 'running', badge: { tone: 'running', text: RUNNING_WORDS[MILESTONES[at]] }, rail: { at, tone: 'running', halo: 'breathing' }, time };

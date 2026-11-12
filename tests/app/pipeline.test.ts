@@ -33,6 +33,11 @@ describe("a project's card", () => {
     expect(m).toMatchObject({ kind: "waiting", badge: { tone: "waiting", text: "2 questions" }, rail: { at: 2, halo: "steady" }, spend: "$0.18", time: "Parked" });
   });
 
+  it("waiting without questions says what it waits for", () => {
+    const m = cardModel(project({ status: "awaiting_human", currentStage: "research", note: "stopped: use shuf instead" }));
+    expect(m).toMatchObject({ kind: "waiting", badge: { text: "Needs you" }, line: "stopped: use shuf instead" });
+  });
+
   it("is running, saying what it is doing, with slices once planned and a breathing halo", () => {
     const m = cardModel(project({ status: "running", currentStage: "build", slicesTotal: 5, slicesPassed: ["S-01", "S-02", "S-03"], spendUsd: 1.4, computeMs: 14 * 60_000 }));
     expect(m).toMatchObject({ kind: "running", badge: { text: "Building" }, rail: { at: 4, tone: "running", halo: "breathing" }, slices: { passed: 3, total: 5 }, time: "14m" });
