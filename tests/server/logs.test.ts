@@ -122,6 +122,16 @@ describe("a project's log, a page at a time", () => {
     expect((await s.get("?from=-1")).status).toBe(400);
   });
 
+  it("does not list or read a log that is a symlink", async () => {
+    write("spec", say("real"));
+    fs.writeFileSync(path.join(home, "secret.txt"), say("leaked"));
+    fs.symlinkSync(path.join(home, "secret.txt"), path.join(logs, "build-S-01.log"));
+    const s = await server();
+    const { page } = await s.get("");
+    expect(page.stages.map((x) => x.name)).toEqual(["spec"]);
+    expect((await s.get("?stage=build-S-01")).status).toBe(404);
+  });
+
   it("has no logs before the run starts", async () => {
     fs.rmSync(logs, { recursive: true });
     const s = await server();

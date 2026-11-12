@@ -12,7 +12,8 @@ import { PROJECT_ID, newSpriteName, provisionProject, type GitHub, type SpriteCr
 import { DEFAULT_PREFERENCES, KINDS, LANGUAGES, PreferencesSchema, WEB_DATA, WEB_HOSTS } from "../core/preferences.js";
 import type { Project, PreferencesResponse } from "../api/types.js";
 import type { SpriteCli } from "../core/sprite.js";
-import { LOG_PAGE_SCRIPT, PAGE_BYTES, parseLogPage, STAGE_NAME, TAIL_BYTES } from "./logs.js";
+import { LOG_PAGE_SCRIPT, PAGE_BYTES, parseLogPage, parseResultFiles, RESULTS_SCRIPT, STAGE_NAME, TAIL_BYTES } from "./logs.js";
+import { resultsFor } from "../core/results.js";
 
 export interface ProjectDeps {
   db: Db;
@@ -375,6 +376,25 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
     if (r.status !== 0) return c.json({ error: r.stdout.trim().slice(0, 300) || "could not read the log" }, 502);
     const page = parseLogPage(r.stdout, { tailed: from === undefined, askedFor: stage || undefined });
     return page ? c.json(page) : c.json({ error: "no such stage" }, 404);
+  });
+
+  // What a project produced (RESULTS_SPEC §4). Its records are read from the
+  // Sprite in one go and set out in a scratch sfo home, so sfo's own readers,
+  // with their validation, are what interpret them.
+  app.get("/projects/:id/results", auth, async (c: Context<Env>) => {
+    const row = owned(c);
+    if (!row) return c.json({ error: "no such project" }, 404);
+    const r = await sprites.exec(row.sprite, RESULTS_SCRIPT, [row.id]);
+    if (r.status !== 0) return c.json({ error: r.stdout.trim().slice(0, 300) || "could not read the project's records" }, 502);
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "sfo-results-"));
+    try {
+      const dir = path.join(home, row.id, ".sfo");
+      fs.mkdirSync(dir, { recursive: true });
+      for (const [name, text] of parseResultFiles(r.stdout)) fs.writeFileSync(path.join(dir, name), text);
+      return c.json(resultsFor(row.id, { SFO_HOME: home }));
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 
   app.get("/projects/:id/summary", auth, async (c: Context<Env>) => {

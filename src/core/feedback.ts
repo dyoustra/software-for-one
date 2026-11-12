@@ -148,8 +148,9 @@ function keepValidDelivery(id: string, before: string | null, env: Env | undefin
   const now = readDeliveryFile(id, env);
   if (now === before || !deliveryProblem(now)) return;
   const file = artifactPath(id, DELIVERY_FILE, env);
-  if (before === null) fs.rmSync(file, { force: true });
-  else fs.writeFileSync(file, before);
+  // Removed rather than written through: what the agent left may be a symlink.
+  fs.rmSync(file, { force: true });
+  if (before !== null) fs.writeFileSync(file, before, { flag: "wx" });
 }
 
 function appendToSummary(id: string, entry: FeedbackEntry, summary: string, env: Env | undefined): void {

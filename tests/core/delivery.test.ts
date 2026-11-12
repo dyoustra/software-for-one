@@ -21,6 +21,8 @@ describe("DELIVERY.json", () => {
     expect(deliveryProblem(JSON.stringify({ ...good, use: [] }))).toMatch(/does not match its schema: use — /);
     expect(deliveryProblem(JSON.stringify({ ...good, gaps: [{ text: "x", weight: "bad" }] }))).toMatch(/gaps\.0\.weight/);
     expect(deliveryProblem(JSON.stringify({ ...good, use: [{ kind: "url", url: "not a url" }] }))).toMatch(/use\.0\.url/);
+    expect(deliveryProblem(JSON.stringify({ ...good, use: [{ kind: "url", url: "javascript:alert(1)" }] }))).toMatch(/use\.0\.url — url must be http\(s\)/);
+    expect(deliveryProblem(JSON.stringify({ ...good, use: [{ kind: "url", url: "https://example.com" }] }))).toBeNull();
   });
 
   it("reads as nothing when it is not right, rather than half", () => {

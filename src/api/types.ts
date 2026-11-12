@@ -126,3 +126,29 @@ export interface LogPage {
   to: number;
   events: LogEvent[];
 }
+
+/** A finished project's delivery (RESULTS_SPEC §3), as the deliver stage wrote it. */
+export interface Delivery {
+  what: string;
+  use: ({ kind: "command"; command: string; label?: string } | { kind: "url"; url: string; label?: string } | { kind: "step"; text: string })[];
+  examples: { say: string; do: string }[];
+  features: string[];
+  gaps: { text: string; weight: "blocks" | "limits" | "note" }[];
+}
+
+/** What a project produced, for the done, Cost and Slices screens (RESULTS_SPEC §4). */
+export interface ProjectResults {
+  /** Null for a project delivered before DELIVERY.json, or not yet delivered. */
+  delivery: Delivery | null;
+  /** Commands sfo put on the person's PATH. */
+  installed: string[];
+  /** The criteria's groups, standing in for features when there is no delivery. */
+  featuresFallback: string[];
+  cost: {
+    totalUsd: number;
+    computeMs: number;
+    byStage: { stage: string; costUsd: number; computeMs: number; ok: boolean; billing: "api" | "plan" | null }[];
+  };
+  slices: { id: string; name: string; criteria: string[]; attempts: number; result: "passed" | "failed" | "skipped" | "pending" }[];
+}
+

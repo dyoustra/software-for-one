@@ -14,7 +14,8 @@ export const DeliverySchema = z.object({
     .array(
       z.discriminatedUnion("kind", [
         z.object({ kind: z.literal("command"), command: z.string().min(1).max(300), label: z.string().max(80).optional() }),
-        z.object({ kind: z.literal("url"), url: z.string().url().max(500), label: z.string().max(80).optional() }),
+        // Only web addresses: the app opens this, and a model wrote it.
+        z.object({ kind: z.literal("url"), url: z.string().url().max(500).refine(isWebAddress, "url must be http(s)"), label: z.string().max(80).optional() }),
         z.object({ kind: z.literal("step"), text: z.string().min(1).max(300) }),
       ]),
     )
@@ -26,6 +27,15 @@ export const DeliverySchema = z.object({
 });
 
 export type Delivery = z.infer<typeof DeliverySchema>;
+
+export function isWebAddress(url: string): boolean {
+  try {
+    return ["http:", "https:"].includes(new URL(url).protocol);
+  } catch {
+    return false;
+  }
+}
+
 export const DELIVERY_FILE = "DELIVERY.json";
 
 /** The file's problem, in words a retry can act on, or null when it is right. */
@@ -43,9 +53,15 @@ export function deliveryProblem(raw: string | null): string | null {
   return `.sfo/${DELIVERY_FILE} does not match its schema: ${issue.path.join(".") || "(top)"} — ${issue.message}`;
 }
 
+/**
+ * The file as written, or null. Only a regular file: an agent could leave a
+ * symlink there, and sfo, unlike the agent, is not sandboxed.
+ */
 export function readDeliveryFile(id: string, env?: Env): string | null {
+  const file = artifactPath(id, DELIVERY_FILE, env);
   try {
-    return fs.readFileSync(artifactPath(id, DELIVERY_FILE, env), "utf8");
+    if (!fs.lstatSync(file).isFile()) return null;
+    return fs.readFileSync(file, "utf8");
   } catch {
     return null;
   }

@@ -1,6 +1,34 @@
 import type { LogPage } from "../api/types.js";
 import { parseEvent } from "../commands/logs.js";
 
+/** The records a project's results are read from, each at most this many bytes. */
+export const RESULT_FILES = ["state.json", "DELIVERY.json", "INSTALL.json", "COST.jsonl", "SLICES.jsonl", "VERIFY.jsonl", "CRITERIA.jsonl"];
+const FILE_BYTES = 2 * 1024 * 1024;
+const FILE_MARK = "--sfo-file--";
+
+/**
+ * Prints each of the project's records that exists, after a marker naming it.
+ * Plain shell, like the log script, so any Sprite can answer. Symlinks are
+ * skipped, here and in the log script: an agent could point one anywhere.
+ */
+export const RESULTS_SCRIPT = `
+d="\${SFO_HOME:-$HOME/.sfo}/$1/.sfo"
+for f in ${RESULT_FILES.join(" ")}; do
+  if [ -f "$d/$f" ] && [ ! -L "$d/$f" ]; then printf '\\n%s %s\\n' "${FILE_MARK}" "$f"; head -c ${FILE_BYTES} "$d/$f"; fi
+done
+`;
+
+/** The script's output as file name and contents; anything not on the list is ignored. */
+export function parseResultFiles(stdout: string): Map<string, string> {
+  const files = new Map<string, string>();
+  for (const part of stdout.split(`\n${FILE_MARK} `).slice(1)) {
+    const nl = part.indexOf("\n");
+    const name = part.slice(0, nl);
+    if (RESULT_FILES.includes(name)) files.set(name, part.slice(nl + 1));
+  }
+  return files;
+}
+
 /** The most a page reads, so a stage that logged a huge tool output cannot stall a phone. */
 export const PAGE_BYTES = 256 * 1024;
 /** Without a starting point, a page is the end of the log: this much of it. */
@@ -25,12 +53,13 @@ echo "$project"
 last=""
 for f in $(ls -tr -- *.log 2>/dev/null); do
   case "$f" in *.verify.log) continue ;; esac
+  [ -L "$f" ] && continue
   printf '%s\\t%s\\n' "\${f%.log}" "$(wc -c < "$f" | tr -d ' ')"
   last="\${f%.log}"
 done
 echo "${SEPARATOR}"
 stage="\${2:-$last}"
-[ -n "$stage" ] && [ -f "$stage.log" ] || exit 0
+[ -n "$stage" ] && [ -f "$stage.log" ] && [ ! -L "$stage.log" ] || exit 0
 size=$(wc -c < "$stage.log" | tr -d ' ')
 from="$3"
 if [ -z "$from" ]; then from=$(( size > $5 ? size - $5 : 0 )); fi
