@@ -1,6 +1,6 @@
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { Alert, Linking, StyleSheet, TextInput, View } from 'react-native';
+import { Linking, StyleSheet, TextInput, View } from 'react-native';
 
 import type { Project, Question } from '@sfo/api';
 import { Artifacts } from '@/components/artifacts';
@@ -8,6 +8,7 @@ import { Body, Button, Card, Code, ErrorText, Muted, Page, Tone } from '@/compon
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth';
+import { confirm } from '@/lib/confirm';
 import { statusLabel } from '@/lib/status';
 
 const REPORTS = [
@@ -66,22 +67,16 @@ export default function ProjectScreen() {
     }
   }
 
-  function destroy() {
-    Alert.alert('Delete this project?', `Its machine and everything on it go${project?.repo ? '; its GitHub repo stays.' : ', and it has no repo: this is the only copy.'}`, [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          try {
-            await api(`/projects/${id}`, { method: 'DELETE' });
-            router.back();
-          } catch (err) {
-            setError(err);
-          }
-        },
-      },
-    ]);
+  async function destroy() {
+    const message = `Its machine and everything on it go${project?.repo ? '; its GitHub repo stays.' : ', and it has no repo: this is the only copy.'}`;
+    if (!(await confirm('Delete this project?', message, 'Delete'))) return;
+    try {
+      await api(`/projects/${id}`, { method: 'DELETE' });
+      if (router.canGoBack()) router.back();
+      else router.replace('/');
+    } catch (err) {
+      setError(err);
+    }
   }
 
   const summary = project?.summary ?? null;

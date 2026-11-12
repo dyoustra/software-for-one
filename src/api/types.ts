@@ -58,6 +58,8 @@ export interface Device {
   name: string;
   createdAt: string;
   lastUsedAt: string | null;
+  /** The device making the request. */
+  current: boolean;
 }
 
 /** A way to sign in to an account. */

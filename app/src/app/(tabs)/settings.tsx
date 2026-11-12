@@ -1,6 +1,6 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Alert, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import type { CredentialKind, Device, Identity, LanguageKind, Preferences, PreferencesResponse } from '@sfo/api';
 import { GitHubSignIn } from '@/components/github-sign-in';
@@ -8,6 +8,7 @@ import { Body, Button, Card, ErrorText, Heading, Muted, Page } from '@/component
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth';
+import { confirm } from '@/lib/confirm';
 
 const PROVIDER_NAMES: Record<Identity['provider'], string> = { apple: 'Apple', github: 'GitHub' };
 
@@ -182,16 +183,18 @@ export default function Settings() {
         <Body style={styles.section}>Signed-in devices</Body>
         {devices.map((d) => (
           <View key={d.id} style={styles.row}>
-            <Muted style={{ flex: 1 }}>{d.name}</Muted>
-            <Pressable
-              onPress={() =>
-                Alert.alert(`Sign out ${d.name}?`, 'It will need to sign in again.', [
-                  { text: 'Cancel', style: 'cancel' },
-                  { text: 'Sign out', style: 'destructive', onPress: () => api(`/devices/${d.id}`, { method: 'DELETE' }).then(load, setError) },
-                ])
-              }>
-              <Text style={{ color: theme.bad, fontWeight: '600' }}>Revoke</Text>
-            </Pressable>
+            <Muted style={{ flex: 1 }}>
+              {d.name}
+              {d.current ? ' · this device' : ''}
+            </Muted>
+            {!d.current && (
+              <Pressable
+                onPress={async () => {
+                  if (await confirm(`Sign out ${d.name}?`, 'It will need to sign in again.', 'Sign out')) api(`/devices/${d.id}`, { method: 'DELETE' }).then(load, setError);
+                }}>
+                <Text style={{ color: theme.bad, fontWeight: '600' }}>Revoke</Text>
+              </Pressable>
+            )}
           </View>
         ))}
         <Button title="Sign out of this device" kind="destructive" onPress={signOut} />

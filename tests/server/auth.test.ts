@@ -46,6 +46,15 @@ describe("device sign-in", () => {
     expect(((await devices.json()) as { name: string }[]).map((d) => d.name)).toEqual(["danny's mac"]);
   });
 
+  it("says which of the account's devices is the one asking", async () => {
+    const s = server();
+    const mac = ((await (await login(s)).collected.json()) as { token: string }).token;
+    const phone = ((await (await s.post("/auth/apple", { idToken: "me", deviceName: "phone" })).json()) as { token: string }).token;
+    const seen = (await (await s.get("/devices", phone)).json()) as { name: string; current: boolean }[];
+    expect(seen.map((d) => [d.name, d.current])).toEqual([["danny's mac", false], ["phone", true]]);
+    expect(((await (await s.get("/devices", mac)).json()) as { current: boolean }[]).map((d) => d.current)).toEqual([true, false]);
+  });
+
   it("stores no token or code a copy of the database could use", async () => {
     const s = server();
     const started = (await (await s.post("/auth/device", {})).json()) as { deviceCode: string; userCode: string };

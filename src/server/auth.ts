@@ -170,9 +170,11 @@ export function authRoutes(app: Hono<Env>, deps: AuthDeps): void {
 
   app.get("/devices", requireDevice(db), (c: Context<Env>) =>
     c.json(
-      db
-        .prepare("SELECT id, name, created_at AS createdAt, last_used_at AS lastUsedAt FROM devices WHERE user_id = ? AND revoked_at IS NULL ORDER BY created_at")
-        .all(c.get("userId")),
+      (
+        db
+          .prepare("SELECT id, name, created_at AS createdAt, last_used_at AS lastUsedAt FROM devices WHERE user_id = ? AND revoked_at IS NULL ORDER BY created_at")
+          .all(c.get("userId")) as { id: string }[]
+      ).map((d) => ({ ...d, current: d.id === c.get("deviceId") })),
     ),
   );
 

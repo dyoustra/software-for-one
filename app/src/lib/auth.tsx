@@ -9,7 +9,14 @@ import { tokenStore } from '@/lib/token-store';
 /** GitHub's code for the person to enter, and where. */
 export type GitHubCode = { userCode: string; verificationUri: string };
 
-const deviceName = () => (Platform.OS === 'web' ? 'Web browser' : (Device.deviceName ?? 'iPhone'));
+const deviceName = () => (Platform.OS === 'web' ? browserName(navigator.userAgent) : (Device.deviceName ?? 'iPhone'));
+
+/** "Chrome on macOS", so two browsers in the device list can be told apart. */
+export function browserName(ua: string): string {
+  const browser = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : 'A browser';
+  const os = /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Mac OS X/.test(ua) ? 'macOS' : /Windows/.test(ua) ? 'Windows' : /Linux/.test(ua) ? 'Linux' : null;
+  return os ? `${browser} on ${os}` : browser;
+}
 
 async function post<T>(path: string, body: unknown, init: { token?: string | null; signal?: AbortSignal } = {}): Promise<{ status: number; body: T & { error?: string } }> {
   const res = await fetch(`${API_URL}${path}`, {
