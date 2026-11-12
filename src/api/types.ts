@@ -136,8 +136,18 @@ export interface Delivery {
   gaps: { text: string; weight: "blocks" | "limits" | "note" }[];
 }
 
+/** Research's verdict on what already exists. */
+export interface PriorArt {
+  verdict: "no_gap" | "marginal_gap" | "clear_gap";
+  summary: string;
+  existing: { name: string; url: string; gap: string }[];
+  recommendation?: string | null;
+}
+
 /** What a project produced, for the done, Cost and Slices screens (RESULTS_SPEC §4). */
 export interface ProjectResults {
+  /** What research found already exists; a verdict other than clear_gap stops the run for the person. */
+  priorArt: PriorArt | null;
   /** Null for a project delivered before DELIVERY.json, or not yet delivered. */
   delivery: Delivery | null;
   /** Commands sfo put on the person's PATH. */

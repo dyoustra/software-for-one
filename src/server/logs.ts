@@ -2,7 +2,7 @@ import type { LogPage } from "../api/types.js";
 import { parseEvent } from "../commands/logs.js";
 
 /** The records a project's results are read from, each at most this many bytes. */
-export const RESULT_FILES = ["state.json", "DELIVERY.json", "INSTALL.json", "COST.jsonl", "SLICES.jsonl", "VERIFY.jsonl", "CRITERIA.jsonl"];
+export const RESULT_FILES = ["state.json", "PRIOR_ART.json", "DELIVERY.json", "INSTALL.json", "COST.jsonl", "SLICES.jsonl", "VERIFY.jsonl", "CRITERIA.jsonl"];
 const FILE_BYTES = 2 * 1024 * 1024;
 const FILE_MARK = "--sfo-file--";
 

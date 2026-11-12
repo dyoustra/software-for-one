@@ -7,6 +7,7 @@ import { readCriteria } from "./criteria.js";
 import { readCostRecords } from "./cost.js";
 import { readSlices, skippedBy } from "./slices.js";
 import { readVerifyRecords } from "./verifyRecord.js";
+import { readPriorArt } from "./priorart.js";
 
 function quietly<T>(read: () => T, fallback: T): T {
   try {
@@ -46,6 +47,7 @@ export function resultsFor(id: string, env?: Env): ProjectResults {
   const skipped = new Set(skippedBy(slices, failed));
 
   return {
+    priorArt: quietly(() => readPriorArt(id, env), null),
     delivery: parseDelivery(readDeliveryFile(id, env)),
     installed: (quietly(() => readInstall(id, env), null)?.commands ?? []).filter((c) => c.installed).map((c) => c.name),
     featuresFallback: groups,

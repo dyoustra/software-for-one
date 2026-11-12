@@ -108,6 +108,15 @@ describe("a project's results", () => {
     ]);
   });
 
+  it("carries research's verdict on what already exists", async () => {
+    fs.writeFileSync(
+      path.join(sfo, "PRIOR_ART.json"),
+      JSON.stringify({ verdict: "marginal_gap", summary: "Close tools exist.", existing: [{ name: "diskclean", url: "https://example.com/diskclean", gap: "no visual map" }], recommendation: "Try diskclean first." }),
+    );
+    const { body } = await results();
+    expect(body.priorArt).toEqual({ verdict: "marginal_gap", summary: "Close tools exist.", existing: [{ name: "diskclean", url: "https://example.com/diskclean", gap: "no visual map" }], recommendation: "Try diskclean first." });
+  });
+
   it("has no delivery for a project delivered before DELIVERY.json, and the rest still", async () => {
     seed(false);
     const { body } = await results();
@@ -129,6 +138,6 @@ describe("a project's results", () => {
   it("is empty, not an error, for a project with no records yet", async () => {
     const { status, body } = await results();
     expect(status).toBe(200);
-    expect(body).toEqual({ delivery: null, installed: [], featuresFallback: [], cost: { totalUsd: 0, computeMs: 0, byStage: [] }, slices: [] });
+    expect(body).toEqual({ priorArt: null, delivery: null, installed: [], featuresFallback: [], cost: { totalUsd: 0, computeMs: 0, byStage: [] }, slices: [] });
   });
 });

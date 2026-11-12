@@ -33,6 +33,11 @@ describe("a project's card", () => {
     expect(m).toMatchObject({ kind: "waiting", badge: { tone: "waiting", text: "2 questions" }, rail: { at: 2, halo: "steady" }, spend: "$0.18", time: "Parked" });
   });
 
+  it("a close prior-art match is the person's call, not a terminal command", () => {
+    const m = cardModel(project({ status: "awaiting_human", currentStage: "research", note: "prior art is close — `sfo why x` to decide" }));
+    expect(m).toMatchObject({ kind: "waiting", badge: { text: "Your call" }, line: "Something close already exists" });
+  });
+
   it("waiting without questions says what it waits for", () => {
     const m = cardModel(project({ status: "awaiting_human", currentStage: "research", note: "stopped: use shuf instead" }));
     expect(m).toMatchObject({ kind: "waiting", badge: { text: "Needs you" }, line: "stopped: use shuf instead" });

@@ -4,6 +4,7 @@ import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { Project, Question } from '@sfo/api';
 import { LiveStrip } from '@/components/activity';
+import { PriorArtDecision } from '@/components/prior-art';
 import { Delivered, useResults } from '@/components/results';
 import { ProjectCard } from '@/components/project-card';
 import { Body, Button, Card, Code, ErrorText, Field, Loading, Muted, Page, Telemetry } from '@/components/ui';
@@ -115,6 +116,8 @@ export default function ProjectScreen() {
 
   const summary = project?.summary ?? null;
   const kind = project ? cardModel(project).kind : null;
+  // Stopped by research for something that already exists: the decision shows instead of a note and Resume.
+  const stoppedForPriorArt = summary?.status === 'awaiting_human' && summary.currentStage === 'research' && /^(stopped:|prior art is close)/.test(summary.note ?? '');
   const settingUp = project?.status === 'creating';
   const status = summary?.status;
 
@@ -131,7 +134,10 @@ export default function ProjectScreen() {
       {!project && <Loading label="Waking the project's machine…" />}
       {project && <ProjectCard project={project} />}
       {kind === 'done' && <DeliveredFor id={id} />}
-      {summary?.note && (status === 'awaiting_human' || status === 'done') ? (
+      {stoppedForPriorArt && (
+        <PriorArtFor id={id} busy={busy === 'run'} onBuild={() => act('run', `/projects/${id}/run`, { anyway: true })} onDrop={() => remove(false)} />
+      )}
+      {summary?.note && !stoppedForPriorArt && (status === 'awaiting_human' || status === 'done') ? (
         <Card>
           <Body selectable>{summary.note.replace(/^stopped: /, '')}</Body>
         </Card>
@@ -151,7 +157,7 @@ export default function ProjectScreen() {
           onPress={() => router.push({ pathname: '/project/[id]/questions', params: { id } })}
         />
       )}
-      {status === 'awaiting_human' && questions.length === 0 && <Button title={summary?.note?.startsWith('stopped:') ? 'Build it anyway' : 'Resume'} busy={busy === 'run'} onPress={() => act('run', `/projects/${id}/run`)} />}
+      {status === 'awaiting_human' && questions.length === 0 && !stoppedForPriorArt && <Button title="Resume" busy={busy === 'run'} onPress={() => act('run', `/projects/${id}/run`)} />}
       {(status === 'failed' || (status === 'done' && /fail|unresolved/.test(summary?.note ?? ''))) && (
         <Button title="Retry what failed" busy={busy === 'retry'} onPress={() => act('retry', `/projects/${id}/retry`)} />
       )}
@@ -200,6 +206,14 @@ export default function ProjectScreen() {
       {!settingUp && project && <Button title="Delete project" kind="destructive" onPress={() => remove(false)} />}
     </Page>
   );
+}
+
+/** Research's verdict, fetched only for a run it stopped. */
+function PriorArtFor({ id, busy, onBuild, onDrop }: { id: string; busy: boolean; onBuild: () => void; onDrop: () => void }) {
+  const { results, error } = useResults(id);
+  if (error) return <ErrorText error={error} />;
+  if (!results) return <Loading label="Reading what research found…" />;
+  return results.priorArt ? <PriorArtDecision art={results.priorArt} busy={busy} onBuild={onBuild} onDrop={onDrop} /> : null;
 }
 
 /** The delivered section, fetching its results only for a finished project. */

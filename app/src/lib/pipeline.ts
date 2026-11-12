@@ -92,6 +92,10 @@ export function cardModel(project: Project): CardModel {
 
   switch (s.status) {
     case 'awaiting_human': {
+      // sfo's note for a close prior-art match names a terminal command; the app has the decision itself.
+      if (s.note?.startsWith('prior art is close')) {
+        return { ...base, kind: 'waiting', badge: { tone: 'waiting', text: 'Your call' }, rail: { at, tone: 'waiting', halo: 'steady' }, time: 'Parked', line: 'Something close already exists' };
+      }
       const text = s.openQuestions ? plural(s.openQuestions, 'question') : s.currentStage === 'clarify' ? 'Questions' : 'Needs you';
       // Without questions, the note is what it waits for: a budget, a crash, a stop, prior art.
       return { ...base, kind: 'waiting', badge: { tone: 'waiting', text }, rail: { at, tone: 'waiting', halo: 'steady' }, time: 'Parked', line: s.openQuestions ? undefined : s.note };
