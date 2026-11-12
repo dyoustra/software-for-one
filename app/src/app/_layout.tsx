@@ -48,10 +48,11 @@ function Routes() {
 
   return (
     <ProjectsProvider>
-      <Stack>
+      {/* Back is a chevron alone: a long project name would otherwise crowd every bar under it. */}
+      <Stack screenOptions={{ headerBackButtonDisplayMode: 'minimal' }}>
         <Stack.Protected guard={!!token}>
           <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-          <Stack.Screen name="project/[id]/index" options={{ title: 'Project', headerBackTitle: 'Projects' }} />
+          <Stack.Screen name="project/[id]/index" options={{ title: '' }} />
           <Stack.Screen name="project/[id]/questions" options={{ title: 'Questions', presentation: 'modal' }} />
           <Stack.Screen name="project/[id]/report" options={{ title: 'Report' }} />
           <Stack.Screen name="project/[id]/log" options={{ title: 'Activity' }} />

@@ -9,6 +9,7 @@ import { Badge, Button, Card, ErrorText, Field, Loading, Muted, Page } from '@/c
 import { Radius, Spacing, tint, Type } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth';
+import { invalidate } from '@/lib/cache';
 import { cardModel } from '@/lib/pipeline';
 import { useProjects } from '@/lib/projects';
 
@@ -52,6 +53,7 @@ export default function Questions() {
     setError(null);
     try {
       await api(`/projects/${id}/answers`, { method: 'POST', body: Object.fromEntries(questions.map((q) => [q.id, answerText(q, drafts[q.id])])) });
+      invalidate(`/projects/${id}`);
       refresh();
       router.back();
     } catch (err) {

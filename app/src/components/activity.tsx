@@ -40,7 +40,7 @@ function Icon({ glyph, color, background }: { glyph: Glyph; color: string; backg
 }
 
 /** One row of the activity list: an icon for its kind, a verb, its target, and how it went. */
-export function ActivityRow({ row }: { row: Row }) {
+export function ActivityRow({ row, still }: { row: Row; still?: boolean }) {
   const theme = useTheme();
   const [open, setOpen] = useState(false);
 
@@ -55,7 +55,7 @@ export function ActivityRow({ row }: { row: Row }) {
       );
     case 'say':
       return (
-        <Pressable onPress={() => setOpen(!open)} accessibilityRole="button" accessibilityHint={open ? 'Shows less' : 'Shows all of it'}>
+        <Pressable disabled={still} onPress={() => setOpen(!open)} accessibilityRole={still ? undefined : 'button'} accessibilityHint={open ? 'Shows less' : 'Shows all of it'}>
           <View style={[styles.quote, { borderLeftColor: theme.line }]}>
             <Text numberOfLines={open ? undefined : 2} style={[styles.quoteText, { color: theme.inkMuted }]}>
               {row.text}
@@ -74,7 +74,7 @@ export function ActivityRow({ row }: { row: Row }) {
       );
     case 'group':
       return (
-        <Pressable onPress={() => setOpen(!open)} accessibilityRole="button">
+        <Pressable disabled={still} onPress={() => setOpen(!open)} accessibilityRole={still ? undefined : 'button'}>
           <View style={styles.row}>
             <Icon glyph={GLYPHS[row.action]} color={theme.inkMuted} background={theme.well} />
             <Text style={[styles.verb, { color: theme.ink }]}>{row.verb}</Text>
@@ -171,7 +171,7 @@ export function LiveStrip({ projectId, onOpen }: { projectId: string; onOpen: ()
         </View>
         {rows.slice(-3).map((r) => (
           <View key={r.key} style={styles.item}>
-            <ActivityRow row={r} />
+            <ActivityRow row={r} still />
           </View>
         ))}
       </Card>

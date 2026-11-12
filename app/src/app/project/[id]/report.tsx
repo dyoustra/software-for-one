@@ -1,25 +1,18 @@
 import { Stack, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import type { Report } from '@sfo/api';
 import { Badge, Card, Code, ErrorText, Loading, Muted, Page, Telemetry } from '@/components/ui';
 import { Fonts, Radius, Spacing, Type } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { useAuth } from '@/lib/auth';
+import { useCached } from '@/lib/cache';
 import { inline, parseCriteria, parseDecisions, parseMarkdown, type Block, type Inline } from '@/lib/reports';
 
 const TITLES: Record<string, string> = { summary: 'Summary', cost: 'Cost', decisions: 'Decisions', criteria: 'Criteria', slices: 'Slices', logs: 'Current log' };
 
 export default function ReportScreen() {
   const { id, kind } = useLocalSearchParams<{ id: string; kind: string }>();
-  const { api } = useAuth();
-  const [report, setReport] = useState<Report | null>(null);
-  const [error, setError] = useState<unknown>(null);
-
-  useEffect(() => {
-    api<Report>(kind === 'summary' ? `/projects/${id}/summary` : `/projects/${id}/report/${kind}`).then(setReport, setError);
-  }, [api, id, kind]);
+  const { data: report, error } = useCached<Report>(kind === 'summary' ? `/projects/${id}/summary` : `/projects/${id}/report/${kind}`);
 
   const text = report?.output.trim() ?? '';
   return (

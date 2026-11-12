@@ -1,5 +1,3 @@
-import { useFocusEffect } from 'expo-router';
-import { useCallback, useState } from 'react';
 import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { Delivery, ProjectResults } from '@sfo/api';
@@ -7,19 +5,12 @@ import { Artifacts } from '@/components/artifacts';
 import { Loading, Telemetry } from '@/components/ui';
 import { Radius, Spacing, Type } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { useAuth } from '@/lib/auth';
+import { useCached } from '@/lib/cache';
 import { formatDuration, formatSpend } from '@/lib/pipeline';
 
-/** A project's results, read once each time the screen comes into view. */
+/** A project's results: the cached copy at once, refreshed each time the screen comes into view. */
 export function useResults(id: string) {
-  const { api } = useAuth();
-  const [results, setResults] = useState<ProjectResults | null>(null);
-  const [error, setError] = useState<unknown>(null);
-  useFocusEffect(
-    useCallback(() => {
-      api<ProjectResults>(`/projects/${id}/results`).then(setResults, setError);
-    }, [api, id]),
-  );
+  const { data: results, error } = useCached<ProjectResults>(`/projects/${id}/results`);
   return { results, error };
 }
 

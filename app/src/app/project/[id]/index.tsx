@@ -12,6 +12,7 @@ import { Radius, Spacing, tint, Type } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { startProject } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
+import { invalidate, peek, put } from '@/lib/cache';
 import { confirm } from '@/lib/confirm';
 import { cardModel } from '@/lib/pipeline';
 import { useProjects } from '@/lib/projects';
@@ -30,8 +31,7 @@ export default function ProjectScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { api, token } = useAuth();
   const { projects, refresh: refreshList } = useProjects();
-  const [fresh, setFresh] = useState<Project | null>(null);
-  const [updating, setUpdating] = useState(true);
+  const [fresh, setFresh] = useState<Project | null>(() => peek<Project>(`/projects/${id}`));
   const [questions, setQuestions] = useState<Question[]>([]);
   const [feedback, setFeedback] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -39,14 +39,15 @@ export default function ProjectScreen() {
   const [error, setError] = useState<unknown>(null);
   const live = useRef(false);
 
-  // The list's copy shows at once; the fresh one (read from the project's
-  // machine, which may need waking) replaces it when it arrives.
+  // The last copy this run of the app saw, or the list's, shows at once; a
+  // fresh one (read from the project's machine, which may need waking)
+  // replaces it quietly when it arrives.
   const project = fresh ?? projects?.find((p) => p.id === id) ?? null;
 
   const load = useCallback(async () => {
-    setUpdating(true);
     try {
       const p = await api<Project>(`/projects/${id}`);
+      put(`/projects/${id}`, p);
       setFresh(p);
       const kind = cardModel(p).kind;
       live.current = kind === 'running' || kind === 'setup';
@@ -54,8 +55,6 @@ export default function ProjectScreen() {
       setError(null);
     } catch (err) {
       setError(err);
-    } finally {
-      setUpdating(false);
     }
   }, [api, id]);
 
@@ -73,6 +72,7 @@ export default function ProjectScreen() {
     setError(null);
     try {
       const r = await api<{ message?: string }>(path, { method: 'POST', body });
+      invalidate(`/projects/${id}`);
       setMessage(r.message ?? null);
       await load();
       refreshList();
@@ -123,13 +123,8 @@ export default function ProjectScreen() {
 
   return (
     <Page refreshing={false} onRefresh={load}>
-      <Stack.Screen
-        options={{
-          title: summary?.title ?? (settingUp ? 'Setting up' : 'Project'),
-          // In the bar, so the page does not shift when it goes.
-          headerRight: () => (project && updating && !settingUp ? <Telemetry>Updating…</Telemetry> : null),
-        }}
-      />
+      {/* The card under the bar names the project; the bar stays clear. */}
+      <Stack.Screen options={{ title: '' }} />
       <ErrorText error={error} />
       {!project && !error && <Loading label="Waking the project's machine…" />}
       {project && <ProjectCard project={project} />}
