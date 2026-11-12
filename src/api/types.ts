@@ -102,3 +102,27 @@ export interface PreferencesResponse {
   /** The values each field allows, for a client to offer. */
   allowed: { kinds: LanguageKind[]; languages: string[]; webHosts: string[]; webData: string[] };
 }
+
+/** One thing a run did, read from its stage log (LIVE_LOGS_SPEC §4). */
+export type LogEvent =
+  | { kind: "start"; text: string }
+  | { kind: "finish"; ok: boolean; costUsd?: number; turns?: number; durationMs?: number }
+  | { kind: "say"; text: string }
+  | { kind: "read" | "edit" | "write" | "run" | "search" | "fetch" | "find" | "tool"; target: string; id?: string; tool?: string }
+  /** A tool's result, for the row with the same `id`; `text` is the first of an error's lines. */
+  | { kind: "result"; id?: string; ok: boolean; text?: string }
+  | { kind: "denied"; target: string; text: string }
+  | { kind: "limit"; text: string }
+  /** A line that was not an event, such as sfo's own output. */
+  | { kind: "note"; text: string };
+
+export interface LogPage {
+  /** Every stage log, in the order written. */
+  stages: { name: string; size: number }[];
+  /** The log read, or null when there are none yet. */
+  stage: string | null;
+  /** The byte range read; the next page starts at `to`. */
+  from: number;
+  to: number;
+  events: LogEvent[];
+}

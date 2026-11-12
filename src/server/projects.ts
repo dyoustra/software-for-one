@@ -12,6 +12,7 @@ import { PROJECT_ID, newSpriteName, provisionProject, type GitHub, type SpriteCr
 import { DEFAULT_PREFERENCES, KINDS, LANGUAGES, PreferencesSchema, WEB_DATA, WEB_HOSTS } from "../core/preferences.js";
 import type { Project, PreferencesResponse } from "../api/types.js";
 import type { SpriteCli } from "../core/sprite.js";
+import { LOG_PAGE_SCRIPT, PAGE_BYTES, parseLogPage, STAGE_NAME, TAIL_BYTES } from "./logs.js";
 
 export interface ProjectDeps {
   db: Db;
@@ -361,6 +362,21 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
   });
 
   // The delivery summary, as the run wrote it; empty until delivery.
+  // A page of a stage's log, as events (LIVE_LOGS_SPEC §4). The app polls it
+  // while the log is on screen, passing back `to` as `from`.
+  app.get("/projects/:id/log", auth, async (c: Context<Env>) => {
+    const row = owned(c);
+    if (!row) return c.json({ error: "no such project" }, 404);
+    const stage = c.req.query("stage") ?? "";
+    const from = c.req.query("from");
+    if (stage && !STAGE_NAME.test(stage)) return c.json({ error: "not a stage name" }, 400);
+    if (from !== undefined && !/^\d{1,12}$/.test(from)) return c.json({ error: "from is a byte offset" }, 400);
+    const r = await sprites.exec(row.sprite, LOG_PAGE_SCRIPT, [row.id, stage, from ?? "", String(PAGE_BYTES), String(TAIL_BYTES)]);
+    if (r.status !== 0) return c.json({ error: r.stdout.trim().slice(0, 300) || "could not read the log" }, 502);
+    const page = parseLogPage(r.stdout, { tailed: from === undefined, askedFor: stage || undefined });
+    return page ? c.json(page) : c.json({ error: "no such stage" }, 404);
+  });
+
   app.get("/projects/:id/summary", auth, async (c: Context<Env>) => {
     const row = owned(c);
     if (!row) return c.json({ error: "no such project" }, 404);

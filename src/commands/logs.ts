@@ -2,6 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { sfoDir, type Env } from "../core/paths.js";
 import { readState } from "../core/state.js";
+import type { LogEvent } from "../api/types.js";
 
 const WIDTH = 160;
 
@@ -15,38 +16,48 @@ function shortPath(p: unknown, cwd: string): string {
   return cwd && s.startsWith(`${cwd}/`) ? s.slice(cwd.length + 1) : s;
 }
 
-function describeTool(name: string, input: Record<string, unknown>, cwd: string): string {
+const TOOL_KINDS: Record<string, "run" | "read" | "write" | "edit" | "search" | "fetch" | "find"> = {
+  Bash: "run",
+  Read: "read",
+  Write: "write",
+  Edit: "edit",
+  MultiEdit: "edit",
+  WebSearch: "search",
+  WebFetch: "fetch",
+  Grep: "find",
+  Glob: "find",
+};
+
+function toolTarget(name: string, input: Record<string, unknown>, cwd: string): string {
   switch (name) {
     case "Bash":
-      return `run    ${oneLine(String(input.command ?? ""))}`;
+      return oneLine(String(input.command ?? ""), 300);
     case "Read":
-      return `read   ${shortPath(input.file_path, cwd)}`;
     case "Write":
-      return `write  ${shortPath(input.file_path, cwd)}`;
     case "Edit":
     case "MultiEdit":
-      return `edit   ${shortPath(input.file_path, cwd)}`;
+      return shortPath(input.file_path, cwd);
     case "WebSearch":
-      return `search ${oneLine(String(input.query ?? ""))}`;
+      return oneLine(String(input.query ?? ""), 300);
     case "WebFetch":
-      return `fetch  ${oneLine(String(input.url ?? ""))}`;
+      return oneLine(String(input.url ?? ""), 300);
     case "Grep":
     case "Glob":
-      return `find   ${oneLine(String(input.pattern ?? ""))}`;
+      return oneLine(String(input.pattern ?? ""), 300);
     default:
-      return `tool   ${name} ${oneLine(JSON.stringify(input), 100)}`;
+      return oneLine(JSON.stringify(input), 100);
   }
 }
 
 /**
- * One stream-json line as something a person can follow: what the agent says,
- * what it runs and touches, what was refused, and what the stage cost. Thinking
- * and bookkeeping events render as nothing. `cwd` is learned from the init
- * event so paths print relative to the project.
+ * One stream-json line as what the run did: what the agent says, what it
+ * runs and touches and how that went, what was refused, and what the stage
+ * cost. Thinking and bookkeeping events are nothing. `cwd` is learned from the
+ * init event so paths are relative to the project.
  */
-export function renderEvent(line: string, state: { cwd: string }): string[] {
+export function parseEvent(line: string, state: { cwd: string }): LogEvent[] {
   const trimmed = line.trim();
-  if (!trimmed.startsWith("{")) return trimmed ? [`       ${oneLine(trimmed)}`] : [];
+  if (!trimmed.startsWith("{")) return trimmed ? [{ kind: "note", text: oneLine(trimmed) }] : [];
   let e: Record<string, unknown>;
   try {
     e = JSON.parse(trimmed) as Record<string, unknown>;
@@ -56,35 +67,84 @@ export function renderEvent(line: string, state: { cwd: string }): string[] {
 
   if (e.type === "system" && e.subtype === "init") {
     state.cwd = String(e.cwd ?? "");
-    return [`── started (${String(e.model ?? "model unknown")})`];
+    return [{ kind: "start", text: String(e.model ?? "model unknown") }];
   }
   if (e.type === "system" && e.subtype === "permission_denied") {
-    return [`DENIED ${String(e.tool_name ?? "")}: ${oneLine(String(e.message ?? ""))}`];
+    return [{ kind: "denied", target: String(e.tool_name ?? ""), text: oneLine(String(e.message ?? "")) }];
   }
   if (e.type === "rate_limit_event") {
     const info = (e.rate_limit_info ?? {}) as Record<string, unknown>;
-    return info.status === "allowed" ? [] : [`LIMIT  ${String(info.status)} (${String(info.rateLimitType ?? "")})`];
+    return info.status === "allowed" ? [] : [{ kind: "limit", text: `${String(info.status)} (${String(info.rateLimitType ?? "")})` }];
   }
   if (e.type === "result") {
-    const cost = typeof e.total_cost_usd === "number" ? `$${e.total_cost_usd.toFixed(2)}` : "cost unknown";
-    const mins = typeof e.duration_ms === "number" ? `${(e.duration_ms / 60000).toFixed(1)} min` : "";
-    return [`── finished ${e.is_error ? "with an error" : "ok"}: ${cost}, ${String(e.num_turns ?? "?")} turns, ${mins}`];
+    return [
+      {
+        kind: "finish",
+        ok: !e.is_error,
+        ...(typeof e.total_cost_usd === "number" ? { costUsd: e.total_cost_usd } : {}),
+        ...(typeof e.num_turns === "number" ? { turns: e.num_turns } : {}),
+        ...(typeof e.duration_ms === "number" ? { durationMs: e.duration_ms } : {}),
+      },
+    ];
   }
 
   const message = e.message as { content?: unknown } | undefined;
   const blocks = Array.isArray(message?.content) ? (message.content as Record<string, unknown>[]) : [];
-  const out: string[] = [];
+  const out: LogEvent[] = [];
   for (const b of blocks) {
     if (e.type === "assistant" && b.type === "text" && String(b.text ?? "").trim()) {
-      out.push(`says   ${oneLine(String(b.text))}`);
+      out.push({ kind: "say", text: String(b.text).trim() });
     } else if (e.type === "assistant" && b.type === "tool_use") {
-      out.push(describeTool(String(b.name), (b.input ?? {}) as Record<string, unknown>, state.cwd));
-    } else if (e.type === "user" && b.type === "tool_result" && b.is_error) {
-      const content = Array.isArray(b.content) ? JSON.stringify(b.content) : String(b.content ?? "");
-      out.push(`  err  ${oneLine(content, 140)}`);
+      const name = String(b.name);
+      const kind = TOOL_KINDS[name];
+      const input = (b.input ?? {}) as Record<string, unknown>;
+      const id = typeof b.id === "string" ? { id: b.id } : {};
+      out.push(kind ? { kind, target: toolTarget(name, input, state.cwd), ...id } : { kind: "tool", tool: name, target: toolTarget(name, input, state.cwd), ...id });
+    } else if (e.type === "user" && b.type === "tool_result") {
+      const id = typeof b.tool_use_id === "string" ? { id: b.tool_use_id } : {};
+      if (b.is_error) {
+        const content = Array.isArray(b.content) ? JSON.stringify(b.content) : String(b.content ?? "");
+        out.push({ kind: "result", ...id, ok: false, text: oneLine(content, 140) });
+      } else {
+        out.push({ kind: "result", ...id, ok: true });
+      }
     }
   }
   return out;
+}
+
+/** One stream-json line as `sfo logs` prints it, built on parseEvent. */
+export function renderEvent(line: string, state: { cwd: string }): string[] {
+  return parseEvent(line, state).flatMap((ev): string[] => {
+    switch (ev.kind) {
+      case "note":
+        return [`       ${ev.text}`];
+      case "start":
+        return [`── started (${ev.text})`];
+      case "denied":
+        return [`DENIED ${ev.target}: ${ev.text}`];
+      case "limit":
+        return [`LIMIT  ${ev.text}`];
+      case "finish": {
+        const cost = ev.costUsd !== undefined ? `$${ev.costUsd.toFixed(2)}` : "cost unknown";
+        const mins = ev.durationMs !== undefined ? `${(ev.durationMs / 60000).toFixed(1)} min` : "";
+        return [`── finished ${ev.ok ? "ok" : "with an error"}: ${cost}, ${ev.turns ?? "?"} turns, ${mins}`];
+      }
+      case "say":
+        return [`says   ${oneLine(ev.text)}`];
+      case "result":
+        return ev.ok ? [] : [`  err  ${ev.text ?? ""}`];
+      case "tool":
+        return [`tool   ${ev.tool ?? ""} ${ev.target}`];
+      case "run":
+      case "search":
+      case "fetch":
+      case "find":
+        return [`${ev.kind.padEnd(6)} ${oneLine(ev.target)}`];
+      default:
+        return [`${ev.kind.padEnd(6)} ${ev.target}`];
+    }
+  });
 }
 
 /** The log being written most recently: the live stage, whatever it is called. */
