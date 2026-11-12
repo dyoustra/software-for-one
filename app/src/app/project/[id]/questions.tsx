@@ -1,13 +1,16 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import { useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { Question } from '@sfo/api';
 import { Artifacts } from '@/components/artifacts';
-import { Body, Button, Card, ErrorText, Muted, Page } from '@/components/ui';
-import { Spacing } from '@/constants/theme';
+import { Rail } from '@/components/rail';
+import { Badge, Button, Card, ErrorText, Field, Muted, Page } from '@/components/ui';
+import { Radius, Spacing, tint, Type } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth';
+import { cardModel } from '@/lib/pipeline';
+import { useProjects } from '@/lib/projects';
 
 /** Each question's choice and, optionally, words of the person's own. */
 type Draft = { key: string | null; words: string };
@@ -27,6 +30,7 @@ function answerText(q: Question, d: Draft): string {
 export default function Questions() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { api } = useAuth();
+  const { projects, refresh } = useProjects();
   const theme = useTheme();
   const [questions, setQuestions] = useState<Question[] | null>(null);
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
@@ -48,6 +52,7 @@ export default function Questions() {
     setError(null);
     try {
       await api(`/projects/${id}/answers`, { method: 'POST', body: Object.fromEntries(questions.map((q) => [q.id, answerText(q, drafts[q.id])])) });
+      refresh();
       router.back();
     } catch (err) {
       setError(err);
@@ -56,43 +61,61 @@ export default function Questions() {
     }
   }
 
+  const project = projects?.find((p) => p.id === id);
+  const model = project ? cardModel(project) : null;
+
   return (
     <Page>
+      {model?.rail && (
+        <View style={styles.where}>
+          <Muted>{`${model.title} is waiting for you at`}</Muted>
+          <Rail at={model.rail.at} tone="waiting" halo="steady" />
+        </View>
+      )}
       <ErrorText error={error} />
       <Artifacts id={id} kind="drafts" />
       {questions?.map((q) => {
         const d = drafts[q.id] ?? { key: null, words: '' };
         return (
-          <Card key={q.id}>
-            <Muted>{q.section === 'blocking' ? 'Needed to go on' : 'A preference (there is a default)'}</Muted>
-            <Body style={styles.question}>{q.text}</Body>
+          <Card key={q.id} style={styles.question}>
+            {q.section === 'blocking' ? <Badge tone="waiting">Needed to go on</Badge> : <Muted>A preference: there is a default</Muted>}
+            <Text style={[Type.cardTitle, styles.questionText, { color: theme.ink }]}>{q.text}</Text>
             {q.context ? <Muted>{q.context}</Muted> : null}
             {q.options.map((o) => {
               const chosen = d.key === o.key;
               return (
                 <Pressable
                   key={o.key}
+                  accessibilityRole="radio"
+                  accessibilityState={{ checked: chosen }}
                   onPress={() => setDrafts({ ...drafts, [q.id]: { ...d, key: chosen ? null : o.key } })}
-                  style={[styles.option, { backgroundColor: chosen ? theme.accent : theme.well }]}>
-                  <Text style={[styles.optionLabel, { color: chosen ? theme.onAccent : theme.ink }]}>{o.label}</Text>
-                  <Text style={{ color: chosen ? theme.onAccent : theme.inkMuted }}>{o.tradeoff}</Text>
+                  style={[
+                    styles.option,
+                    { borderColor: chosen ? theme.accent : theme.line, backgroundColor: chosen ? tint(theme.accent, 0.1) : theme.surface },
+                  ]}>
+                  <View style={[styles.key, chosen ? { backgroundColor: theme.accent, borderColor: theme.accent } : { borderColor: theme.line }]}>
+                    <Text style={[Type.label, { color: chosen ? theme.onAccent : theme.inkMuted }]}>{chosen ? '✓' : o.key}</Text>
+                  </View>
+                  <View style={styles.optionText}>
+                    <Text style={[Type.body, styles.optionLabel, { color: theme.ink }]}>{o.label}</Text>
+                    {o.tradeoff ? <Text style={[styles.tradeoff, { color: theme.inkMuted }]}>{o.tradeoff}</Text> : null}
+                  </View>
                 </Pressable>
               );
             })}
-            <TextInput
-              style={[styles.input, { color: theme.ink, backgroundColor: theme.well }]}
+            <Field
               multiline
-              placeholder={d.key ? 'Anything to add? (optional)' : 'Or say it in your own words'}
-              placeholderTextColor={theme.inkMuted}
+              placeholder={d.key ? 'Add a note (optional)' : 'Or answer in your own words'}
               value={d.words}
               onChangeText={(words) => setDrafts({ ...drafts, [q.id]: { ...d, words } })}
+              style={styles.note}
             />
           </Card>
         );
       })}
       {questions && (
         <View style={{ gap: Spacing.two }}>
-          {unanswered.length > 0 && <Muted>{unanswered.length} still to answer</Muted>}
+          {unanswered.length > 0 && <Muted>{`${unanswered.length} still to answer`}</Muted>}
           <Button title="Send answers" busy={busy} disabled={unanswered.length > 0} onPress={submit} />
         </View>
       )}
@@ -101,8 +124,13 @@ export default function Questions() {
 }
 
 const styles = StyleSheet.create({
-  question: { fontWeight: '700' },
-  option: { borderRadius: 12, padding: Spacing.three, gap: Spacing.one, marginTop: Spacing.two },
-  optionLabel: { fontSize: 16, fontWeight: '600' },
-  input: { borderRadius: 10, padding: Spacing.two + 2, fontSize: 16, marginTop: Spacing.two, minHeight: 48 },
+  where: { gap: Spacing.one },
+  question: { gap: Spacing.two + 2 },
+  questionText: { fontSize: 18, lineHeight: 24 },
+  option: { flexDirection: 'row', gap: Spacing.three, alignItems: 'flex-start', borderWidth: 1, borderRadius: Radius.control, padding: Spacing.three },
+  key: { width: 24, height: 24, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center', marginTop: 1 },
+  optionText: { flex: 1, gap: 2 },
+  optionLabel: { fontWeight: '600' },
+  tradeoff: { fontSize: 14, lineHeight: 19 },
+  note: { minHeight: 48 },
 });

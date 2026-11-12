@@ -1,14 +1,20 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { CredentialKind, Device, Identity, LanguageKind, Preferences, PreferencesResponse } from '@sfo/api';
 import { GitHubSignIn } from '@/components/github-sign-in';
-import { Body, Button, Card, ErrorText, Heading, Muted, Page } from '@/components/ui';
-import { Spacing } from '@/constants/theme';
+import { Body, Button, Card, ErrorText, Field, Heading, Muted, Page, Telemetry } from '@/components/ui';
+import { Radius, Spacing, tint, Type } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth';
 import { confirm } from '@/lib/confirm';
+
+/** When a device last reached the control plane, as a short machine fact. */
+function lastUsed(at: string): string {
+  const days = Math.floor((Date.now() - Date.parse(at)) / 86_400_000);
+  return days <= 0 ? 'today' : days === 1 ? '1d ago' : `${days}d ago`;
+}
 
 const PROVIDER_NAMES: Record<Identity['provider'], string> = { apple: 'Apple', github: 'GitHub' };
 
@@ -20,8 +26,13 @@ function Choice<T extends string>({ options, value, onChange }: { options: reado
   return (
     <View style={styles.choices}>
       {options.map((o) => (
-        <Pressable key={o} onPress={() => onChange(o)} style={[styles.choice, { backgroundColor: o === value ? theme.accent : theme.well }]}>
-          <Text style={{ color: o === value ? theme.onAccent : theme.ink, fontWeight: '600' }}>{o}</Text>
+        <Pressable
+          key={o}
+          accessibilityRole="radio"
+          accessibilityState={{ checked: o === value }}
+          onPress={() => onChange(o)}
+          style={[styles.choice, o === value ? { borderColor: theme.accent, backgroundColor: tint(theme.accent, 0.12) } : { borderColor: theme.line }]}>
+          <Text style={{ color: o === value ? theme.accent : theme.ink, fontWeight: '600' }}>{o}</Text>
         </Pressable>
       ))}
     </View>
@@ -96,7 +107,6 @@ export default function Settings() {
     }
   }
 
-  const input = [styles.input, { color: theme.ink, backgroundColor: theme.well }];
   return (
     <Page>
       <Heading>Settings</Heading>
@@ -110,7 +120,7 @@ export default function Settings() {
             : 'No Claude subscription connected. Run `sfo login` on your Mac to bring it here.'}
         </Muted>
         <Muted>{have.includes('anthropic_api_key') ? 'An Anthropic API key is stored.' : 'No API key stored.'}</Muted>
-        <TextInput style={input} placeholder="Paste an Anthropic API key" placeholderTextColor={theme.inkMuted} value={apiKey} onChangeText={setApiKey} autoCapitalize="none" autoCorrect={false} secureTextEntry />
+        <Field placeholder="Paste an Anthropic API key" value={apiKey} onChangeText={setApiKey} autoCapitalize="none" autoCorrect={false} secureTextEntry />
         {apiKey.trim() ? <Button title="Save API key" kind="secondary" onPress={saveApiKey} /> : null}
       </Card>
 
@@ -131,7 +141,7 @@ export default function Settings() {
           {prefs.allowed.kinds.map((k) => (
             <View key={k} style={styles.field}>
               <Muted>{KIND_NAMES[k]}</Muted>
-              <TextInput style={input} value={rankings[k] ?? ''} onChangeText={(v) => setRankings({ ...rankings, [k]: v })} autoCapitalize="none" autoCorrect={false} />
+              <Field value={rankings[k] ?? ''} onChangeText={(v) => setRankings({ ...rankings, [k]: v })} autoCapitalize="none" autoCorrect={false} />
             </View>
           ))}
           <Muted>Known: {prefs.allowed.languages.join(', ')}</Muted>
@@ -140,19 +150,17 @@ export default function Settings() {
           <Body>Where web app data lives</Body>
           <Choice options={prefs.allowed.webData as Preferences['webData'][]} value={prefs.preferences.webData} onChange={(webData) => set({ webData })} />
           <Body>Budget for each new project</Body>
-          <TextInput
-            style={input}
+          <Field
             placeholder="No limit"
-            placeholderTextColor={theme.inkMuted}
             keyboardType="decimal-pad"
             value={prefs.preferences.budgetUsd === null ? '' : String(prefs.preferences.budgetUsd)}
             onChangeText={(v) => set({ budgetUsd: v.trim() ? Number(v) : null })}
           />
           <Body>Smoke checks may spend, per run</Body>
-          <TextInput style={input} keyboardType="decimal-pad" value={String(prefs.preferences.smokeCapUsd)} onChangeText={(v) => set({ smokeCapUsd: Number(v) || 0 })} />
+          <Field keyboardType="decimal-pad" value={String(prefs.preferences.smokeCapUsd)} onChangeText={(v) => set({ smokeCapUsd: Number(v) || 0 })} />
           <Body>SFO.md</Body>
           <Muted>Anything that fits no field above.</Muted>
-          <TextInput style={[input, styles.long]} multiline value={prefs.sfoMd ?? ''} onChangeText={(sfoMd) => setPrefs({ ...prefs, sfoMd })} />
+          <Field multiline value={prefs.sfoMd ?? ''} onChangeText={(sfoMd) => setPrefs({ ...prefs, sfoMd })} />
           <Button title={saved ? 'Saved' : 'Save preferences'} onPress={save} busy={saving} />
         </Card>
       )}
@@ -161,7 +169,7 @@ export default function Settings() {
         <Body style={styles.section}>Ways to sign in</Body>
         {identities.map((i) => (
           <Muted key={i.provider}>
-            {PROVIDER_NAMES[i.provider]} · added {new Date(i.createdAt).toLocaleDateString()}
+            {PROVIDER_NAMES[i.provider]}, added {new Date(i.createdAt).toLocaleDateString()}
           </Muted>
         ))}
       </Card>
@@ -185,8 +193,9 @@ export default function Settings() {
           <View key={d.id} style={styles.row}>
             <Muted style={{ flex: 1 }}>
               {d.name}
-              {d.current ? ' · this device' : ''}
+              {d.current ? ' (this device)' : ''}
             </Muted>
+            <Telemetry>{lastUsed(d.lastUsedAt ?? d.createdAt)}</Telemetry>
             {!d.current && (
               <Pressable
                 onPress={async () => {
@@ -204,11 +213,9 @@ export default function Settings() {
 }
 
 const styles = StyleSheet.create({
-  section: { fontWeight: '700' },
-  input: { borderRadius: 10, padding: Spacing.two + 2, fontSize: 16 },
-  long: { minHeight: 120, textAlignVertical: 'top' },
+  section: { ...Type.cardTitle },
   field: { gap: Spacing.one },
   choices: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
-  choice: { borderRadius: 999, paddingVertical: Spacing.two, paddingHorizontal: Spacing.three },
+  choice: { borderRadius: Radius.pill, borderWidth: 1, paddingVertical: Spacing.two, paddingHorizontal: Spacing.three },
   row: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, paddingVertical: Spacing.one },
 });

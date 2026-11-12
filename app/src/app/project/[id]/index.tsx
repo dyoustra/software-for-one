@@ -1,42 +1,46 @@
 import { router, Stack, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { Linking, StyleSheet, TextInput, View } from 'react-native';
+import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { Project, Question } from '@sfo/api';
 import { Artifacts } from '@/components/artifacts';
-import { Body, Button, Card, Code, ErrorText, Muted, Page, Tone } from '@/components/ui';
-import { Spacing } from '@/constants/theme';
+import { ProjectCard } from '@/components/project-card';
+import { Body, Button, Card, Code, ErrorText, Field, Muted, Page, Telemetry } from '@/components/ui';
+import { Radius, Spacing, tint, Type } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { startProject } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { confirm } from '@/lib/confirm';
-import { statusLabel } from '@/lib/status';
+import { cardModel } from '@/lib/pipeline';
+import { useProjects } from '@/lib/projects';
 
 const REPORTS = [
   { kind: 'summary', title: 'Summary' },
-  { kind: 'cost', title: 'Cost' },
   { kind: 'decisions', title: 'Decisions' },
   { kind: 'criteria', title: 'Criteria' },
   { kind: 'slices', title: 'Slices' },
+  { kind: 'cost', title: 'Cost' },
   { kind: 'logs', title: 'Current log' },
 ] as const;
 
 export default function ProjectScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const { api } = useAuth();
-  const theme = useTheme();
+  const { api, token } = useAuth();
+  const { refresh: refreshList } = useProjects();
   const [project, setProject] = useState<Project | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [feedback, setFeedback] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<unknown>(null);
-  const running = useRef(false);
+  const live = useRef(false);
 
   const load = useCallback(async () => {
     try {
       const p = await api<Project>(`/projects/${id}`);
       setProject(p);
-      running.current = p.summary?.status === 'running';
+      const kind = cardModel(p).kind;
+      live.current = kind === 'running' || kind === 'setup';
       setQuestions(p.summary?.status === 'awaiting_human' ? await api<Question[]>(`/projects/${id}/questions`) : []);
       setError(null);
     } catch (err) {
@@ -47,7 +51,7 @@ export default function ProjectScreen() {
   useFocusEffect(
     useCallback(() => {
       load();
-      const timer = setInterval(() => running.current && load(), 20_000);
+      const timer = setInterval(() => live.current && load(), 15_000);
       return () => clearInterval(timer);
     }, [load]),
   );
@@ -60,6 +64,7 @@ export default function ProjectScreen() {
       const r = await api<{ message?: string }>(path, { method: 'POST', body });
       setMessage(r.message ?? null);
       await load();
+      refreshList();
     } catch (err) {
       setError(err);
     } finally {
@@ -67,34 +72,55 @@ export default function ProjectScreen() {
     }
   }
 
-  async function destroy() {
-    const message = `Its machine and everything on it go${project?.repo ? '; its GitHub repo stays.' : ', and it has no repo: this is the only copy.'}`;
-    if (!(await confirm('Delete this project?', message, 'Delete'))) return;
+  async function remove(settingUp: boolean) {
+    const message = settingUp
+      ? 'Its record goes; nothing was built.'
+      : `Its machine and everything on it go${project?.repo ? '; its GitHub repo stays.' : ', and it has no repo: this is the only copy.'}`;
+    if (!(await confirm(settingUp ? 'Remove this setup?' : 'Delete this project?', message, settingUp ? 'Remove' : 'Delete'))) return;
     try {
       await api(`/projects/${id}`, { method: 'DELETE' });
+      await refreshList();
       if (router.canGoBack()) router.back();
-      else router.replace('/');
+      else router.replace('/projects');
     } catch (err) {
       setError(err);
     }
   }
 
+  /** A failed setup, started again from the same idea; the failed record goes. */
+  async function setUpAgain() {
+    if (!token || !project?.idea) return;
+    setBusy('again');
+    try {
+      await startProject(token, { idea: project.idea });
+      await api(`/projects/${id}`, { method: 'DELETE' });
+      await refreshList();
+      router.replace('/projects');
+    } catch (err) {
+      setError(err);
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const summary = project?.summary ?? null;
-  const label = statusLabel(summary);
+  const kind = project ? cardModel(project).kind : null;
+  const settingUp = project?.status === 'creating';
   const status = summary?.status;
+
   return (
     <Page refreshing={false} onRefresh={load}>
-      <Stack.Screen options={{ title: summary?.title ?? 'Project' }} />
+      <Stack.Screen options={{ title: summary?.title ?? (settingUp ? 'Setting up' : 'Project') }} />
       <ErrorText error={error} />
-      {project && (
-        <Card>
-          <Tone tone={label.tone}>{label.text}</Tone>
-          {summary?.note ? <Body>{summary.note}</Body> : null}
-          {summary?.slicesPassed?.length ? <Muted>{summary.slicesPassed.length} slices passed</Muted> : null}
-          {project.repo ? <Muted>{project.repo.replace('https://', '')}</Muted> : null}
-          {project.repo ? <Button title="Open repo" kind="secondary" onPress={() => Linking.openURL(project.repo!)} /> : null}
-        </Card>
+      {project && <ProjectCard project={project} />}
+
+      {settingUp && project?.setup?.error && (
+        <>
+          <Button title="Try again" busy={busy === 'again'} onPress={setUpAgain} />
+          <Button title="Remove" kind="destructive" onPress={() => remove(true)} />
+        </>
       )}
+      {settingUp && !project?.setup?.error && <Muted>Setting up takes about a minute. You can leave; it carries on.</Muted>}
 
       {questions.length > 0 && (
         <Button
@@ -102,27 +128,20 @@ export default function ProjectScreen() {
           onPress={() => router.push({ pathname: '/project/[id]/questions', params: { id } })}
         />
       )}
-      {status === 'running' && <Button title="Stop" kind="secondary" busy={busy === 'stop'} onPress={() => act('stop', `/projects/${id}/stop`)} />}
-      {status === 'awaiting_human' && questions.length === 0 && (
-        <Button title="Resume" busy={busy === 'run'} onPress={() => act('run', `/projects/${id}/run`)} />
-      )}
+      {status === 'awaiting_human' && questions.length === 0 && <Button title="Resume" busy={busy === 'run'} onPress={() => act('run', `/projects/${id}/run`)} />}
       {(status === 'failed' || (status === 'done' && /fail|unresolved/.test(summary?.note ?? ''))) && (
-        <Button title="Retry what failed" kind="secondary" busy={busy === 'retry'} onPress={() => act('retry', `/projects/${id}/retry`)} />
+        <Button title="Retry what failed" busy={busy === 'retry'} onPress={() => act('retry', `/projects/${id}/retry`)} />
       )}
+      {status === 'running' && <Button title="Stop" kind="secondary" busy={busy === 'stop'} onPress={() => act('stop', `/projects/${id}/stop`)} />}
       {message ? <Code>{message}</Code> : null}
 
-      {(status === 'done' || status === 'failed') && (
+      {summary?.slicesTotal ? <SliceBreakdown ids={summary.sliceIds} passed={summary.slicesPassed ?? []} failed={summary.slicesFailed ?? []} total={summary.slicesTotal} /> : null}
+
+      {(kind === 'done' || status === 'failed') && (
         <Card>
-          <Body style={styles.section}>Feedback</Body>
-          <Muted>Ask for a change in your own words. More feedback while one is applying waits its turn.</Muted>
-          <TextInput
-            style={[styles.input, { color: theme.ink, backgroundColor: theme.well }]}
-            multiline
-            value={feedback}
-            onChangeText={setFeedback}
-            placeholder="Make it…"
-            placeholderTextColor={theme.inkMuted}
-          />
+          <Body style={styles.section}>Ask for a change</Body>
+          <Muted>In your own words. A second request while one is applying waits its turn.</Muted>
+          <Field multiline value={feedback} onChangeText={setFeedback} placeholder="Make it…" style={styles.feedback} />
           <Button
             title="Send feedback"
             busy={busy === 'feedback'}
@@ -135,24 +154,65 @@ export default function ProjectScreen() {
         </Card>
       )}
 
-      {status === 'done' && <Artifacts id={id} kind="renders" />}
+      {kind === 'done' && <Artifacts id={id} kind="renders" />}
 
-      <View style={styles.reports}>
-        {REPORTS.map((r) => (
-          <View key={r.kind} style={styles.report}>
-            <Button title={r.title} kind="secondary" onPress={() => router.push({ pathname: '/project/[id]/report', params: { id, kind: r.kind } })} />
-          </View>
-        ))}
-      </View>
+      {!settingUp && project && (
+        <Card style={styles.rows}>
+          {REPORTS.map((r, i) => (
+            <Row key={r.kind} first={i === 0} title={r.title} onPress={() => router.push({ pathname: '/project/[id]/report', params: { id, kind: r.kind } })} />
+          ))}
+          {project.repo && <Row title="Open repo" detail={project.repo.replace(/^https?:\/\/(www\.)?github\.com\//, '')} onPress={() => Linking.openURL(project.repo!)} />}
+        </Card>
+      )}
 
-      <Button title="Delete project" kind="destructive" onPress={destroy} />
+      {!settingUp && project && <Button title="Delete project" kind="destructive" onPress={() => remove(false)} />}
     </Page>
   );
 }
 
+/** One pill per planned slice: passed, failed, or still to come. */
+function SliceBreakdown({ ids: planned, passed, failed, total }: { ids?: string[]; passed: string[]; failed: string[]; total: number }) {
+  const theme = useTheme();
+  // A summary from an older Sprite has only the count: sfo's plans number slices S-01, S-02, …
+  const ids = planned ?? Array.from({ length: total }, (_, i) => `S-${String(i + 1).padStart(2, '0')}`);
+  return (
+    <View style={styles.slices} accessibilityLabel={`${passed.length} of ${total} slices passed${failed.length ? `, ${failed.length} failed` : ''}`}>
+      {ids.map((s) => {
+        const tone = passed.includes(s) ? theme.done : failed.includes(s) ? theme.failed : null;
+        return (
+          <View key={s} style={[styles.pill, { borderColor: tone ? tint(tone, 0.4) : theme.line, backgroundColor: tone ? tint(tone, 0.12) : 'transparent' }]}>
+            <Telemetry style={{ color: tone ?? theme.inkMuted }}>{s}</Telemetry>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+function Row({ title, detail, first, onPress }: { title: string; detail?: string; first?: boolean; onPress: () => void }) {
+  const theme = useTheme();
+  return (
+    <Pressable
+      accessibilityRole="button"
+      onPress={onPress}
+      style={({ pressed }) => [styles.row, !first && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.line }, pressed && { opacity: 0.6 }]}>
+      <Text style={[Type.body, { color: theme.ink, flex: 1 }]}>{title}</Text>
+      {detail && (
+        <Telemetry numberOfLines={1} style={styles.detail}>
+          {detail}
+        </Telemetry>
+      )}
+      <Text style={[Type.body, { color: theme.inkMuted }]}>›</Text>
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
-  section: { fontWeight: '700' },
-  input: { borderRadius: 10, padding: Spacing.two + 2, fontSize: 16, minHeight: 90, textAlignVertical: 'top' },
-  reports: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
-  report: { flexGrow: 1, flexBasis: '30%' },
+  section: { fontWeight: '600' },
+  feedback: { minHeight: 90 },
+  slices: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
+  pill: { borderWidth: 1, borderRadius: Radius.pill, paddingVertical: 3, paddingHorizontal: 9 },
+  rows: { paddingVertical: 0, gap: 0 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, paddingVertical: 13 },
+  detail: { maxWidth: '55%' },
 });

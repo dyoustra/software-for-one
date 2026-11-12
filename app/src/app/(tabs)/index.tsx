@@ -1,63 +1,119 @@
-import { router, useFocusEffect } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
+import { router } from 'expo-router';
+import { useState } from 'react';
+import { KeyboardAvoidingView, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import Animated, { FadeInUp, FadeOut, LinearTransition } from 'react-native-reanimated';
 
 import type { Project } from '@sfo/api';
-import { Body, Card, ErrorText, Heading, Muted, Page, Tone } from '@/components/ui';
+import { ProjectCard } from '@/components/project-card';
+import { Button, ErrorText, Field } from '@/components/ui';
+import { MaxContentWidth, Spacing, Type } from '@/constants/theme';
+import { useTheme } from '@/hooks/use-theme';
+import { startProject } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
-import { statusLabel } from '@/lib/status';
+import { useProjects } from '@/lib/projects';
 
-/** How often to look again while something is running and the screen is open. */
-const WHILE_RUNNING_MS = 30_000;
+/** A run waiting on the person opens straight to what it is waiting for. */
+function openWaiting(p: Project) {
+  if (p.summary?.openQuestions) router.push({ pathname: '/project/[id]/questions', params: { id: p.id } });
+  else router.push({ pathname: '/project/[id]', params: { id: p.id } });
+}
 
-export default function Projects() {
-  const { api } = useAuth();
-  const [projects, setProjects] = useState<Project[] | null>(null);
-  const latest = useRef<Project[] | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
+/**
+ * Home: a near-empty canvas for dropping an idea and leaving (THEME_SPEC §5).
+ * Only a run waiting on the person is shown above it, and the project just
+ * started, settling in as a card.
+ */
+export default function Idea() {
+  const { token } = useAuth();
+  const { projects, waiting, refresh } = useProjects();
+  const theme = useTheme();
+  const [idea, setIdea] = useState('');
+  const [budget, setBudget] = useState('');
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  const [startedAt, setStartedAt] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  // The started project as the list now has it, so its card follows setup.
+  // Found by when it was created: once set up, it trades its provisional id
+  // for the real one.
+  const started = startedAt ? (projects?.find((p) => p.createdAt === startedAt) ?? null) : null;
+  const longest = waiting[0];
+
+  async function start() {
+    if (!token) return;
+    setBusy(true);
+    setError(null);
     try {
-      const fresh = await api<Project[]>('/projects');
-      latest.current = fresh;
-      setProjects(fresh);
-      setError(null);
+      const project = await startProject(token, { idea: idea.trim(), ...(budget.trim() ? { budget: budget.trim() } : {}) });
+      setIdea('');
+      setBudget('');
+      setStartedAt(project.createdAt);
+      await refresh();
     } catch (err) {
       setError(err);
+    } finally {
+      setBusy(false);
     }
-  }, [api]);
-
-  useFocusEffect(
-    useCallback(() => {
-      load();
-      const timer = setInterval(() => {
-        if (latest.current?.some((p) => p.summary?.status === 'running' || !p.summary)) load();
-      }, WHILE_RUNNING_MS);
-      return () => clearInterval(timer);
-    }, [load]),
-  );
+  }
 
   return (
-    <Page
-      refreshing={refreshing}
-      onRefresh={async () => {
-        setRefreshing(true);
-        await load();
-        setRefreshing(false);
-      }}>
-      <Heading>Projects</Heading>
-      <ErrorText error={error} />
-      {projects?.length === 0 && <Muted>Nothing yet. Start one from New idea.</Muted>}
-      {projects?.map((p) => {
-        const label = statusLabel(p.summary);
-        return (
-          <Card key={p.id} onPress={() => router.push({ pathname: '/project/[id]', params: { id: p.id } })}>
-            <Body style={{ fontWeight: '600' }}>{p.summary?.title ?? p.id}</Body>
-            <Tone tone={label.tone}>{label.text}</Tone>
-            {p.summary?.note ? <Muted>{p.summary.note}</Muted> : null}
-          </Card>
-        );
-      })}
-    </Page>
+    <KeyboardAvoidingView style={{ flex: 1, backgroundColor: theme.canvas }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView contentInsetAdjustmentBehavior="automatic" keyboardShouldPersistTaps="handled" contentContainerStyle={styles.scroll}>
+        <View style={styles.column}>
+          {longest && (
+            <Animated.View layout={LinearTransition} style={styles.stack}>
+              <ProjectCard project={longest} onPress={() => openWaiting(longest)} />
+              {waiting.length > 1 && (
+                <Pressable accessibilityRole="link" onPress={() => router.push('/projects')}>
+                  <Text style={[Type.label, { color: theme.waiting }]}>{`${waiting.length - 1} more waiting`}</Text>
+                </Pressable>
+              )}
+            </Animated.View>
+          )}
+
+          {started && (
+            <Animated.View entering={FadeInUp.duration(500)} exiting={FadeOut.duration(200)} layout={LinearTransition}>
+              <ProjectCard project={started} onPress={() => router.push('/projects')} />
+            </Animated.View>
+          )}
+
+          <Animated.View layout={LinearTransition} style={[styles.canvas, !longest && !started && styles.canvasAlone]}>
+            <Text style={[Type.prompt, { color: theme.ink }]} accessibilityRole="header">
+              What do you want built?
+            </Text>
+            <Field
+              multiline
+              placeholder="Describe it in your own words. Dictation works too."
+              value={idea}
+              onChangeText={(text) => {
+                setIdea(text);
+                if (startedAt) setStartedAt(null);
+              }}
+              editable={!busy}
+              style={styles.idea}
+            />
+            <Field
+              placeholder="Spending limit in dollars (optional)"
+              keyboardType="decimal-pad"
+              value={budget}
+              onChangeText={setBudget}
+              editable={!busy}
+            />
+            <Button title="Start building" onPress={start} busy={busy} disabled={!idea.trim()} />
+            <ErrorText error={error} />
+          </Animated.View>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
+
+const styles = StyleSheet.create({
+  scroll: { flexGrow: 1, padding: Spacing.three, paddingBottom: Spacing.six, alignItems: 'center' },
+  column: { width: '100%', maxWidth: MaxContentWidth, gap: Spacing.four, flexGrow: 1 },
+  stack: { gap: Spacing.two },
+  canvas: { gap: Spacing.three },
+  // Alone on the screen, the prompt sits a third of the way down rather than against the top.
+  canvasAlone: { marginTop: '22%' },
+  idea: { minHeight: 160 },
+});

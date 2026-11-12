@@ -271,7 +271,7 @@ describe("what a project card reads", () => {
       { id: "S-02", name: "roll", criterionIds: ["C-2"], prerequisites: ["S-01"] },
     ], env);
 
-    expect(listProjects(env)[0]).toMatchObject({ slicesTotal: 2, spendUsd: 1.41, computeMs: 150_000 });
+    expect(listProjects(env)[0]).toMatchObject({ slicesTotal: 2, sliceIds: ["S-01", "S-02"], spendUsd: 1.41, computeMs: 150_000 });
   });
 
   it("says where a failed run stopped, in one line", async () => {

@@ -51,9 +51,13 @@ export function Muted({ children, style }: { children: ReactNode; style?: TextSt
 }
 
 /** A machine fact: a count, a sum of money, a duration, a stage. Monospaced, tabular. */
-export function Telemetry({ children, tone, style }: { children: ReactNode; tone?: ToneName; style?: TextStyle }) {
+export function Telemetry({ children, tone, style, numberOfLines }: { children: ReactNode; tone?: ToneName; style?: TextStyle; numberOfLines?: number }) {
   const theme = useTheme();
-  return <Text style={[Type.telemetry, { color: tone ? theme[tone] : theme.inkMuted }, style]}>{children}</Text>;
+  return (
+    <Text numberOfLines={numberOfLines} style={[Type.telemetry, { color: tone ? theme[tone] : theme.inkMuted }, style]}>
+      {children}
+    </Text>
+  );
 }
 
 /** Text that is a command or a log: monospaced, selectable, set into a well. */
@@ -133,14 +137,6 @@ export function Field({ style, ...props }: TextInputProps) {
       style={[Type.body, styles.field, { color: theme.ink, backgroundColor: theme.well }, props.multiline && styles.fieldLong, style]}
     />
   );
-}
-
-const LEGACY_TONES = { active: 'running', needs: 'waiting', done: 'done', bad: 'failed' } as const;
-
-/** A coloured word for a state. Superseded by Badge as the screens move to it. */
-export function Tone({ tone, children }: { tone: keyof typeof LEGACY_TONES; children: ReactNode }) {
-  const theme = useTheme();
-  return <Text style={[Type.label, { color: theme[LEGACY_TONES[tone]] }]}>{children}</Text>;
 }
 
 /** What went wrong, in the failed colour. */

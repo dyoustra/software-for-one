@@ -28,6 +28,8 @@ export type ProjectSummary = ProjectState & { note?: string; next?: string } & T
 export interface Telemetry {
   /** Slices planned; absent until the plan exists. */
   slicesTotal?: number;
+  /** The planned slices' ids, in plan order. */
+  sliceIds?: string[];
   /** Model spend so far (at API prices, whatever actually paid for it). */
   spendUsd: number;
   /** Time the model spent working, summed over every stage. */
@@ -55,7 +57,7 @@ function telemetryFor(state: ProjectState, env: Env | undefined): Telemetry {
   const installed = state.status === "done" ? quietly(() => readInstall(state.id, env)) : undefined;
   const failure = state.status === "failed" ? quietly(() => readFailure(state.id, env)) : undefined;
   return {
-    ...(slices && slices.length > 0 ? { slicesTotal: slices.length } : {}),
+    ...(slices && slices.length > 0 ? { slicesTotal: slices.length, sliceIds: slices.map((s) => s.id) } : {}),
     spendUsd: Math.round(total.costUsd * 100) / 100,
     computeMs: total.durationMs,
     ...(open ? { openQuestions: open } : {}),

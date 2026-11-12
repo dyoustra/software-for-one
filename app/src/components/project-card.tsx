@@ -47,7 +47,7 @@ function Footer({ m }: { m: CardModel }) {
             {m.line}
           </Text>
         ) : m.lineIsCode ? (
-          <Telemetry style={{ color: theme.ink }}>{m.line}</Telemetry>
+          <Telemetry style={{ color: theme.ink }} numberOfLines={1}>{m.line}</Telemetry>
         ) : m.slices && m.kind !== 'done' ? (
           <Slices {...m.slices} tone={m.rail?.tone ?? 'done'} />
         ) : null}

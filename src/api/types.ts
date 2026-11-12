@@ -21,6 +21,8 @@ export interface ProjectSummary {
   updatedAt?: string;
   /** Slices planned; absent until the plan exists. */
   slicesTotal?: number;
+  /** The planned slices' ids, in plan order. */
+  sliceIds?: string[];
   /** Model spend so far, at API prices. Absent from summaries older than this field. */
   spendUsd?: number;
   /** Time the model spent working, summed over every stage. */

@@ -1,6 +1,6 @@
 import { fetch } from 'expo/fetch';
 
-import type { CreateEvent } from '@sfo/api';
+import type { Project } from '@sfo/api';
 
 export const API_URL = process.env.EXPO_PUBLIC_SFO_CONTROL_URL ?? 'https://sfo-control.fly.dev';
 
@@ -26,29 +26,17 @@ export async function call<T>(token: string, path: string, init: { method?: stri
 }
 
 /**
- * Creating a project holds its request for the whole setup (about a minute)
- * and answers with a line of JSON per step; each is handed to `onEvent` as it
- * arrives.
+ * Starts a project from an idea. The control plane answers at once with the
+ * project as `creating` and sets it up after (about a minute); the project
+ * list shows it until then.
  */
-export async function createProject(token: string, body: { idea: string; budget?: string }, onEvent: (event: CreateEvent) => void): Promise<void> {
-  const res = await fetch(`${API_URL}/projects?stream=1`, {
+export async function startProject(token: string, body: { idea: string; budget?: string }): Promise<Project> {
+  const res = await fetch(`${API_URL}/projects`, {
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!res.ok || !res.body) {
-    const error = ((await res.json().catch(() => ({}))) as { error?: string }).error;
-    throw new ApiError(error ?? `The control plane answered ${res.status}`, res.status);
-  }
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let rest = '';
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    rest += decoder.decode(value, { stream: true });
-    const lines = rest.split('\n');
-    rest = lines.pop() ?? '';
-    for (const line of lines) if (line.trim()) onEvent(JSON.parse(line) as CreateEvent);
-  }
+  const parsed = (await res.json().catch(() => ({}))) as { project?: Project; error?: string };
+  if (!res.ok || !parsed.project) throw new ApiError(parsed.error ?? `The control plane answered ${res.status}`, res.status);
+  return parsed.project;
 }
