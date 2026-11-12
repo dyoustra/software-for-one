@@ -140,6 +140,17 @@ export function Field({ style, ...props }: TextInputProps) {
   );
 }
 
+/** Waiting for something, saying what: the slow waits are a project's machine waking up. */
+export function Loading({ label }: { label: string }) {
+  const theme = useTheme();
+  return (
+    <View style={styles.loading} accessibilityRole="progressbar" accessibilityLabel={label}>
+      <ActivityIndicator color={theme.inkMuted} />
+      <Text style={[styles.muted, { color: theme.inkMuted }]}>{label}</Text>
+    </View>
+  );
+}
+
 /** What went wrong, in the failed colour. */
 export function ErrorText({ error }: { error: unknown }) {
   const theme = useTheme();
@@ -158,4 +169,5 @@ const styles = StyleSheet.create({
   buttonText: { fontSize: 16, fontWeight: '600' },
   field: { borderRadius: Radius.control, paddingVertical: 12, paddingHorizontal: 14 },
   fieldLong: { minHeight: 120, textAlignVertical: 'top' },
+  loading: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, paddingVertical: Spacing.three },
 });

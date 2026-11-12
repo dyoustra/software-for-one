@@ -6,7 +6,7 @@ import type { Project, Question } from '@sfo/api';
 import { LiveStrip } from '@/components/activity';
 import { Artifacts } from '@/components/artifacts';
 import { ProjectCard } from '@/components/project-card';
-import { Body, Button, Card, Code, ErrorText, Field, Muted, Page, Telemetry } from '@/components/ui';
+import { Body, Button, Card, Code, ErrorText, Field, Loading, Muted, Page, Telemetry } from '@/components/ui';
 import { Radius, Spacing, tint, Type } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { startProject } from '@/lib/api';
@@ -26,8 +26,9 @@ const REPORTS = [
 export default function ProjectScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { api, token } = useAuth();
-  const { refresh: refreshList } = useProjects();
-  const [project, setProject] = useState<Project | null>(null);
+  const { projects, refresh: refreshList } = useProjects();
+  const [fresh, setFresh] = useState<Project | null>(null);
+  const [updating, setUpdating] = useState(true);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [feedback, setFeedback] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
@@ -35,16 +36,23 @@ export default function ProjectScreen() {
   const [error, setError] = useState<unknown>(null);
   const live = useRef(false);
 
+  // The list's copy shows at once; the fresh one (read from the project's
+  // machine, which may need waking) replaces it when it arrives.
+  const project = fresh ?? projects?.find((p) => p.id === id) ?? null;
+
   const load = useCallback(async () => {
+    setUpdating(true);
     try {
       const p = await api<Project>(`/projects/${id}`);
-      setProject(p);
+      setFresh(p);
       const kind = cardModel(p).kind;
       live.current = kind === 'running' || kind === 'setup';
       setQuestions(p.summary?.status === 'awaiting_human' ? await api<Question[]>(`/projects/${id}/questions`) : []);
       setError(null);
     } catch (err) {
       setError(err);
+    } finally {
+      setUpdating(false);
     }
   }, [api, id]);
 
@@ -110,8 +118,15 @@ export default function ProjectScreen() {
 
   return (
     <Page refreshing={false} onRefresh={load}>
-      <Stack.Screen options={{ title: summary?.title ?? (settingUp ? 'Setting up' : 'Project') }} />
+      <Stack.Screen
+        options={{
+          title: summary?.title ?? (settingUp ? 'Setting up' : 'Project'),
+          // In the bar, so the page does not shift when it goes.
+          headerRight: () => (project && updating && !settingUp ? <Telemetry>Updating…</Telemetry> : null),
+        }}
+      />
       <ErrorText error={error} />
+      {!project && <Loading label="Waking the project's machine…" />}
       {project && <ProjectCard project={project} />}
       {summary?.note && (status === 'awaiting_human' || status === 'done') ? (
         <Card>

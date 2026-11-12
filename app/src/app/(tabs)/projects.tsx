@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 
 import { ProjectCard } from '@/components/project-card';
-import { ErrorText, Heading, Muted, Page, Telemetry } from '@/components/ui';
+import { ErrorText, Heading, Loading, Muted, Page, Telemetry } from '@/components/ui';
 import { useProjects } from '@/lib/projects';
 import { byAttention } from '@/lib/pipeline';
 
@@ -26,6 +26,7 @@ export default function Projects() {
         {projects && projects.length > 0 && <Telemetry>{String(projects.length)}</Telemetry>}
       </View>
       <ErrorText error={error} />
+      {!projects && !error && <Loading label="Loading your projects…" />}
       {projects?.length === 0 && <Muted>Nothing yet. Describe an idea on the Idea tab and it starts here.</Muted>}
       {sorted.map((p) => (
         <ProjectCard key={p.id} project={p} onPress={() => router.push({ pathname: '/project/[id]', params: { id: p.id } })} />

@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import type { Report } from '@sfo/api';
-import { Badge, Card, Code, ErrorText, Muted, Page, Telemetry } from '@/components/ui';
+import { Badge, Card, Code, ErrorText, Loading, Muted, Page, Telemetry } from '@/components/ui';
 import { Fonts, Radius, Spacing, Type } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth';
@@ -26,6 +26,7 @@ export default function ReportScreen() {
     <Page>
       <Stack.Screen options={{ title: TITLES[kind] ?? 'Report' }} />
       <ErrorText error={error} />
+      {!report && !error && <Loading label="Reading it from the project's machine…" />}
       {report && (text ? <Rendered kind={kind} text={text} /> : <Muted>Nothing yet.</Muted>)}
     </Page>
   );

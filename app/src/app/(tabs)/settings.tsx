@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { CredentialKind, Device, Identity, LanguageKind, Preferences, PreferencesResponse } from '@sfo/api';
 import { GitHubSignIn } from '@/components/github-sign-in';
-import { Body, Button, Card, ErrorText, Field, Heading, Muted, Page, Telemetry } from '@/components/ui';
+import { Body, Button, Card, ErrorText, Field, Heading, Loading, Muted, Page, Telemetry } from '@/components/ui';
 import { Radius, Spacing, tint, Type } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth';
@@ -133,6 +133,7 @@ export default function Settings() {
         </Muted>
       </Card>
 
+      {!prefs && !error && <Loading label="Loading your preferences…" />}
       {prefs && (
         <Card>
           <Body style={styles.section}>Preferences</Body>

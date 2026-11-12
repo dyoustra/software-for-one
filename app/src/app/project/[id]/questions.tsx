@@ -5,7 +5,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { Question } from '@sfo/api';
 import { Artifacts } from '@/components/artifacts';
 import { Rail } from '@/components/rail';
-import { Badge, Button, Card, ErrorText, Field, Muted, Page } from '@/components/ui';
+import { Badge, Button, Card, ErrorText, Field, Loading, Muted, Page } from '@/components/ui';
 import { Radius, Spacing, tint, Type } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth';
@@ -73,6 +73,7 @@ export default function Questions() {
         </View>
       )}
       <ErrorText error={error} />
+      {!questions && !error && <Loading label="Fetching the questions…" />}
       <Artifacts id={id} kind="drafts" />
       {questions?.map((q) => {
         const d = drafts[q.id] ?? { key: null, words: '' };
