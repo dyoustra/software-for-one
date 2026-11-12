@@ -2,7 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { artifactPath, projectDir, sfoDir, type Env } from "./paths.js";
-import { readContractFile, type Contract } from "./contracts.js";
+import { COMMAND_NAME, readContractFile, type Contract } from "./contracts.js";
+
+export { COMMAND_NAME };
 
 export const INSTALL_FILE = "INSTALL.json";
 
@@ -59,12 +61,6 @@ function packageName(dir: string, archetype: string): string | null {
 }
 
 const SHELL_TIMEOUT_MS = 30_000;
-
-/**
- * A command name as a person would type one. Names come from a manifest an
- * agent wrote, so anything else is refused rather than handed to a shell.
- */
-export const COMMAND_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 /**
  * What a person's new terminal would find for `name`, and whether it runs.
@@ -175,10 +171,30 @@ function installDeclared(
   const record: InstallRecord = { installer: declared.run.join(" "), commands: [], at: new Date().toISOString() };
   if (declared.needs.length > 0 && !needsMet) return save(id, { ...record, deferred: declared.needs }, env);
 
+  // The names it will put on PATH, each checked first: the install is the
+  // project's own command, so if one name is someone else's, none of it runs.
+  const names = declared.commands.filter((n) => COMMAND_NAME.test(n));
+  const before = readInstall(id, env);
+  const previously = new Set((before?.commands ?? []).filter((c) => c.installed).map((c) => realpathOr(c.detail)));
+  const pkg = packageName(dir, "cli-python");
+  const isOurs = (resolved: string): boolean => {
+    const real = realpathOr(resolved);
+    return real.startsWith(`${realpathOr(dir)}/`) || (pkg !== null && real.includes(`/uv/tools/${pkg}/`)) || previously.has(real);
+  };
+  const taken = names.flatMap((name) => {
+    const found = fromFreshShell(name, run, env);
+    return found.path && !isOurs(found.path) ? [{ name, installed: false, detail: `the name is already taken by ${found.path}; not replaced` }] : [];
+  });
+  if (taken.length > 0) return save(id, { ...record, commands: taken }, env);
+
   const done = run(declared.run[0], declared.run.slice(1), { cwd: dir, timeoutMs: 300_000 });
   if (done.status !== 0) {
     record.commands.push({ name: declared.run.join(" "), installed: false, detail: `the install failed: ${done.output.split("\n").slice(-3).join(" ")}` });
     return save(id, record, env);
+  }
+  for (const name of names) {
+    const after = fromFreshShell(name, run, env);
+    record.commands.push(after.path ? { name, installed: true, detail: after.path } : { name, installed: false, detail: "not found from a new terminal after installing" });
   }
   const shell = env.SHELL || "/bin/zsh";
   for (const check of declared.check) {
@@ -218,6 +234,16 @@ export function reinstall(id: string, archetype: string, env: Env = process.env,
 export function declaredInstall(id: string, env?: Env): string[][] | null {
   const install = readContractFile(id, env)?.install;
   return install ? [install.run, ...install.check] : null;
+}
+
+/**
+ * The commands an install put on PATH, as a person would type them. A record
+ * from a declared install without `commands` names its checks (`rolld
+ * --help`), so those read as the command they run.
+ */
+export function installedCommands(record: InstallRecord | null): string[] {
+  const names = (record?.commands ?? []).filter((c) => c.installed).map((c) => (COMMAND_NAME.test(c.name) ? c.name : (c.name.split(" ")[0] ?? "")));
+  return [...new Set(names.filter((n) => COMMAND_NAME.test(n)))];
 }
 
 export function readInstall(id: string, env?: Env): InstallRecord | null {

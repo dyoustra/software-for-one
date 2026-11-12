@@ -27,7 +27,7 @@ the contract, and the build has to satisfy it.
 
     {
       "gate":    [ {"name": "...", "run": ["argv", "..."], "files": "tests/{slice}-*.test.ts"} ],
-      "install": {"run": ["argv"], "check": [["argv"]], "needs": []},
+      "install": {"run": ["argv"], "check": [["argv"]], "commands": ["<name>"], "needs": []},
       "render":  [ {"name": "...", "run": ["argv"], "produces": ["path.png"], "needs": []} ],
       "smoke":   [ {"name": "<seam id from SERVICES.jsonl>", "run": ["argv"], "needs": []} ]
     }
@@ -41,7 +41,9 @@ the contract, and the build has to satisfy it.
   use host-side tests, a simulator, or fakes. A gate step cannot declare `needs`.
 - **`install`** — how to put it where the person uses it (a command on their
   PATH, an unpacked extension, firmware on a board), and `check` commands that
-  prove it worked, each run from a new terminal.
+  prove it worked, each run from a new terminal. `commands` lists the names
+  it puts on PATH, if any: sfo will not run an install that would replace a
+  command something else already owns.
 - **`render`** — commands that produce something to look at: screenshots, a
   terminal capture, a photo. Review looks at what they produce.
 - **`smoke`** — one entry per seam in `.sfo/SERVICES.jsonl` with a smoke check,
@@ -74,7 +76,7 @@ otherwise):
        {"name": "lint",      "run": ["uv", "run", "ruff", "check", "."]},
        {"name": "typecheck", "run": ["uv", "run", "mypy", "--strict", "."]},
        {"name": "test",      "run": ["uv", "run", "pytest", "-q", "--ignore=smoke"], "files": "tests/**/*{slice}*"}],
-     "install": {"run": ["uv", "tool", "install", "--editable", "--force", "."], "check": [["<command>", "--help"]]},
+     "install": {"run": ["uv", "tool", "install", "--editable", "--force", "."], "check": [["<command>", "--help"]], "commands": ["<command>"]},
      "smoke": [{"name": "<seam>", "run": ["uv", "run", "pytest", "-q", "--noconftest", "smoke/test_smoke_<seam>.py"]}]}
 
 **A Node CLI** (`package.json` with `"type": "module"` and `lint`, `typecheck`
@@ -86,7 +88,7 @@ and `test` scripts; run `npm install` and keep `package-lock.json`, which
        {"name": "lint",      "run": ["npm", "run", "lint"]},
        {"name": "typecheck", "run": ["npm", "run", "typecheck"]},
        {"name": "test",      "run": ["npx", "vitest", "run", "--exclude", "smoke/**"], "files": "tests/**/*{slice}*"}],
-     "install": {"run": ["npm", "link"], "check": [["<command>", "--help"]]}}
+     "install": {"run": ["npm", "link"], "check": [["<command>", "--help"]], "commands": ["<command>"]}}
 
 **A web app** (Vite, React, TypeScript; unit tests in Vitest, browser tests in
 Playwright against the production build — `playwright.config.ts` whose

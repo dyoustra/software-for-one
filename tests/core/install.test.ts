@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { commandNames, installTool, readInstall, reinstall, declaredInstall, type Exec } from "../../src/core/install.js";
+import { commandNames, installTool, installedCommands, readInstall, reinstall, declaredInstall, type Exec } from "../../src/core/install.js";
 
 let env: Record<string, string>;
 let dir: string;
@@ -132,6 +132,49 @@ describe("reinstall, after a change", () => {
   it("assumes nothing when it was never installed", () => {
     lastInstall(null);
     expect(needsMetFor()).toBe(false);
+  });
+});
+
+describe("a declared install", () => {
+  const contract = (install: object) =>
+    fs.writeFileSync(path.join(dir, ".sfo", "CONTRACTS.json"), JSON.stringify({ gate: [{ name: "t", run: ["true"], files: "tests/{slice}*" }], install }));
+
+  it("does not run when a command it would put on PATH belongs to something else", () => {
+    contract({ run: ["uv", "tool", "install", "--force", "."], check: [["moon", "--help"]], commands: ["moon"] });
+    const { run, calls } = shell({ before: { moon: "/opt/homebrew/bin/moon" } });
+    const record = installTool("p", "cli-python", env, run);
+    expect(calls.some((c) => c.startsWith("uv "))).toBe(false);
+    expect(record.commands).toEqual([{ name: "moon", installed: false, detail: "the name is already taken by /opt/homebrew/bin/moon; not replaced" }]);
+  });
+
+  it("installs, and records where each of its commands now resolves", () => {
+    contract({ run: ["uv", "tool", "install", "--force", "."], check: [["moon", "--help"]], commands: ["moon"] });
+    const { run } = shell({ after: { moon: "/Users/me/.local/bin/moon" } });
+    const record = installTool("p", "cli-python", env, run);
+    expect(record.commands).toEqual([
+      { name: "moon", installed: true, detail: "/Users/me/.local/bin/moon" },
+      { name: "moon --help", installed: true, detail: "runs from a new terminal" },
+    ]);
+  });
+
+  it("goes over its own earlier install", () => {
+    contract({ run: ["uv", "tool", "install", "--force", "."], check: [], commands: ["moon"] });
+    fs.writeFileSync(path.join(dir, ".sfo", "INSTALL.json"), JSON.stringify({ installer: "uv", commands: [{ name: "moon", installed: true, detail: "/Users/me/.local/bin/moon" }], at: "t" }));
+    const { run, calls } = shell({ before: { moon: "/Users/me/.local/bin/moon" }, after: { moon: "/Users/me/.local/bin/moon" } });
+    installTool("p", "cli-python", env, run);
+    expect(calls.some((c) => c.startsWith("uv "))).toBe(true);
+  });
+
+  it("refuses a contract naming something that is not a plain command", () => {
+    contract({ run: ["true"], check: [], commands: ["$(touch pwned)"] });
+    expect(() => declaredInstall("p", env)).toThrow(/invalid CONTRACTS\.json[\s\S]*a plain command name/);
+  });
+});
+
+describe("installed commands, as a person would type them", () => {
+  it("are the plain names, and a check's command when that is all an older record has", () => {
+    expect(installedCommands({ installer: "x", at: "t", commands: [{ name: "rolld --help", installed: true, detail: "" }, { name: "rolld", installed: true, detail: "/x" }, { name: "gone", installed: false, detail: "" }] })).toEqual(["rolld"]);
+    expect(installedCommands(null)).toEqual([]);
   });
 });
 

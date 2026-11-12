@@ -29,6 +29,12 @@ const GateStepSchema = z.strictObject({
   files: z.string().min(1).optional(),
 });
 
+/**
+ * A command name as a person would type one. Names come from files an agent
+ * wrote, so anything else is refused rather than handed to a shell.
+ */
+export const COMMAND_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+
 export const ContractSchema = z.object({
   /** In order. The gate must run anywhere, so a gate step may need nothing. */
   gate: z.array(GateStepSchema).min(1),
@@ -37,6 +43,11 @@ export const ContractSchema = z.object({
       run: Argv,
       /** Each must exit 0 from a new login shell once installed. */
       check: z.array(Argv).default([]),
+      /**
+       * The names the install puts on the person's PATH. sfo will not run an
+       * install that would replace a command something else owns.
+       */
+      commands: z.array(z.string().regex(COMMAND_NAME, "a plain command name")).default([]),
       needs: Needs,
     })
     .optional(),

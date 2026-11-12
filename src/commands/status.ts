@@ -15,7 +15,7 @@ import { openQuestions } from "../core/openQuestions.js";
 import { isStopped, readCrash, readFailure } from "../core/stopped.js";
 import { readSlices } from "../core/slices.js";
 import { readCostRecords, totalCost } from "../core/cost.js";
-import { readInstall } from "../core/install.js";
+import { installedCommands, readInstall } from "../core/install.js";
 
 /**
  * A project plus whatever short explanation the listing owes the reader, and
@@ -61,7 +61,7 @@ function telemetryFor(state: ProjectState, env: Env | undefined): Telemetry {
     spendUsd: Math.round(total.costUsd * 100) / 100,
     computeMs: total.durationMs,
     ...(open ? { openQuestions: open } : {}),
-    ...(installed?.commands.some((c) => c.installed) ? { delivered: { commands: installed.commands.filter((c) => c.installed).map((c) => c.name) } } : {}),
+    ...(installedCommands(installed ?? null).length > 0 ? { delivered: { commands: installedCommands(installed ?? null) } } : {}),
     ...(failure ? { failure: { stage: failure.stage, reason: failure.reason.split("\n")[0].slice(0, 300) } } : {}),
   };
 }

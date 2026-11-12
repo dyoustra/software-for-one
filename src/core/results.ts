@@ -2,7 +2,7 @@ import type { ProjectResults } from "../api/types.js";
 import type { Env } from "./paths.js";
 import { readState } from "./state.js";
 import { parseDelivery, readDeliveryFile } from "./delivery.js";
-import { readInstall } from "./install.js";
+import { installedCommands, readInstall } from "./install.js";
 import { readCriteria } from "./criteria.js";
 import { readCostRecords } from "./cost.js";
 import { readSlices, skippedBy } from "./slices.js";
@@ -49,7 +49,7 @@ export function resultsFor(id: string, env?: Env): ProjectResults {
   return {
     priorArt: quietly(() => readPriorArt(id, env), null),
     delivery: parseDelivery(readDeliveryFile(id, env)),
-    installed: (quietly(() => readInstall(id, env), null)?.commands ?? []).filter((c) => c.installed).map((c) => c.name),
+    installed: installedCommands(quietly(() => readInstall(id, env), null)),
     featuresFallback: groups,
     cost: {
       totalUsd: Math.round(stages.reduce((n, s) => n + s.costUsd, 0) * 100) / 100,
