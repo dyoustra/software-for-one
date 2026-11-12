@@ -8,7 +8,7 @@ import type { Db } from "./db.js";
 import { requireDevice, type Env } from "./auth.js";
 import { issueWorkerKey } from "./workers.js";
 import { githubToken, type GitHubOAuth, type Vault } from "./credentials.js";
-import { PROJECT_ID, provisionProject, type GitHub, type SpriteCredential } from "../core/provision.js";
+import { PROJECT_ID, newSpriteName, provisionProject, type GitHub, type SpriteCredential } from "../core/provision.js";
 import { DEFAULT_PREFERENCES, KINDS, LANGUAGES, PreferencesSchema, WEB_DATA, WEB_HOSTS } from "../core/preferences.js";
 import type { Project, PreferencesResponse } from "../api/types.js";
 import type { SpriteCli } from "../core/sprite.js";
@@ -23,14 +23,58 @@ export interface ProjectDeps {
   oauth: GitHubOAuth;
   /** Where a project's Sprite reports to; absent, Sprites report nowhere. */
   controlUrl?: string;
+  /** Setups still running after their request returned; shutdown waits for them. */
+  setups?: Set<Promise<unknown>>;
 }
 
-type ProjectRow = { id: string; user_id: string; sprite: string; repo: string | null; status: string; summary: string | null; created_at: string; updated_at: string };
+type ProjectRow = {
+  id: string;
+  user_id: string;
+  sprite: string;
+  repo: string | null;
+  status: string;
+  summary: string | null;
+  idea: string | null;
+  setup_step: string | null;
+  setup_error: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+/**
+ * A project's id until `sfo new` on its Sprite names it. The underscore is
+ * outside PROJECT_ID, so it can never be mistaken for, or collide with, a
+ * real project's id.
+ */
+const SETUP_ID = /^setup_[0-9a-f]{12}$/;
 
 const now = (): string => new Date().toISOString();
 
 function present(row: ProjectRow): Project {
-  return { id: row.id, sprite: row.sprite, repo: row.repo, status: row.status as Project["status"], summary: row.summary ? JSON.parse(row.summary) : null, createdAt: row.created_at, updatedAt: row.updated_at };
+  return {
+    id: row.id,
+    sprite: row.sprite,
+    repo: row.repo,
+    status: row.status as Project["status"],
+    summary: row.summary ? JSON.parse(row.summary) : null,
+    ...(row.status === "creating" ? { idea: row.idea ?? "", setup: { step: row.setup_step, error: row.setup_error } } : {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/**
+ * Setups the control plane was in the middle of when it last stopped, which
+ * nothing will finish now: each is marked failed, for the person to try
+ * again, and its half-made Sprite removed.
+ */
+export async function abandonInterruptedSetups(db: Db, sprites: SpriteCli): Promise<number> {
+  const rows = db.prepare("SELECT id, sprite FROM projects WHERE status = 'creating' AND setup_error IS NULL").all() as { id: string; sprite: string }[];
+  for (const row of rows) {
+    db.prepare("UPDATE projects SET setup_error = ?, updated_at = ? WHERE id = ?").run("Setup was interrupted when the server restarted. Try again.", now(), row.id);
+    await sprites.destroy(row.sprite).catch(() => undefined);
+  }
+  return rows.length;
 }
 
 /**
@@ -60,12 +104,20 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
   const { db, vault, sprites } = deps;
   const auth = requireDevice(db);
 
-  /** The project, if it is this person's; anyone else's is indistinguishable from none. */
-  const owned = (c: Context<Env>): ProjectRow | null => {
-    if (!PROJECT_ID.test(c.req.param("id") ?? "")) return null;
-    const row = db.prepare("SELECT * FROM projects WHERE id = ? AND user_id = ? AND status != 'destroyed'").get(c.req.param("id") ?? "", c.get("userId")) as ProjectRow | undefined;
+  /**
+   * The project, if it is this person's; anyone else's is indistinguishable
+   * from none. Only a ready one, unless `settingUp`: nothing may reach the
+   * Sprite of a project still being set up.
+   */
+  const owned = (c: Context<Env>, settingUp = false): ProjectRow | null => {
+    const id = c.req.param("id") ?? "";
+    if (!PROJECT_ID.test(id) && !(settingUp && SETUP_ID.test(id))) return null;
+    const row = db
+      .prepare(`SELECT * FROM projects WHERE id = ? AND user_id = ? AND status ${settingUp ? "IN ('ready', 'creating')" : "= 'ready'"}`)
+      .get(id, c.get("userId")) as ProjectRow | undefined;
     return row ?? null;
   };
+  const setups = deps.setups ?? new Set<Promise<unknown>>();
 
   /** Runs sfo on the project's Sprite; arguments reach it as data, never as script. */
   const sfo = (row: ProjectRow, args: string[], input?: string) => sprites.exec(row.sprite, `cd ~ && exec sfo "$@"`, args, input === undefined ? {} : { input });
@@ -112,24 +164,47 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
     return c.json({ ok: true });
   });
 
-  // Creating a project holds its request for the whole setup (about a minute),
-  // reporting each step as a line of JSON: the Machine is never stopped under
-  // it, because the work is the request.
+  // Creating a project records it and answers at once; setup (about a
+  // minute) carries on after the request, so the person can leave. That is
+  // the one exception to every action finishing inside its request: shutdown
+  // waits for `setups`, and a setup a restart cut short is marked failed on
+  // boot. `?stream=1` holds the request instead, reporting each step as a
+  // line of JSON, for a terminal where someone is watching.
   app.post("/projects", auth, async (c: Context<Env>) => {
     const body = (await c.req.json().catch(() => ({}))) as { idea?: string; budget?: string; run?: boolean; preferencesJson?: string; sfoMd?: string | null };
-    if (!body.idea?.trim()) return c.json({ error: "idea is required" }, 400);
+    const idea = body.idea?.trim();
+    if (!idea) return c.json({ error: "idea is required" }, 400);
+    if (idea.length > 20_000) return c.json({ error: "an idea must be under 20,000 characters" }, 400);
     const userId = c.get("userId");
     const { credentials, profileJson } = spriteCredentials(vault, userId);
     if (credentials.length === 0) return c.json({ error: "no model credential stored — `sfo login` from your Mac to upload one, or add an API key" }, 400);
     const token = await githubToken(vault, deps.oauth, userId).catch(() => null);
     const worker = issueWorkerKey();
+    const provisional = `setup_${randomBytes(6).toString("hex")}`;
+    const sprite = newSpriteName();
+    db.prepare("INSERT INTO projects (id, user_id, sprite, repo, status, idea, setup_step, created_at, updated_at) VALUES (?, ?, ?, NULL, 'creating', ?, ?, ?, ?)").run(
+      provisional,
+      userId,
+      sprite,
+      idea,
+      "Setting up its machine",
+      now(),
+      now(),
+    );
 
-    return stream(c, async (out) => {
-      const say = (line: Record<string, unknown>) => out.write(`${JSON.stringify(line)}\n`);
+    // Kept, so a stream attached after setup began still hears every line.
+    const told: Record<string, unknown>[] = [];
+    const listeners = new Set<(line: Record<string, unknown>) => void>();
+    const tell = (line: Record<string, unknown>) => {
+      told.push(line);
+      listeners.forEach((l) => l(line));
+    };
+    const setup = (async () => {
       try {
         const made = await provisionProject(
           {
-            idea: body.idea ?? "",
+            idea,
+            sprite,
             budget: body.budget,
             run: body.run !== false,
             credentials,
@@ -139,22 +214,35 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
             githubToken: token,
             ...(deps.controlUrl ? { control: { url: deps.controlUrl, token: worker.token } } : {}),
           },
-          { cli: sprites, github: deps.repos, log: (message) => void say({ progress: message }) },
+          {
+            cli: sprites,
+            github: deps.repos,
+            log: (message) => tell({ progress: message }),
+            step: (step) => void db.prepare("UPDATE projects SET setup_step = ?, updated_at = ? WHERE id = ?").run(step, now(), provisional),
+          },
         );
-        db.prepare("INSERT INTO projects (id, user_id, sprite, repo, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'ready', ?, ?)").run(
-          made.id,
-          userId,
-          made.sprite,
-          made.repo,
-          now(),
-          now(),
-        );
+        // Nothing refers to the provisional id yet, so it can take the real one.
+        db.prepare("UPDATE projects SET id = ?, repo = ?, status = 'ready', setup_step = NULL, updated_at = ? WHERE id = ?").run(made.id, made.repo, now(), provisional);
         db.prepare("INSERT INTO worker_keys (project_id, token_hash) VALUES (?, ?)").run(made.id, worker.hash);
         const row = await refresh(db.prepare("SELECT * FROM projects WHERE id = ?").get(made.id) as ProjectRow);
-        await say({ done: true, project: present(row), started: made.started });
+        tell({ done: true, project: present(row), started: made.started });
       } catch (err) {
-        await say({ error: err instanceof Error ? err.message : String(err) });
+        const message = err instanceof Error ? err.message : String(err);
+        db.prepare("UPDATE projects SET setup_error = ?, updated_at = ? WHERE id = ?").run(message.slice(0, 2000), now(), provisional);
+        tell({ error: message });
       }
+    })();
+    setups.add(setup);
+    void setup.finally(() => setups.delete(setup));
+
+    if (c.req.query("stream") !== "1") {
+      return c.json({ project: present(db.prepare("SELECT * FROM projects WHERE id = ?").get(provisional) as ProjectRow) }, 202);
+    }
+    return stream(c, async (out) => {
+      const say = (line: Record<string, unknown>) => void out.write(`${JSON.stringify(line)}\n`);
+      told.forEach(say);
+      listeners.add(say);
+      await setup;
     });
   });
 
@@ -163,8 +251,9 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
   );
 
   app.get("/projects/:id", auth, async (c: Context<Env>) => {
-    const row = owned(c);
-    return row ? c.json(present(await refresh(row))) : c.json({ error: "no such project" }, 404);
+    const row = owned(c, true);
+    if (!row) return c.json({ error: "no such project" }, 404);
+    return c.json(present(row.status === "ready" ? await refresh(row) : row));
   });
 
   app.get("/projects/:id/questions", auth, async (c: Context<Env>) => {
@@ -290,8 +379,15 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
   });
 
   app.delete("/projects/:id", auth, async (c: Context<Env>) => {
-    const row = owned(c);
+    const row = owned(c, true);
     if (!row) return c.json({ error: "no such project" }, 404);
+    // A setup still under way finishes or fails on its own; one that failed is
+    // just its record (provisioning already removed its Sprite).
+    if (row.status === "creating") {
+      if (!row.setup_error) return c.json({ error: "still being set up — wait for it to finish or fail" }, 409);
+      db.prepare("DELETE FROM projects WHERE id = ?").run(row.id);
+      return c.json({ ok: true, repo: null });
+    }
     await sprites.destroy(row.sprite);
     db.prepare("UPDATE projects SET status = 'destroyed', updated_at = ? WHERE id = ?").run(now(), row.id);
     return c.json({ ok: true, repo: row.repo });

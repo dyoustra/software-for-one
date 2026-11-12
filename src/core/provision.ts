@@ -77,6 +77,8 @@ export interface SpriteCredential {
 /** Everything a new project's Sprite is given; where it comes from is the caller's business. */
 export interface ProvisionSpec {
   idea: string;
+  /** The Sprite's name, when the caller recorded it before setup began; otherwise one is made. */
+  sprite?: string;
   budget?: string;
   run: boolean;
   credentials: SpriteCredential[];
@@ -96,6 +98,8 @@ export interface Provisioned {
   started: boolean;
 }
 
+export const newSpriteName = (): string => `sfo-${randomBytes(4).toString("hex")}`;
+
 /**
  * Captures an idea on a new Sprite of its own: created, set up, given its
  * credentials and the person's preferences, captured, optionally given a
@@ -103,12 +107,14 @@ export interface Provisioned {
  */
 export async function provisionProject(
   spec: ProvisionSpec,
-  deps: { cli: SpriteCli; github?: GitHub; log?: (message: string) => void },
+  deps: { cli: SpriteCli; github?: GitHub; log?: (message: string) => void; step?: (step: string) => void },
 ): Promise<Provisioned> {
   const log = deps.log ?? console.log;
+  const step = deps.step ?? (() => undefined);
   const cli = deps.cli;
-  const sprite = `sfo-${randomBytes(4).toString("hex")}`;
+  const sprite = spec.sprite ?? newSpriteName();
   log(`creating Sprite ${sprite} and setting it up (about a minute)`);
+  step("Setting up its machine");
   await cli.create(sprite);
   let id: string | null = null;
   let triage = "";
@@ -132,6 +138,7 @@ export async function provisionProject(
 
     // On its own Sprite the project is local; without --local, sfo there would
     // try to make yet another Sprite.
+    step("Reading your idea");
     const captured = await cli.exec(sprite, `cd ~ && exec sfo new "$@"`, [spec.idea, "--local", "--no-run", ...(spec.budget ? ["--budget", spec.budget] : [])]);
     triage = captured.stdout;
     log(captured.stdout.trim().replace(/not started — `sfo run [^`]+` when you are ready\n?/, ""));
@@ -148,6 +155,7 @@ export async function provisionProject(
 
   let repo: string | null = null;
   if (spec.githubToken) {
+    step("Making its repo");
     try {
       repo = await connectRepo(id, sprite, spec.githubToken, cli, deps.github ?? github);
       log(`private repo: ${repo}`);
@@ -160,6 +168,7 @@ export async function provisionProject(
   // just said this cannot build; the person decides with `sfo run`.
   const started = spec.run && !/triage: out of scope/.test(triage);
   if (started) {
+    step("Starting");
     await cli.exec(sprite, `exec sfo run "$1"`, [id]);
     log(`started on ${sprite}`);
   }

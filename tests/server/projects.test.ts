@@ -3,6 +3,7 @@ import { describe, it, expect } from "vitest";
 import { randomBytes } from "node:crypto";
 import { openDb } from "../../src/server/db.js";
 import { createApp } from "../../src/server/app.js";
+import { abandonInterruptedSetups } from "../../src/server/projects.js";
 import { Vault, type GitHubOAuth } from "../../src/server/credentials.js";
 import type { SpriteCli } from "../../src/core/sprite.js";
 
@@ -35,24 +36,27 @@ function server() {
   const db = openDb(":memory:");
   const vault = new Vault(db, randomBytes(32).toString("base64"));
   const fake = fakeSprites();
+  const setups = new Set<Promise<unknown>>();
   const oauth: GitHubOAuth = { clientId: "x", authorizeUrl: () => "", whoami: async () => "x", exchange: async () => ({ accessToken: "", refreshToken: null, expiresAt: null }) };
-  const app = createApp({ db, version: "t", verifyApple: async (t) => ({ sub: t }), allowed: new Set(["me", "you"]), publicUrl: "https://cp.test", vault, github: oauth, githubRedirects: [], sprites: fake.sprites, githubDevice: noGitHubDevice, allowedGithub: new Set() });
+  const app = createApp({ db, version: "t", verifyApple: async (t) => ({ sub: t }), allowed: new Set(["me", "you"]), publicUrl: "https://cp.test", vault, github: oauth, githubRedirects: [], sprites: fake.sprites, githubDevice: noGitHubDevice, allowedGithub: new Set(), setups });
   const call = (method: string, path: string, token?: string, body?: unknown) =>
     app.request(path, { method, headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) }, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
   const signIn = async (who: string) => ((await (await call("POST", "/auth/apple", undefined, { idToken: who })).json()) as { token: string }).token;
-  return { db, vault, fake, call, signIn };
+  /** Until every setup the server has running has finished. */
+  const settled = () => Promise.all([...setups]);
+  return { db, vault, fake, call, signIn, settled };
 }
 
 async function withProject(s: ReturnType<typeof server>, who = "me") {
   const token = await s.signIn(who);
   await s.call("PUT", "/credentials/claude", token, { value: "sk-ant-oat01-secret" });
-  const res = await s.call("POST", "/projects", token, { idea: "tonight's moon" });
+  const res = await s.call("POST", "/projects?stream=1", token, { idea: "tonight's moon" });
   const lines = (await res.text()).trim().split("\n").map((l) => JSON.parse(l) as Record<string, unknown>);
   return { token, lines };
 }
 
 describe("creating a project", () => {
-  it("provisions a Sprite inside the request, reporting each step, and records the project", async () => {
+  it("streams each step to a terminal that asks to watch, and records the project", async () => {
     const s = server();
     const { token, lines } = await withProject(s);
 
@@ -68,6 +72,59 @@ describe("creating a project", () => {
     await withProject(s);
     expect(s.fake.calls.find((c) => c.args[0] === "claude-token")?.input).toBe("sk-ant-oat01-secret");
     for (const c of s.fake.calls) expect([c.script, ...c.args].join(" ")).not.toContain("sk-ant-oat01-secret");
+  });
+
+  it("answers at once, and the project shows as setting up until its Sprite is ready", async () => {
+    const s = server();
+    const token = await s.signIn("me");
+    await s.call("PUT", "/credentials/claude", token, { value: "sk-ant-oat01-secret" });
+    const res = await s.call("POST", "/projects", token, { idea: "tonight's moon" });
+    expect(res.status).toBe(202);
+    const { project } = (await res.json()) as { project: { id: string; status: string; idea: string; setup: { step: string; error: null } } };
+    expect(project).toMatchObject({ status: "creating", idea: "tonight's moon", setup: { error: null } });
+    expect(project.id).toMatch(/^setup_[0-9a-f]{12}$/);
+    expect((await s.call("GET", `/projects/${project.id}/questions`, token)).status).toBe(404);
+
+    await s.settled();
+    const list = (await (await s.call("GET", "/projects", token)).json()) as { id: string; status: string; setup?: unknown }[];
+    expect(list).toEqual([expect.objectContaining({ id: "moon-abc123", status: "ready" })]);
+    expect(list[0].setup).toBeUndefined();
+    expect((await s.call("GET", `/projects/${project.id}`, token)).status).toBe(404);
+  });
+
+  it("keeps a failed setup, with why, until the person removes it", async () => {
+    const s = server();
+    let release = () => {};
+    const held = new Promise<void>((r) => (release = r));
+    s.fake.sprites.exec = async () => {
+      await held;
+      return { status: 1, stdout: "no network" };
+    };
+    const token = await s.signIn("me");
+    await s.call("PUT", "/credentials/claude", token, { value: "sk-ant-oat01-secret" });
+    const { project } = (await (await s.call("POST", "/projects", token, { idea: "x" })).json()) as { project: { id: string } };
+    expect((await s.call("DELETE", `/projects/${project.id}`, token)).status).toBe(409);
+    release();
+
+    await s.settled();
+    const failed = (await (await s.call("GET", `/projects/${project.id}`, token)).json()) as { setup: { error: string } };
+    expect(failed.setup.error).toMatch(/setting up sfo-.* failed/);
+    expect(s.fake.destroyed).toEqual(s.fake.created);
+    expect((await s.call("DELETE", `/projects/${project.id}`, token)).status).toBe(200);
+    expect(await (await s.call("GET", "/projects", token)).json()).toEqual([]);
+  });
+
+  it("marks a setup a restart cut short as failed, and removes its half-made Sprite", async () => {
+    const s = server();
+    const token = await s.signIn("me");
+    const userId = (s.db.prepare("SELECT user_id FROM devices").get() as { user_id: string }).user_id;
+    s.db.prepare("INSERT INTO projects (id, user_id, sprite, status, idea, setup_step, created_at, updated_at) VALUES ('setup_000000000001', ?, 'sfo-0000aaaa', 'creating', 'x', 'Reading your idea', 't', 't')").run(userId);
+
+    expect(await abandonInterruptedSetups(s.db, s.fake.sprites)).toBe(1);
+    const [p] = (await (await s.call("GET", "/projects", token)).json()) as { setup: { error: string } }[];
+    expect(p.setup.error).toMatch(/interrupted/);
+    expect(s.fake.destroyed).toEqual(["sfo-0000aaaa"]);
+    expect(await abandonInterruptedSetups(s.db, s.fake.sprites)).toBe(0);
   });
 
   it("refuses before making anything when no model credential is stored", async () => {
@@ -157,7 +214,7 @@ describe("preferences", () => {
     expect((await s.call("PUT", "/preferences", token, { preferences: { ...first.preferences, webHost: "none" }, sfoMd: "Python first." })).status).toBe(200);
 
     await s.call("PUT", "/credentials/claude", token, { value: "sk-ant-oat01-secret" });
-    await (await s.call("POST", "/projects", token, { idea: "x" })).text();
+    await (await s.call("POST", "/projects?stream=1", token, { idea: "x" })).text();
     const copied = (file: string) => s.fake.calls.find((c) => c.script.includes("~/.sfo/") && c.args[0] === file)?.input;
     expect(JSON.parse(copied("preferences.json") ?? "{}").webHost).toBe("none");
     expect(copied("SFO.md")).toBe("Python first.");

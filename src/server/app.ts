@@ -20,6 +20,8 @@ export interface ServerDeps extends Omit<AuthDeps, "db"> {
   repos?: GitHub;
   push?: SendPush;
   githubDevice: GitHubDevice;
+  /** Setups still running after their request returned; shutdown waits for them. */
+  setups?: Set<Promise<unknown>>;
   /** Origins the web build is served from; only they may call across origins. */
   webOrigins?: string[];
 }
@@ -37,7 +39,7 @@ export function createApp(deps: ServerDeps): Hono<Env> {
   authRoutes(app, deps);
   githubSignInRoutes(app, { db: deps.db, github: deps.githubDevice, allowlists: { apple: deps.allowed, github: deps.allowedGithub }, holdMs: deps.holdMs, log: deps.log });
   credentialRoutes(app, deps.db, deps.vault, deps.github, deps.githubRedirects);
-  projectRoutes(app, { db: deps.db, vault: deps.vault, sprites: deps.sprites, repos: deps.repos, oauth: deps.github, controlUrl: deps.publicUrl });
+  projectRoutes(app, { db: deps.db, vault: deps.vault, sprites: deps.sprites, repos: deps.repos, oauth: deps.github, controlUrl: deps.publicUrl, setups: deps.setups });
   workerRoutes(app, { db: deps.db, sprites: deps.sprites, push: deps.push ?? (async () => {}), log: deps.log });
 
   return app;

@@ -147,7 +147,8 @@ export function controlPlane(at: { url: string; token: string }, env: Env = proc
   return {
     kind: "control",
     async create(idea, opts) {
-      const res = await raw("/projects", {
+      // Streamed: at a terminal, the person watches setup happen.
+      const res = await raw("/projects?stream=1", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ idea, budget: opts.budget, run: opts.run, preferencesJson: JSON.stringify(readPreferences(env)), sfoMd: readSfoMd(env) }),

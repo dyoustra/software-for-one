@@ -12,10 +12,15 @@ primary_region = "dfw"
   source = "sfo_data"
   destination = "/data"
 
+# Long enough for a project setup under way to finish before the Machine is
+# stopped (setups outlive their request; see POST /projects).
+kill_timeout = "180s"
+
 [http_service]
   internal_port = 8080
   force_https = true
-  # Stopped when idle and started by the next request; nothing may run outside one.
+  # Stopped when idle and started by the next request; nothing runs outside one,
+  # except a project setup, which shutdown waits for.
   auto_stop_machines = "stop"
   auto_start_machines = true
   min_machines_running = 0

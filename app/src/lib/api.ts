@@ -31,7 +31,7 @@ export async function call<T>(token: string, path: string, init: { method?: stri
  * arrives.
  */
 export async function createProject(token: string, body: { idea: string; budget?: string }, onEvent: (event: CreateEvent) => void): Promise<void> {
-  const res = await fetch(`${API_URL}/projects`, {
+  const res = await fetch(`${API_URL}/projects?stream=1`, {
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: JSON.stringify(body),

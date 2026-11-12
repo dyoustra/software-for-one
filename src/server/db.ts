@@ -136,6 +136,13 @@ const MIGRATIONS: string[] = [
   DROP TABLE users;
   ALTER TABLE users_rebuilt RENAME TO users;
   `,
+  // v9: a project is recorded before its setup starts, so the person can leave
+  // while it runs; these say what it is and how setup is going.
+  `
+  ALTER TABLE projects ADD COLUMN idea TEXT;
+  ALTER TABLE projects ADD COLUMN setup_step TEXT;
+  ALTER TABLE projects ADD COLUMN setup_error TEXT;
+  `,
 ];
 
 export type Db = DatabaseSync;

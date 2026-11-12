@@ -1,3 +1,4 @@
+import { noGitHubDevice } from "../server/fakes.js";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
@@ -50,7 +51,7 @@ beforeAll(async () => {
   const db = openDb(":memory:");
   const vault = new Vault(db, randomBytes(32).toString("base64"));
   const oauth: GitHubOAuth = { clientId: "x", authorizeUrl: () => "", whoami: async () => "x", exchange: async () => ({ accessToken: "", refreshToken: null, expiresAt: null }) };
-  const app = createApp({ db, version: "t", verifyApple: async (t) => ({ sub: t }), allowed: new Set(["me"]), publicUrl: "http://t", vault, github: oauth, githubRedirects: [], sprites });
+  const app = createApp({ db, version: "t", verifyApple: async (t) => ({ sub: t }), allowed: new Set(["me"]), publicUrl: "http://t", vault, github: oauth, githubRedirects: [], sprites, githubDevice: noGitHubDevice, allowedGithub: new Set() });
   server = serve({ fetch: app.fetch, port: 0 });
   await new Promise((r) => server.once("listening", r));
   const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;

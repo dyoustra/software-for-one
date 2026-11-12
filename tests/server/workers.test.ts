@@ -44,7 +44,7 @@ async function registerVerified(s: ReturnType<typeof server>, device: string, to
 async function projectWithWorker(s: ReturnType<typeof server>) {
   const token = ((await (await s.call("POST", "/auth/apple", undefined, { idToken: "me" })).json()) as { token: string }).token;
   await s.call("PUT", "/credentials/claude", token, { value: "sk-ant-oat01-x" });
-  await (await s.call("POST", "/projects", token, { idea: "moon" })).text();
+  await (await s.call("POST", "/projects?stream=1", token, { idea: "moon" })).text();
   const worker = s.calls.find((c) => c.args[0] === "control-token")?.input ?? "";
   return { token, worker };
 }

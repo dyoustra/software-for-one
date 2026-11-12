@@ -35,6 +35,11 @@ it needs you.
 ### Questions / Clarify (light, right phone)
 ![Clarify light mode reference](docs/renders/questions-light-mode.jpg)
 
+### App icon
+![App icon reference](docs/renders/app-icon.jpg)
+
+Full-bleed `1024×1024` master PNG is exported at `app/assets/images/icon.png`.
+
 ### Where to depart from the renders
 
 The renders are a direction, not a pixel target. Deliberate departures:
@@ -172,8 +177,11 @@ Same content, restyled: grouped sections on `surface`, telemetry-style values
 ### System chrome
 
 React Navigation's `ThemeProvider`, the native and web tab bars and modals use
-the light and dark surfaces. The app icon and splash screen are supplied
-separately by Danny and applied when they arrive.
+the light and dark surfaces. The master app icon is at
+`app/assets/images/icon.png`: point `app.json` (`ios.icon` currently points at
+the starter `./assets/expo.icon` bundle), `favicon.png`, Android adaptive icon
+layers, and `expo-splash-screen` (currently `#208AEF`) to match it and the dark
+`canvas` background.
 
 ## 6. Card grammar
 
@@ -244,10 +252,10 @@ existing `.sfo/` files so `GET /projects` powers every card in one fetch:
 
 Today a Sprite reports only when a run stops, so a running card would freeze.
 Sprites also send a **silent progress event** at every stage change and every
-slice result: the same worker endpoint, carrying the new summary, never
-pushed to the phone. The server validates its shape and size (it is the
-project's own Sprite, but its content is still capped and typed) and updates
-the cached summary.
+slice result: the same worker endpoint, never pushed to the phone and never
+waited on by the run. The event carries nothing; the control plane re-reads
+the summary from the Sprite (`sfo status --json`, as for a stop event — it is
+awake, so this costs nothing extra) and updates the cached one.
 
 ### 7.2 Creating without waiting
 
@@ -280,4 +288,3 @@ cover one), and on boot a project left half set up is marked failed with
 - The native iOS ActivityKit / Live Activities extension itself. The
   three-row card stays clean and self-contained so it can be mirrored later.
 - A wide desktop layout for the web build.
-- The app icon and splash artwork (Danny's).

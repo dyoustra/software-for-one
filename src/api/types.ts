@@ -39,6 +39,10 @@ export interface Project {
   repo: string | null;
   status: "creating" | "ready" | "destroyed";
   summary: ProjectSummary | null;
+  /** While `creating`: the idea as given. */
+  idea?: string;
+  /** While `creating`: the step under way, or why setup failed. */
+  setup?: { step: string | null; error: string | null };
   createdAt: string;
   updatedAt: string;
 }
