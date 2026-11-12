@@ -109,9 +109,29 @@ describe("creating a project", () => {
     await s.settled();
     const failed = (await (await s.call("GET", `/projects/${project.id}`, token)).json()) as { setup: { error: string } };
     expect(failed.setup.error).toMatch(/setting up sfo-.* failed/);
-    expect(s.fake.destroyed).toEqual(s.fake.created);
+    expect([...new Set(s.fake.destroyed)]).toEqual(s.fake.created);
     expect((await s.call("DELETE", `/projects/${project.id}`, token)).status).toBe(200);
     expect(await (await s.call("GET", "/projects", token)).json()).toEqual([]);
+  });
+
+  it("removes a failed setup's Sprite before its record, whichever step failed", async () => {
+    const s = server();
+    s.fake.sprites.exec = async (_sprite, script) => (script.includes("sfo run") ? Promise.reject(new Error("network down")) : script.includes("sfo new") ? { status: 0, stdout: "captured: moon-abc123\n" } : { status: 0, stdout: "" });
+    const token = await s.signIn("me");
+    await s.call("PUT", "/credentials/claude", token, { value: "sk-ant-oat01-secret" });
+    const { project } = (await (await s.call("POST", "/projects", token, { idea: "x" })).json()) as { project: { id: string } };
+    await s.settled();
+    expect([...new Set(s.fake.destroyed)]).toEqual(s.fake.created);
+
+    s.fake.sprites.destroy = async () => {
+      throw new Error("Sprites API DELETE /v1/sprites/x failed (500): busy");
+    };
+    expect((await s.call("DELETE", `/projects/${project.id}`, token)).status).toBe(502);
+    expect(((await (await s.call("GET", "/projects", token)).json()) as unknown[]).length).toBe(1);
+    s.fake.sprites.destroy = async () => {
+      throw new Error("Sprites API DELETE /v1/sprites/x failed (404): not found");
+    };
+    expect((await s.call("DELETE", `/projects/${project.id}`, token)).status).toBe(200);
   });
 
   it("marks a setup a restart cut short as failed, and removes its half-made Sprite", async () => {
@@ -196,7 +216,7 @@ describe("a project", () => {
     const s = server();
     const { token } = await withProject(s);
     expect((await s.call("DELETE", "/projects/moon-abc123", token)).status).toBe(200);
-    expect(s.fake.destroyed).toEqual(s.fake.created);
+    expect([...new Set(s.fake.destroyed)]).toEqual(s.fake.created);
     expect(await (await s.call("GET", "/projects", token)).json()).toEqual([]);
   });
 });

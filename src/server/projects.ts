@@ -64,6 +64,20 @@ function present(row: ProjectRow): Project {
 }
 
 /**
+ * Removes a Sprite, counting one that is already gone as removed. A failed
+ * setup's Sprite may hold the person's credentials, so its record goes only
+ * once this is true.
+ */
+async function destroySprite(sprites: SpriteCli, sprite: string): Promise<boolean> {
+  try {
+    await sprites.destroy(sprite);
+    return true;
+  } catch (err) {
+    return /\(404\)/.test(err instanceof Error ? err.message : String(err));
+  }
+}
+
+/**
  * Setups the control plane was in the middle of when it last stopped, which
  * nothing will finish now: each is marked failed, for the person to try
  * again, and its half-made Sprite removed.
@@ -72,7 +86,8 @@ export async function abandonInterruptedSetups(db: Db, sprites: SpriteCli): Prom
   const rows = db.prepare("SELECT id, sprite FROM projects WHERE status = 'creating' AND setup_error IS NULL").all() as { id: string; sprite: string }[];
   for (const row of rows) {
     db.prepare("UPDATE projects SET setup_error = ?, updated_at = ? WHERE id = ?").run("Setup was interrupted when the server restarted. Try again.", now(), row.id);
-    await sprites.destroy(row.sprite).catch(() => undefined);
+    // If this fails, removing the record tries again (DELETE /projects/:id).
+    await destroySprite(sprites, row.sprite);
   }
   return rows.length;
 }
@@ -228,6 +243,10 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
         tell({ done: true, project: present(row), started: made.started });
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        // Provisioning removes its Sprite when capture fails, but not when a
+        // later step does, and its own removal can fail: either way the Sprite
+        // may hold the person's credentials.
+        await destroySprite(sprites, sprite);
         db.prepare("UPDATE projects SET setup_error = ?, updated_at = ? WHERE id = ?").run(message.slice(0, 2000), now(), provisional);
         tell({ error: message });
       }
@@ -381,10 +400,11 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
   app.delete("/projects/:id", auth, async (c: Context<Env>) => {
     const row = owned(c, true);
     if (!row) return c.json({ error: "no such project" }, 404);
-    // A setup still under way finishes or fails on its own; one that failed is
-    // just its record (provisioning already removed its Sprite).
+    // A setup still under way finishes or fails on its own; one that failed
+    // loses its record only once its Sprite is surely gone.
     if (row.status === "creating") {
       if (!row.setup_error) return c.json({ error: "still being set up — wait for it to finish or fail" }, 409);
+      if (!(await destroySprite(sprites, row.sprite))) return c.json({ error: "could not remove its machine — try again" }, 502);
       db.prepare("DELETE FROM projects WHERE id = ?").run(row.id);
       return c.json({ ok: true, repo: null });
     }
