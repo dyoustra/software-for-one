@@ -241,6 +241,41 @@ describe("preferences", () => {
   });
 });
 
+describe("upgrading a project's sfo", () => {
+  it("swaps in the current sfo and says which commit it is at", async () => {
+    const s = server();
+    const { token } = await withProject(s);
+    const exec = s.fake.sprites.exec;
+    s.fake.sprites.exec = async (sprite, script, args, opts) => (script.includes("sfo.next") ? { status: 0, stdout: "a1b2c3d\n" } : exec(sprite, script, args, opts));
+    const res = await s.call("POST", "/projects/moon-abc123/upgrade", token);
+    expect(await res.json()).toEqual({ ok: true, commit: "a1b2c3d" });
+  });
+
+  it("will not swap it from under a run that is working", async () => {
+    const s = server();
+    const { token } = await withProject(s);
+    const exec = s.fake.sprites.exec;
+    let upgraded = false;
+    s.fake.sprites.exec = async (sprite, script, args, opts) => {
+      if (script.includes("status --json")) return { status: 0, stdout: JSON.stringify([{ id: "moon-abc123", title: "Moon", currentStage: "build", status: "running" }]) };
+      if (script.includes("sfo.next")) upgraded = true;
+      return exec(sprite, script, args, opts);
+    };
+    expect((await s.call("POST", "/projects/moon-abc123/upgrade", token)).status).toBe(409);
+    expect(upgraded).toBe(false);
+  });
+
+  it("says the old one is still in place when the upgrade fails", async () => {
+    const s = server();
+    const { token } = await withProject(s);
+    const exec = s.fake.sprites.exec;
+    s.fake.sprites.exec = async (sprite, script, args, opts) => (script.includes("sfo.next") ? { status: 1, stdout: "npm ERR! network" } : exec(sprite, script, args, opts));
+    const res = await s.call("POST", "/projects/moon-abc123/upgrade", token);
+    expect(res.status).toBe(502);
+    expect(((await res.json()) as { error: string }).error).toMatch(/old sfo is still in place: npm ERR! network/);
+  });
+});
+
 describe("importing a project made before the control plane", () => {
   /** The person writes the challenge onto the Sprite with their own access; here, the fake holds it. */
   function holding(s: ReturnType<typeof server>, sprite: string, proof: () => string) {

@@ -26,6 +26,8 @@ export interface CloudProjects {
   /** What a check left in the local copy, back to the original. */
   pushBack(id: string): Promise<void>;
   destroy(id: string): Promise<{ sprite: string; repo: string | null }>;
+  /** Brings the project's Sprite to the current sfo; returns the commit it is at. */
+  upgrade(id: string): Promise<string>;
 }
 
 export async function cloudProjects(env: Env = process.env): Promise<CloudProjects> {
@@ -66,6 +68,14 @@ async function direct(env: Env): Promise<CloudProjects> {
     destroy: async (id) => {
       const entry = await cloud.destroyCloudProject(id, deps);
       return { sprite: entry.sprite, repo: entry.repo };
+    },
+    async upgrade(id) {
+      const entry = cloud.cloudEntry(id, env);
+      if (!entry) throw new Error(`${id} is not a cloud project`);
+      const { SFO_REPO, UPGRADE_SFO } = await import("../core/provision.js");
+      const r = await spriteCli.exec(entry.sprite, UPGRADE_SFO, [env.SFO_REPO_URL || SFO_REPO]);
+      if (r.status !== 0) throw new Error(`the upgrade failed, and the old sfo is still in place: ${r.stdout.trim().split("\n").slice(-3).join(" ")}`);
+      return r.stdout.trim().split("\n").pop() ?? "";
     },
   };
 }
@@ -249,6 +259,11 @@ export function controlPlane(at: { url: string; token: string }, env: Env = proc
         body: new Uint8Array(fs.readFileSync(file)),
       });
       if (!res.ok) throw new Error(String(((await res.json().catch(() => ({}))) as { error?: string }).error ?? `could not send the results back (${res.status})`));
+    },
+    async upgrade(id) {
+      const r = await api(`/projects/${id}/upgrade`, { method: "POST" });
+      if (r.status !== 200) fail(r);
+      return String(r.body.commit ?? "");
     },
     async destroy(id) {
       const found = await api(`/projects/${id}`);

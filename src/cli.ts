@@ -314,6 +314,28 @@ export function buildProgram(): Command {
     }));
 
   program
+    .command("upgrade")
+    .description("Bring a cloud project's Sprite to the current sfo (never while it runs)")
+    .argument("[id]", "project id")
+    .option("--all", "every cloud project")
+    .action(guarded(async (id: string | undefined, opts: { all?: boolean }) => {
+      const { cloudProjects } = await import("./commands/clouds.js");
+      const cloud = await cloudProjects();
+      const ids = opts.all ? (await cloud.list()).map((p) => p.id) : id ? [id] : [];
+      if (ids.length === 0) throw new Error("name a project, or --all");
+      let failed = 0;
+      for (const each of ids) {
+        try {
+          console.log(`${each}: sfo ${await cloud.upgrade(each)}`);
+        } catch (err) {
+          failed++;
+          console.error(`${each}: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+      if (failed > 0) process.exitCode = 1;
+    }));
+
+  program
     .command("destroy")
     .description("Delete a cloud project's Sprite and everything on it (its GitHub repo stays)")
     .argument("<id>", "project id")

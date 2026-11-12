@@ -8,7 +8,7 @@ import type { Db } from "./db.js";
 import { requireDevice, type Env } from "./auth.js";
 import { issueWorkerKey } from "./workers.js";
 import { githubToken, type GitHubOAuth, type Vault } from "./credentials.js";
-import { PROJECT_ID, newSpriteName, provisionProject, type GitHub, type SpriteCredential } from "../core/provision.js";
+import { PROJECT_ID, SFO_REPO, UPGRADE_SFO, newSpriteName, provisionProject, type GitHub, type SpriteCredential } from "../core/provision.js";
 import { DEFAULT_PREFERENCES, KINDS, LANGUAGES, PreferencesSchema, WEB_DATA, WEB_HOSTS } from "../core/preferences.js";
 import type { Project, PreferencesResponse } from "../api/types.js";
 import type { SpriteCli } from "../core/sprite.js";
@@ -363,6 +363,19 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
   });
 
   // The delivery summary, as the run wrote it; empty until delivery.
+  // Brings the project's Sprite to the current sfo. Never mid-run: the stage
+  // under way would have its program swapped from under it.
+  app.post("/projects/:id/upgrade", auth, async (c: Context<Env>) => {
+    const row = owned(c);
+    if (!row) return c.json({ error: "no such project" }, 404);
+    const fresh = await refresh(row);
+    const status = fresh.summary ? (JSON.parse(fresh.summary) as { status?: string }).status : undefined;
+    if (status === "running") return c.json({ error: "it is running — upgrade once the run stops or waits for you" }, 409);
+    const r = await sprites.exec(row.sprite, UPGRADE_SFO, [process.env.SFO_REPO_URL || SFO_REPO]);
+    if (r.status !== 0) return c.json({ error: `the upgrade failed, and the old sfo is still in place: ${r.stdout.trim().split("\n").slice(-3).join(" ")}` }, 502);
+    return c.json({ ok: true, commit: r.stdout.trim().split("\n").pop() });
+  });
+
   // A page of a stage's log, as events (LIVE_LOGS_SPEC §4). The app polls it
   // while the log is on screen, passing back `to` as `from`.
   app.get("/projects/:id/log", auth, async (c: Context<Env>) => {

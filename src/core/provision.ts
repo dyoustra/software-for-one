@@ -31,6 +31,18 @@ mkdir -p ~/.sfo && printf '%s\\n' "$2" > ~/.sfo/profile.json
 git config --global user.name sfo && git config --global user.email sfo@localhost
 claude --version >/dev/null && sfo --version >/dev/null`;
 
+/**
+ * Brings a Sprite's sfo up to date with the repo: built beside the one in use
+ * and swapped in only once it builds, so a failed update leaves the old one
+ * working. Prints the commit it is now at.
+ */
+export const UPGRADE_SFO = `set -e
+rm -rf ~/sfo.next && git clone -q --depth 1 "$1" ~/sfo.next
+cd ~/sfo.next && npm ci --no-audit --no-fund --loglevel=error >/dev/null && npm run -s build >/dev/null
+rm -rf ~/sfo.prev && mv ~/sfo ~/sfo.prev && mv ~/sfo.next ~/sfo && rm -rf ~/sfo.prev
+ln -sf ~/sfo/dist/cli.js ~/.local/bin/sfo
+sfo --version >/dev/null && git -C ~/sfo rev-parse --short HEAD`;
+
 /** Stores one secret on the Sprite, readable only by its user. It travels on stdin, never in arguments. */
 const STORE_SECRET = `umask 077; mkdir -p ~/.config/sfo; cat > ~/.config/sfo/"$1"`;
 
