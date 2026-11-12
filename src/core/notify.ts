@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 
 export type Notifier = (title: string, message: string) => void;
 
@@ -65,16 +65,7 @@ export const desktopNotifier: Notifier = (title, message) => {
 
 const CONTROL_TOKEN = path.join(os.homedir(), ".config", "sfo", "control-token");
 
-/**
- * Tells the control plane, when this machine is a project's Sprite. Waits for
- * the answer: a run reports how it ended as it exits, and a request left
- * pending would die with the process. The token is read from its file by the
- * child, never passed as an argument.
- */
-export function reportToControlPlane(title: string, message: string, env: NodeJS.ProcessEnv = process.env, tokenFile = CONTROL_TOKEN): boolean {
-  const url = env.SFO_CONTROL_URL;
-  if (!url || !fs.existsSync(tokenFile)) return false;
-  const script = `const [url, file] = process.argv.slice(1);
+const POST_EVENT = `const [url, file] = process.argv.slice(1);
 let body = "";
 process.stdin.on("data", (d) => (body += d)).on("end", async () => {
   const token = require("fs").readFileSync(file, "utf8").trim();
@@ -85,6 +76,32 @@ process.stdin.on("data", (d) => (body += d)).on("end", async () => {
     process.exit(1);
   }
 });`;
-  const r = spawnSync(process.execPath, ["-e", script, url, tokenFile], { input: JSON.stringify({ title, message }), timeout: 20_000, stdio: ["pipe", "ignore", "ignore"] });
+
+/**
+ * Tells the control plane, when this machine is a project's Sprite, that the
+ * run moved on (a stage started, a slice passed or failed), so the app's card
+ * follows it. Silent: nothing is pushed to the phone. Does not wait: the run
+ * must never slow down for it, and a lost one is made good by the next.
+ */
+export function reportProgress(env: NodeJS.ProcessEnv = process.env, tokenFile = CONTROL_TOKEN): boolean {
+  const url = env.SFO_CONTROL_URL;
+  if (!url || !fs.existsSync(tokenFile)) return false;
+  const child = spawn(process.execPath, ["-e", POST_EVENT, url, tokenFile], { detached: true, stdio: ["pipe", "ignore", "ignore"] });
+  child.on("error", () => undefined);
+  child.stdin.end(JSON.stringify({ kind: "progress" }));
+  child.unref();
+  return true;
+}
+
+/**
+ * Tells the control plane, when this machine is a project's Sprite. Waits for
+ * the answer: a run reports how it ended as it exits, and a request left
+ * pending would die with the process. The token is read from its file by the
+ * child, never passed as an argument.
+ */
+export function reportToControlPlane(title: string, message: string, env: NodeJS.ProcessEnv = process.env, tokenFile = CONTROL_TOKEN): boolean {
+  const url = env.SFO_CONTROL_URL;
+  if (!url || !fs.existsSync(tokenFile)) return false;
+  const r = spawnSync(process.execPath, ["-e", POST_EVENT, url, tokenFile], { input: JSON.stringify({ title, message }), timeout: 20_000, stdio: ["pipe", "ignore", "ignore"] });
   return r.status === 0;
 }

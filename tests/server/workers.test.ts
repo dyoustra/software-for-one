@@ -69,6 +69,21 @@ describe("a project's Sprite", () => {
     expect(s.pushed).toEqual([{ to: PUSH, title: "Moon", body: "needs you — `sfo answer moon-abc123`", data: { projectId: "moon-abc123" }, sound: "default" }]);
   });
 
+  it("reports progress silently: the project's card follows, and no one is told", async () => {
+    const s = server();
+    const { token, worker } = await projectWithWorker(s);
+    await registerVerified(s, token);
+    s.db.prepare("UPDATE projects SET summary = ?").run(JSON.stringify({ id: "moon-abc123", title: "Moon", currentStage: "spec", status: "running" }));
+    const before = (s.db.prepare("SELECT count(*) AS n FROM events").get() as { n: number }).n;
+
+    const res = await s.call("POST", "/workers/events", worker, { kind: "progress" });
+    expect(res.status).toBe(200);
+    const [p] = (await (await s.call("GET", "/projects", token)).json()) as { summary: { currentStage: string } }[];
+    expect(p.summary.currentStage).toBe("clarify");
+    expect(s.pushed).toEqual([]);
+    expect((s.db.prepare("SELECT count(*) AS n FROM events").get() as { n: number }).n).toBe(before);
+  });
+
   it("cannot report with anything but its own token", async () => {
     const s = server();
     const { token } = await projectWithWorker(s);

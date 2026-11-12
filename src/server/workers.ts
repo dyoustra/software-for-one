@@ -73,21 +73,32 @@ export function workerRoutes(app: Hono<Env>, deps: { db: Db; sprites: SpriteCli;
           .get(hashToken(token)) as { id: string; user_id: string; sprite: string } | undefined)
       : undefined;
     if (!row) return c.json({ error: "not a worker of any project" }, 401);
-    const { title, message } = (await c.req.json().catch(() => ({}))) as { title?: string; message?: string };
-    if (typeof title !== "string" || typeof message !== "string") return c.json({ error: "title and message are required" }, 400);
+    const body = (await c.req.json().catch(() => ({}))) as { kind?: string; title?: string; message?: string };
     const at = new Date().toISOString();
-    db.prepare("INSERT INTO events (project_id, kind, payload, at) VALUES (?, 'notify', ?, ?)").run(row.id, JSON.stringify({ title: title.slice(0, 200), message: message.slice(0, 2000) }), at);
 
     // The Sprite is awake (it just spoke), so asking it costs nothing extra.
-    const status = await sprites.exec(row.sprite, "exec sfo status --json").catch(() => null);
-    if (status?.status === 0) {
+    // Its summary is read from it rather than taken from the event.
+    async function refreshSummary(projectRow: { id: string; sprite: string }) {
+      const status = await sprites.exec(projectRow.sprite, "exec sfo status --json").catch(() => null);
+      if (status?.status !== 0) return;
       try {
-        const summary = (JSON.parse(status.stdout) as { id: string }[]).find((p) => p.id === row.id) ?? null;
-        db.prepare("UPDATE projects SET summary = ?, updated_at = ? WHERE id = ?").run(JSON.stringify(summary), at, row.id);
+        const summary = (JSON.parse(status.stdout) as { id: string }[]).find((p) => p.id === projectRow.id) ?? null;
+        db.prepare("UPDATE projects SET summary = ?, updated_at = ? WHERE id = ?").run(JSON.stringify(summary), at, projectRow.id);
       } catch {
         // A summary that does not parse leaves the last one standing.
       }
     }
+
+    // The run moved on: the app's card should follow. Nothing to tell anyone.
+    if (body.kind === "progress") {
+      await refreshSummary(row);
+      return c.json({ ok: true });
+    }
+
+    const { title, message } = body;
+    if (typeof title !== "string" || typeof message !== "string") return c.json({ error: "title and message are required" }, 400);
+    db.prepare("INSERT INTO events (project_id, kind, payload, at) VALUES (?, 'notify', ?, ?)").run(row.id, JSON.stringify({ title: title.slice(0, 200), message: message.slice(0, 2000) }), at);
+    await refreshSummary(row);
 
     // Only to phones that proved they receive on the token, and are still
     // signed in to this account.

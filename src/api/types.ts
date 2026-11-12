@@ -19,6 +19,18 @@ export interface ProjectSummary {
   slicesPassed?: string[];
   slicesFailed?: string[];
   updatedAt?: string;
+  /** Slices planned; absent until the plan exists. */
+  slicesTotal?: number;
+  /** Model spend so far, at API prices. Absent from summaries older than this field. */
+  spendUsd?: number;
+  /** Time the model spent working, summed over every stage. */
+  computeMs?: number;
+  /** Questions waiting for the person, when the run is parked on them. */
+  openQuestions?: number;
+  /** What a finished project delivered: the commands it installed. */
+  delivered?: { commands: string[] };
+  /** Where and why a failed run stopped. */
+  failure?: { stage: string; reason: string };
 }
 
 export interface Project {

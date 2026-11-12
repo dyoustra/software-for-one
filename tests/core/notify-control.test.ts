@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
-import { reportToControlPlane } from "../../src/core/notify.js";
+import { reportProgress, reportToControlPlane } from "../../src/core/notify.js";
 
 /**
  * A stand-in control plane in its own process: reportToControlPlane blocks
@@ -44,5 +44,28 @@ describe("reporting to the control plane from a Sprite", () => {
 
   it("does nothing off a Sprite", () => {
     expect(reportToControlPlane("t", "m", {}, "/nonexistent")).toBe(false);
+  });
+});
+
+describe("reporting progress from a Sprite", () => {
+  it("posts a silent progress event without waiting for the answer", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "sfo-ctl-"));
+    const log = path.join(dir, "request.json");
+    const file = path.join(dir, "control-token");
+    fs.writeFileSync(file, "sfow_secret\n");
+    const cp = await controlPlane(log);
+    try {
+      const started = Date.now();
+      expect(reportProgress({ SFO_CONTROL_URL: cp.url }, file)).toBe(true);
+      expect(Date.now() - started).toBeLessThan(500);
+      await expect.poll(() => fs.existsSync(log), { timeout: 10_000 }).toBe(true);
+      expect(JSON.parse(fs.readFileSync(log, "utf8"))).toEqual({ path: "/workers/events", auth: "Bearer sfow_secret", body: JSON.stringify({ kind: "progress" }) });
+    } finally {
+      cp.stop();
+    }
+  });
+
+  it("does nothing off a Sprite", () => {
+    expect(reportProgress({}, "/nonexistent")).toBe(false);
   });
 });

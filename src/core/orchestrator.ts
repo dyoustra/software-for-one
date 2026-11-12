@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { readState, writeState, type ProjectState } from "./state.js";
+import { reportProgress } from "./notify.js";
 import { holdAwake } from "./keepAwake.js";
 import { nextStage, blocksOnHuman, recoveryHint } from "./stages.js";
 import { artifactExists } from "./artifacts.js";
@@ -817,6 +818,7 @@ async function runSlices(
         },
         env,
       );
+      reportProgress();
       commitStage(id, stageName, env);
       continue;
     }
@@ -832,6 +834,7 @@ async function runSlices(
       },
       env,
     );
+    reportProgress();
 
     // Failing again on a retry: the same inputs got the same answer, so the
     // test, not the code, may be what is wrong. ut-tower's S-13 failed three
@@ -950,6 +953,7 @@ export async function advance(
       updatedAt: new Date().toISOString(),
     };
     writeState(state, env);
+    reportProgress();
 
     // `build` is not one call to an agent but a loop over slices, each verified
     // as it lands. Verification is deliberately not a stage of its own: a slice

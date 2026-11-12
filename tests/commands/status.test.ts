@@ -255,3 +255,49 @@ describe("a finding only feedback can fix", () => {
   });
 });
 
+
+describe("what a project card reads", () => {
+  const usage = (costUsd: number, durationMs: number) => ({
+    costUsd, durationMs, numTurns: 1, inputTokens: 1, outputTokens: 1, cacheCreationInputTokens: 0, cacheReadInputTokens: 0,
+  });
+
+  it("totals spend and model time, and counts the planned slices", async () => {
+    const { writeSlices } = await import("../../src/core/slices.js");
+    seed("a-111", "build", "running");
+    recordCost("a-111", "spec", true, usage(0.404, 60_000), env);
+    recordCost("a-111", "plan", true, usage(1.003, 90_000), env);
+    writeSlices("a-111", [
+      { id: "S-01", name: "parse", criterionIds: ["C-1"], prerequisites: [] },
+      { id: "S-02", name: "roll", criterionIds: ["C-2"], prerequisites: ["S-01"] },
+    ], env);
+
+    expect(listProjects(env)[0]).toMatchObject({ slicesTotal: 2, spendUsd: 1.41, computeMs: 150_000 });
+  });
+
+  it("says where a failed run stopped, in one line", async () => {
+    const { writeFailure } = await import("../../src/core/stopped.js");
+    seed("a-111", "review", "failed");
+    writeFailure("a-111", { stage: "review", reason: "two findings left open\nfull detail follows", at: "2026-08-21T00:00:00.000Z" }, env);
+
+    expect(listProjects(env)[0]).toMatchObject({ failure: { stage: "review", reason: "two findings left open" }, spendUsd: 0 });
+  });
+
+  it("names the commands a finished project installed, and only those", () => {
+    seed("a-111", "deliver", "done");
+    fs.writeFileSync(
+      path.join(env.SFO_HOME, "a-111", ".sfo", "INSTALL.json"),
+      JSON.stringify({ installer: "uv", commands: [{ name: "rolld", installed: true, detail: "" }, { name: "rolld-dev", installed: false, detail: "" }], at: "t" }),
+    );
+
+    expect(listProjects(env)[0].delivered).toEqual({ commands: ["rolld"] });
+  });
+
+  it("has no slice count before there is a plan, and survives a cost file it cannot read", () => {
+    seed("a-111", "spec", "running");
+    fs.writeFileSync(path.join(env.SFO_HOME, "a-111", ".sfo", "COST.jsonl"), "not json\n");
+
+    const [p] = listProjects(env);
+    expect(p.slicesTotal).toBeUndefined();
+    expect(p.spendUsd).toBe(0);
+  });
+});

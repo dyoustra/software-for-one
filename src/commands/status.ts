@@ -13,13 +13,56 @@ import { failures } from "./retry.js";
 import { deferredWork, hasDeferred } from "../core/deferred.js";
 import { openQuestions } from "../core/openQuestions.js";
 import { isStopped, readCrash, readFailure } from "../core/stopped.js";
+import { readSlices } from "../core/slices.js";
+import { readCostRecords, totalCost } from "../core/cost.js";
+import { readInstall } from "../core/install.js";
 
 /**
  * A project plus whatever short explanation the listing owes the reader, and
  * the command that acts on it. Kept apart from the note so a long note can be
  * shortened without cutting off the one part the reader needs whole.
  */
-export type ProjectSummary = ProjectState & { note?: string; next?: string };
+export type ProjectSummary = ProjectState & { note?: string; next?: string } & Telemetry;
+
+/** What a project card shows at a glance, read from the project's own files. */
+export interface Telemetry {
+  /** Slices planned; absent until the plan exists. */
+  slicesTotal?: number;
+  /** Model spend so far (at API prices, whatever actually paid for it). */
+  spendUsd: number;
+  /** Time the model spent working, summed over every stage. */
+  computeMs: number;
+  /** Questions waiting for the person, when the run is parked on them. */
+  openQuestions?: number;
+  /** What a finished project delivered: the commands it installed. */
+  delivered?: { commands: string[] };
+  /** Where and why a failed run stopped. */
+  failure?: { stage: string; reason: string };
+}
+
+function quietly<T>(read: () => T): T | undefined {
+  try {
+    return read();
+  } catch {
+    return undefined;
+  }
+}
+
+function telemetryFor(state: ProjectState, env: Env | undefined): Telemetry {
+  const slices = quietly(() => readSlices(state.id, env));
+  const total = totalCost(quietly(() => readCostRecords(state.id, env)) ?? []);
+  const open = state.status === "awaiting_human" ? quietly(() => openQuestions(state.id, env).length) : undefined;
+  const installed = state.status === "done" ? quietly(() => readInstall(state.id, env)) : undefined;
+  const failure = state.status === "failed" ? quietly(() => readFailure(state.id, env)) : undefined;
+  return {
+    ...(slices && slices.length > 0 ? { slicesTotal: slices.length } : {}),
+    spendUsd: Math.round(total.costUsd * 100) / 100,
+    computeMs: total.durationMs,
+    ...(open ? { openQuestions: open } : {}),
+    ...(installed?.commands.some((c) => c.installed) ? { delivered: { commands: installed.commands.filter((c) => c.installed).map((c) => c.name) } } : {}),
+    ...(failure ? { failure: { stage: failure.stage, reason: failure.reason.split("\n")[0].slice(0, 300) } } : {}),
+  };
+}
 
 /** Wide enough for a real recommendation, narrow enough to keep the table a table. */
 const NOTE_WIDTH = 100;
@@ -132,7 +175,7 @@ export function listProjects(env?: Env): ProjectSummary[] {
           : limit
           ? formatLimit(state.id, limit)
           : (criterionNote(state, env) ?? budgetNote(state, env) ?? smokeNote(state, env));
-      out.push({ ...state, ...(note !== undefined ? { note } : {}), ...(next !== undefined ? { next } : {}) });
+      out.push({ ...state, ...(note !== undefined ? { note } : {}), ...(next !== undefined ? { next } : {}), ...telemetryFor(state, env) });
     } catch {
       // A directory with no readable state is not a project. Skip it silently —
       // `sfo status` must never fail because of unrelated junk in the root.
