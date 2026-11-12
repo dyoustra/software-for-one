@@ -20,8 +20,8 @@ function Choice<T extends string>({ options, value, onChange }: { options: reado
   return (
     <View style={styles.choices}>
       {options.map((o) => (
-        <Pressable key={o} onPress={() => onChange(o)} style={[styles.choice, { backgroundColor: o === value ? theme.accent : theme.backgroundSelected }]}>
-          <Text style={{ color: o === value ? theme.onAccent : theme.text, fontWeight: '600' }}>{o}</Text>
+        <Pressable key={o} onPress={() => onChange(o)} style={[styles.choice, { backgroundColor: o === value ? theme.accent : theme.well }]}>
+          <Text style={{ color: o === value ? theme.onAccent : theme.ink, fontWeight: '600' }}>{o}</Text>
         </Pressable>
       ))}
     </View>
@@ -96,7 +96,7 @@ export default function Settings() {
     }
   }
 
-  const input = [styles.input, { color: theme.text, backgroundColor: theme.backgroundSelected }];
+  const input = [styles.input, { color: theme.ink, backgroundColor: theme.well }];
   return (
     <Page>
       <Heading>Settings</Heading>
@@ -110,7 +110,7 @@ export default function Settings() {
             : 'No Claude subscription connected. Run `sfo login` on your Mac to bring it here.'}
         </Muted>
         <Muted>{have.includes('anthropic_api_key') ? 'An Anthropic API key is stored.' : 'No API key stored.'}</Muted>
-        <TextInput style={input} placeholder="Paste an Anthropic API key" placeholderTextColor={theme.textSecondary} value={apiKey} onChangeText={setApiKey} autoCapitalize="none" autoCorrect={false} secureTextEntry />
+        <TextInput style={input} placeholder="Paste an Anthropic API key" placeholderTextColor={theme.inkMuted} value={apiKey} onChangeText={setApiKey} autoCapitalize="none" autoCorrect={false} secureTextEntry />
         {apiKey.trim() ? <Button title="Save API key" kind="secondary" onPress={saveApiKey} /> : null}
       </Card>
 
@@ -143,7 +143,7 @@ export default function Settings() {
           <TextInput
             style={input}
             placeholder="No limit"
-            placeholderTextColor={theme.textSecondary}
+            placeholderTextColor={theme.inkMuted}
             keyboardType="decimal-pad"
             value={prefs.preferences.budgetUsd === null ? '' : String(prefs.preferences.budgetUsd)}
             onChangeText={(v) => set({ budgetUsd: v.trim() ? Number(v) : null })}
@@ -192,7 +192,7 @@ export default function Settings() {
                 onPress={async () => {
                   if (await confirm(`Sign out ${d.name}?`, 'It will need to sign in again.', 'Sign out')) api(`/devices/${d.id}`, { method: 'DELETE' }).then(load, setError);
                 }}>
-                <Text style={{ color: theme.bad, fontWeight: '600' }}>Revoke</Text>
+                <Text style={{ color: theme.failed, fontWeight: '600' }}>Revoke</Text>
               </Pressable>
             )}
           </View>

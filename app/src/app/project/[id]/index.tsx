@@ -116,12 +116,12 @@ export default function ProjectScreen() {
           <Body style={styles.section}>Feedback</Body>
           <Muted>Ask for a change in your own words. More feedback while one is applying waits its turn.</Muted>
           <TextInput
-            style={[styles.input, { color: theme.text, backgroundColor: theme.backgroundSelected }]}
+            style={[styles.input, { color: theme.ink, backgroundColor: theme.well }]}
             multiline
             value={feedback}
             onChangeText={setFeedback}
             placeholder="Make it…"
-            placeholderTextColor={theme.textSecondary}
+            placeholderTextColor={theme.inkMuted}
           />
           <Button
             title="Send feedback"

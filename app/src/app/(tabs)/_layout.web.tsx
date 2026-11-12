@@ -13,8 +13,8 @@ export default function WebTabs() {
       screenOptions={{
         headerShown: false,
         tabBarActiveTintColor: theme.accent,
-        tabBarInactiveTintColor: theme.textSecondary,
-        tabBarStyle: { backgroundColor: theme.background, borderTopColor: theme.backgroundSelected },
+        tabBarInactiveTintColor: theme.inkMuted,
+        tabBarStyle: { backgroundColor: theme.canvas, borderTopColor: theme.line },
         tabBarIconStyle: { display: 'none' },
         tabBarLabelStyle: { fontSize: 15, fontWeight: '600' },
       }}>

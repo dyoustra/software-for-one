@@ -3,10 +3,18 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useEffect } from 'react';
 import { useColorScheme } from 'react-native';
 
+import { Colors } from '@/constants/theme';
 import { AuthProvider, useAuth } from '@/lib/auth';
 import { followNotificationTaps, registerForPush } from '@/lib/push';
 
 SplashScreen.preventAutoHideAsync();
+
+/** React Navigation's stock themes, on sfo's surfaces: headers, modals and tab bars match the screens. */
+const navigationTheme = (dark: boolean) => {
+  const base = dark ? DarkTheme : DefaultTheme;
+  const c = Colors[dark ? 'dark' : 'light'];
+  return { ...base, colors: { ...base.colors, primary: c.accent, background: c.canvas, card: c.canvas, text: c.ink, border: c.line, notification: c.waiting } };
+};
 
 function Routes() {
   const { token, api } = useAuth();
@@ -44,7 +52,7 @@ function Routes() {
 export default function RootLayout() {
   const scheme = useColorScheme();
   return (
-    <ThemeProvider value={scheme === 'dark' ? DarkTheme : DefaultTheme}>
+    <ThemeProvider value={navigationTheme(scheme === 'dark')}>
       <AuthProvider>
         <Routes />
       </AuthProvider>

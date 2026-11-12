@@ -50,7 +50,7 @@ export function GitHubSignIn({ link, onDone, onCancel }: { link?: boolean; onDon
       ) : (
         <>
           <Muted>Enter this code on GitHub:</Muted>
-          <Text selectable style={[styles.code, { color: theme.text }]}>
+          <Text selectable style={[styles.code, { color: theme.ink }]}>
             {code.userCode}
           </Text>
           <Button title={Platform.OS === 'web' ? 'Copy code and open GitHub' : 'Open GitHub'} onPress={open} />

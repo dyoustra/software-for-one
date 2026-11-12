@@ -40,6 +40,11 @@ it needs you.
 
 Full-bleed `1024×1024` master PNG is exported at `app/assets/images/icon.png`.
 
+### Splash screen (dark & light)
+![Splash screen reference](docs/renders/splash-screen.jpg)
+
+Transparent `1024×1024` RGBA lockups (`sfo` + cobalt node rule + `software for one`) are exported at `app/assets/images/splash-icon.png` (light) and `app/assets/images/splash-icon-dark.png` (dark).
+
 ### Where to depart from the renders
 
 The renders are a direction, not a pixel target. Deliberate departures:
@@ -179,9 +184,11 @@ Same content, restyled: grouped sections on `surface`, telemetry-style values
 React Navigation's `ThemeProvider`, the native and web tab bars and modals use
 the light and dark surfaces. The master app icon is at
 `app/assets/images/icon.png`: point `app.json` (`ios.icon` currently points at
-the starter `./assets/expo.icon` bundle), `favicon.png`, Android adaptive icon
-layers, and `expo-splash-screen` (currently `#208AEF`) to match it and the dark
-`canvas` background.
+the starter `./assets/expo.icon` bundle), `favicon.png`, and Android adaptive
+icon layers to match it. Configure `expo-splash-screen` (currently `#208AEF` at
+`76` width) to use `app/assets/images/splash-icon.png` on `#F4F6F9` with
+`dark` set to `app/assets/images/splash-icon-dark.png` on `#0E131A` at
+`imageWidth: 200`.
 
 ## 6. Card grammar
 

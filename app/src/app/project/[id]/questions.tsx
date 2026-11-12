@@ -73,17 +73,17 @@ export default function Questions() {
                 <Pressable
                   key={o.key}
                   onPress={() => setDrafts({ ...drafts, [q.id]: { ...d, key: chosen ? null : o.key } })}
-                  style={[styles.option, { backgroundColor: chosen ? theme.accent : theme.backgroundSelected }]}>
-                  <Text style={[styles.optionLabel, { color: chosen ? theme.onAccent : theme.text }]}>{o.label}</Text>
-                  <Text style={{ color: chosen ? theme.onAccent : theme.textSecondary }}>{o.tradeoff}</Text>
+                  style={[styles.option, { backgroundColor: chosen ? theme.accent : theme.well }]}>
+                  <Text style={[styles.optionLabel, { color: chosen ? theme.onAccent : theme.ink }]}>{o.label}</Text>
+                  <Text style={{ color: chosen ? theme.onAccent : theme.inkMuted }}>{o.tradeoff}</Text>
                 </Pressable>
               );
             })}
             <TextInput
-              style={[styles.input, { color: theme.text, backgroundColor: theme.backgroundSelected }]}
+              style={[styles.input, { color: theme.ink, backgroundColor: theme.well }]}
               multiline
               placeholder={d.key ? 'Anything to add? (optional)' : 'Or say it in your own words'}
-              placeholderTextColor={theme.textSecondary}
+              placeholderTextColor={theme.inkMuted}
               value={d.words}
               onChangeText={(words) => setDrafts({ ...drafts, [q.id]: { ...d, words } })}
             />

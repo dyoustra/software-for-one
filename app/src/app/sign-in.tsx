@@ -21,7 +21,7 @@ export default function SignIn() {
   }, []);
 
   return (
-    <View style={[styles.screen, { backgroundColor: theme.background }]}>
+    <View style={[styles.screen, { backgroundColor: theme.canvas }]}>
       <View style={styles.column}>
         <Heading>Software For One</Heading>
         <Body>Say what you want built. sfo builds it in the cloud, asks when it needs you, and tells you when it is done.</Body>

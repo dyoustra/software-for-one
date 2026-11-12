@@ -39,7 +39,7 @@ export default function NewIdea() {
     }
   }
 
-  const input = [styles.input, { color: theme.text, backgroundColor: theme.backgroundElement }];
+  const input = [styles.input, { color: theme.ink, backgroundColor: theme.surface }];
   return (
     <Page>
       <Heading>New idea</Heading>
@@ -48,7 +48,7 @@ export default function NewIdea() {
         style={[input, styles.idea]}
         multiline
         placeholder="A tool that…"
-        placeholderTextColor={theme.textSecondary}
+        placeholderTextColor={theme.inkMuted}
         value={idea}
         onChangeText={setIdea}
         editable={!busy}
@@ -56,7 +56,7 @@ export default function NewIdea() {
       <TextInput
         style={input}
         placeholder="Budget in dollars (optional)"
-        placeholderTextColor={theme.textSecondary}
+        placeholderTextColor={theme.inkMuted}
         keyboardType="decimal-pad"
         value={budget}
         onChangeText={setBudget}
