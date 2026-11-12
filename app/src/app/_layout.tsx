@@ -55,6 +55,8 @@ function Routes() {
           <Stack.Screen name="project/[id]/questions" options={{ title: 'Questions', presentation: 'modal' }} />
           <Stack.Screen name="project/[id]/report" options={{ title: 'Report' }} />
           <Stack.Screen name="project/[id]/log" options={{ title: 'Activity' }} />
+          <Stack.Screen name="project/[id]/cost" options={{ title: 'Cost' }} />
+          <Stack.Screen name="project/[id]/slices" options={{ title: 'Slices' }} />
         </Stack.Protected>
         <Stack.Protected guard={!token}>
           <Stack.Screen name="sign-in" options={{ headerShown: false }} />

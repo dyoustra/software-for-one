@@ -4,7 +4,7 @@ import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { Project, Question } from '@sfo/api';
 import { LiveStrip } from '@/components/activity';
-import { Artifacts } from '@/components/artifacts';
+import { Delivered, useResults } from '@/components/results';
 import { ProjectCard } from '@/components/project-card';
 import { Body, Button, Card, Code, ErrorText, Field, Loading, Muted, Page, Telemetry } from '@/components/ui';
 import { Radius, Spacing, tint, Type } from '@/constants/theme';
@@ -15,12 +15,14 @@ import { confirm } from '@/lib/confirm';
 import { cardModel } from '@/lib/pipeline';
 import { useProjects } from '@/lib/projects';
 
-const REPORTS = [
-  { kind: 'summary', title: 'Summary' },
-  { kind: 'decisions', title: 'Decisions' },
-  { kind: 'criteria', title: 'Criteria' },
-  { kind: 'slices', title: 'Slices' },
-  { kind: 'cost', title: 'Cost' },
+/** Prose reports open the report screen; Slices and Cost have screens of their own. */
+const ROWS = [
+  { title: 'Summary', to: 'report', kind: 'summary' },
+  { title: 'Decisions', to: 'report', kind: 'decisions' },
+  { title: 'Criteria', to: 'report', kind: 'criteria' },
+  { title: 'Slices', to: 'slices' },
+  { title: 'Cost', to: 'cost' },
+  { title: 'Activity', to: 'log' },
 ] as const;
 
 export default function ProjectScreen() {
@@ -128,6 +130,7 @@ export default function ProjectScreen() {
       <ErrorText error={error} />
       {!project && <Loading label="Waking the project's machine…" />}
       {project && <ProjectCard project={project} />}
+      {kind === 'done' && <DeliveredFor id={id} />}
       {summary?.note && (status === 'awaiting_human' || status === 'done') ? (
         <Card>
           <Body selectable>{summary.note.replace(/^stopped: /, '')}</Body>
@@ -175,14 +178,21 @@ export default function ProjectScreen() {
         </Card>
       )}
 
-      {kind === 'done' && <Artifacts id={id} kind="renders" />}
 
       {!settingUp && project && (
         <Card style={styles.rows}>
-          {REPORTS.map((r, i) => (
-            <Row key={r.kind} first={i === 0} title={r.title} onPress={() => router.push({ pathname: '/project/[id]/report', params: { id, kind: r.kind } })} />
+          {ROWS.map((r, i) => (
+            <Row
+              key={r.title}
+              first={i === 0}
+              title={r.title}
+              onPress={() =>
+                r.to === 'report'
+                  ? router.push({ pathname: '/project/[id]/report', params: { id, kind: r.kind } })
+                  : router.push({ pathname: `/project/[id]/${r.to}`, params: { id } })
+              }
+            />
           ))}
-          <Row title="Activity" onPress={() => router.push({ pathname: '/project/[id]/log', params: { id } })} />
           {project.repo && <Row title="Open repo" detail={project.repo.replace(/^https?:\/\/(www\.)?github\.com\//, '')} onPress={() => Linking.openURL(project.repo!)} />}
         </Card>
       )}
@@ -190,6 +200,12 @@ export default function ProjectScreen() {
       {!settingUp && project && <Button title="Delete project" kind="destructive" onPress={() => remove(false)} />}
     </Page>
   );
+}
+
+/** The delivered section, fetching its results only for a finished project. */
+function DeliveredFor({ id }: { id: string }) {
+  const { results, error } = useResults(id);
+  return error ? <ErrorText error={error} /> : <Delivered id={id} results={results} />;
 }
 
 /** One pill per planned slice: passed, failed, or still to come. */
