@@ -20,8 +20,8 @@ export default function WebTabs() {
         tabBarIconStyle: { display: 'none' },
         tabBarLabelStyle: { fontSize: 15, fontWeight: '600' },
       }}>
-      <Tabs.Screen name="index" options={{ title: 'Idea' }} />
       <Tabs.Screen name="projects" options={{ title: 'Projects', tabBarBadge: waiting.length || undefined, tabBarBadgeStyle: { backgroundColor: theme.waiting, color: theme.canvas } }} />
+      <Tabs.Screen name="index" options={{ title: 'Idea' }} />
       <Tabs.Screen name="settings" options={{ title: 'Settings' }} />
     </Tabs>
   );
