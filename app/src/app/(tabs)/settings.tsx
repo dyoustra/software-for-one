@@ -20,8 +20,65 @@ const PROVIDER_NAMES: Record<Identity['provider'], string> = { apple: 'Apple', g
 
 const KIND_NAMES: Record<LanguageKind, string> = { cli: 'Command-line tools', web: 'Web apps', mobile: 'Mobile apps', firmware: 'Firmware', default: 'Anything else' };
 
+const LANGUAGE_NAMES: Record<string, string> = {
+  python: 'Python',
+  typescript: 'TypeScript',
+  javascript: 'JavaScript',
+  go: 'Go',
+  rust: 'Rust',
+  swift: 'Swift',
+  kotlin: 'Kotlin',
+  java: 'Java',
+  cpp: 'C++',
+  c: 'C',
+  micropython: 'MicroPython',
+  ruby: 'Ruby',
+  elixir: 'Elixir',
+};
+const HOST_NAMES: Record<string, string> = { vercel: 'Vercel', cloudflare: 'Cloudflare', none: "Don't publish" };
+const DATA_NAMES: Record<string, string> = { browser: 'In the browser', synced: 'Synced online' };
+
+const named = (names: Record<string, string>, value: string) => names[value] ?? value.replace(/^./, (c) => c.toUpperCase());
+
+/**
+ * Choices in order of preference: the chosen ones in rank order (tap one to
+ * remove it), then Add, which shows the rest; tapping one of those adds it next.
+ */
+function Ranked({ options, value, onChange }: { options: readonly string[]; value: string[]; onChange: (v: string[]) => void }) {
+  const theme = useTheme();
+  const [adding, setAdding] = useState(false);
+  const rest = options.filter((o) => !value.includes(o));
+  return (
+    <View style={styles.choices}>
+      {value.map((o, rank) => (
+        <Pressable
+          key={o}
+          accessibilityRole="button"
+          accessibilityLabel={`${named(LANGUAGE_NAMES, o)}, choice ${rank + 1}. Removes it`}
+          onPress={() => onChange(value.filter((v) => v !== o))}
+          style={[styles.choice, styles.ranked, { borderColor: theme.accent, backgroundColor: tint(theme.accent, 0.12) }]}>
+          <Text style={[styles.rank, { color: theme.onAccent, backgroundColor: theme.accent }]}>{rank + 1}</Text>
+          <Text style={{ color: theme.accent, fontWeight: '600' }}>{named(LANGUAGE_NAMES, o)}</Text>
+        </Pressable>
+      ))}
+      {adding
+        ? rest.map((o) => (
+            <Pressable key={o} accessibilityRole="button" accessibilityLabel={`Add ${named(LANGUAGE_NAMES, o)}`} onPress={() => onChange([...value, o])} style={[styles.choice, { borderColor: theme.line }]}>
+              <Text style={{ color: theme.ink, fontWeight: '600' }}>{named(LANGUAGE_NAMES, o)}</Text>
+            </Pressable>
+          ))
+        : null}
+      {rest.length > 0 && (
+        <Pressable accessibilityRole="button" onPress={() => setAdding(!adding)} style={[styles.choice, { borderColor: theme.line, borderStyle: 'dashed' }]}>
+          <Text style={{ color: theme.inkMuted, fontWeight: '600' }}>{adding ? 'Done' : '+ Add'}</Text>
+        </Pressable>
+      )}
+    </View>
+  );
+}
+
 /** A row of choices, one selected. */
-function Choice<T extends string>({ options, value, onChange }: { options: readonly T[]; value: T; onChange: (v: T) => void }) {
+function Choice<T extends string>({ options, value, onChange, names = {} }: { options: readonly T[]; value: T; onChange: (v: T) => void; names?: Record<string, string> }) {
   const theme = useTheme();
   return (
     <View style={styles.choices}>
@@ -32,7 +89,7 @@ function Choice<T extends string>({ options, value, onChange }: { options: reado
           accessibilityState={{ checked: o === value }}
           onPress={() => onChange(o)}
           style={[styles.choice, o === value ? { borderColor: theme.accent, backgroundColor: tint(theme.accent, 0.12) } : { borderColor: theme.line }]}>
-          <Text style={{ color: o === value ? theme.accent : theme.ink, fontWeight: '600' }}>{o}</Text>
+          <Text style={{ color: o === value ? theme.accent : theme.ink, fontWeight: '600' }}>{named(names, o)}</Text>
         </Pressable>
       ))}
     </View>
@@ -47,7 +104,7 @@ export default function Settings() {
   const [linking, setLinking] = useState(false);
   const [have, setHave] = useState<CredentialKind[]>([]);
   const [prefs, setPrefs] = useState<PreferencesResponse | null>(null);
-  const [rankings, setRankings] = useState<Record<string, string>>({});
+  const [rankings, setRankings] = useState<Record<string, string[]>>({});
   const [apiKey, setApiKey] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -65,7 +122,7 @@ export default function Settings() {
       setIdentities(i);
       setHave(c.have);
       setPrefs(p);
-      setRankings(Object.fromEntries(Object.entries(p.preferences.languages).map(([k, v]) => [k, v.join(', ')])));
+      setRankings(p.preferences.languages);
     } catch (err) {
       setError(err);
     }
@@ -85,9 +142,7 @@ export default function Settings() {
     setError(null);
     setSaved(false);
     try {
-      const languages = Object.fromEntries(
-        prefs.allowed.kinds.map((k) => [k, (rankings[k] ?? '').split(',').map((l) => l.trim().toLowerCase()).filter(Boolean)]),
-      ) as Preferences['languages'];
+      const languages = Object.fromEntries(prefs.allowed.kinds.map((k) => [k, rankings[k] ?? []])) as Preferences['languages'];
       await api('/preferences', { method: 'PUT', body: { preferences: { ...prefs.preferences, languages }, sfoMd: prefs.sfoMd?.trim() ? prefs.sfoMd : null } });
       setSaved(true);
     } catch (err) {
@@ -113,7 +168,7 @@ export default function Settings() {
       <ErrorText error={error} />
 
       <Card>
-        <Body style={styles.section}>Paying for model calls</Body>
+        <Body style={styles.section}>Model access</Body>
         <Muted>
           {have.includes('claude_token')
             ? 'Your Claude subscription is connected.'
@@ -138,26 +193,25 @@ export default function Settings() {
         <Card>
           <Body style={styles.section}>Preferences</Body>
           <Muted>Every new project reads these as guidance. A run that thinks something else is much better asks you first.</Muted>
-          <Body>Languages, best first</Body>
+          <Body>Preferred languages, in order</Body>
           {prefs.allowed.kinds.map((k) => (
             <View key={k} style={styles.field}>
               <Muted>{KIND_NAMES[k]}</Muted>
-              <Field value={rankings[k] ?? ''} onChangeText={(v) => setRankings({ ...rankings, [k]: v })} autoCapitalize="none" autoCorrect={false} />
+              <Ranked options={prefs.allowed.languages} value={rankings[k] ?? []} onChange={(v) => setRankings({ ...rankings, [k]: v })} />
             </View>
           ))}
-          <Muted>Known: {prefs.allowed.languages.join(', ')}</Muted>
           <Body>Where web apps are published</Body>
-          <Choice options={prefs.allowed.webHosts as Preferences['webHost'][]} value={prefs.preferences.webHost} onChange={(webHost) => set({ webHost })} />
-          <Body>Where web app data lives</Body>
-          <Choice options={prefs.allowed.webData as Preferences['webData'][]} value={prefs.preferences.webData} onChange={(webData) => set({ webData })} />
-          <Body>Budget for each new project</Body>
+          <Choice options={prefs.allowed.webHosts as Preferences['webHost'][]} value={prefs.preferences.webHost} onChange={(webHost) => set({ webHost })} names={HOST_NAMES} />
+          <Body>Where web apps keep their data</Body>
+          <Choice options={prefs.allowed.webData as Preferences['webData'][]} value={prefs.preferences.webData} onChange={(webData) => set({ webData })} names={DATA_NAMES} />
+          <Body>Spending limit per project</Body>
           <Field
             placeholder="No limit"
             keyboardType="decimal-pad"
             value={prefs.preferences.budgetUsd === null ? '' : String(prefs.preferences.budgetUsd)}
             onChangeText={(v) => set({ budgetUsd: v.trim() ? Number(v) : null })}
           />
-          <Body>Smoke checks may spend, per run</Body>
+          <Body>Spending limit for tests against real services</Body>
           <Field keyboardType="decimal-pad" value={String(prefs.preferences.smokeCapUsd)} onChangeText={(v) => set({ smokeCapUsd: Number(v) || 0 })} />
           <Body>SFO.md</Body>
           <Muted>Anything that fits no field above.</Muted>
@@ -218,5 +272,7 @@ const styles = StyleSheet.create({
   field: { gap: Spacing.one },
   choices: { flexDirection: 'row', flexWrap: 'wrap', gap: Spacing.two },
   choice: { borderRadius: Radius.pill, borderWidth: 1, paddingVertical: Spacing.two, paddingHorizontal: Spacing.three },
+  ranked: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  rank: { minWidth: 18, height: 18, borderRadius: 9, textAlign: 'center', fontSize: 11, lineHeight: 18, fontWeight: '700', overflow: 'hidden' },
   row: { flexDirection: 'row', alignItems: 'center', gap: Spacing.two, paddingVertical: Spacing.one },
 });
