@@ -1,10 +1,10 @@
 # To do
 
 1. Real-iPhone build, and check push delivery on it. make sure APNS works too.
-2. `sfo.dannyyoustra.com` for the control plane
+2. model control, at first just within the claude models. we should be able to specify model tiers in general, by project, or by project step (im open to ideas on how to do/allow this specification, or how to break down the different categories).
 3. Passkeys
 4. Cookie session for a deployed web app
-5. Web and mobile archetypes (delivered URL on cards)
+5. Web and mobile apps: databases, then mobile (web publishing is in)
 6. Lock Screen Live Activities
 7. Wide desktop layout for web
 8. Model access for other people

@@ -106,6 +106,7 @@ export default function Settings() {
   const [prefs, setPrefs] = useState<PreferencesResponse | null>(null);
   const [rankings, setRankings] = useState<Record<string, string[]>>({});
   const [apiKey, setApiKey] = useState('');
+  const [vercelToken, setVercelToken] = useState('');
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -181,8 +182,26 @@ export default function Settings() {
 
       <Card>
         <Body style={styles.section}>Connections</Body>
-        <Muted>{have.includes('vercel_token') ? 'Vercel is connected: web projects go online through it.' : 'Vercel is not connected. A web project asks for it when it is ready to go online.'}</Muted>
-        {have.includes('vercel_token') && <Button title="Disconnect Vercel" kind="destructive" onPress={() => api('/credentials/vercel_token', { method: 'DELETE' }).then(load, setError)} />}
+        <Muted>{have.includes('vercel_token') ? 'Vercel is connected: web projects go online through it.' : 'Vercel: not connected. Web projects go online through it.'}</Muted>
+        {have.includes('vercel_token') ? (
+          <Button title="Disconnect Vercel" kind="destructive" onPress={() => api('/credentials/vercel_token', { method: 'DELETE' }).then(load, setError)} />
+        ) : (
+          <>
+            <Field placeholder="Paste a Vercel token" value={vercelToken} onChangeText={setVercelToken} autoCapitalize="none" autoCorrect={false} secureTextEntry />
+            {vercelToken.trim() ? (
+              <Button
+                title="Connect Vercel"
+                kind="secondary"
+                onPress={() =>
+                  api('/credentials/vercel', { method: 'PUT', body: { value: vercelToken.trim() } }).then(() => {
+                    setVercelToken('');
+                    load();
+                  }, setError)
+                }
+              />
+            ) : null}
+          </>
+        )}
       </Card>
 
       <Card>
