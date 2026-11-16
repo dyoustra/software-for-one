@@ -60,6 +60,13 @@ describe("a project's card", () => {
     expect(m.rail).toBeUndefined();
   });
 
+  it("finished and online leads with its address", () => {
+    const live = cardModel(project({ status: "done", delivered: { commands: ["x"] } }, { publish: { state: "live", url: "https://tips.vercel.app", at: "t", error: null, changed: false } }));
+    expect(live).toMatchObject({ badge: { tone: "done", text: "✓ Live" }, line: "tips.vercel.app", lineIsCode: true });
+    expect(cardModel(project({ status: "done" }, { publish: { state: "needs_connection", url: null, at: null, error: "x", changed: false } })).badge).toEqual({ tone: "waiting", text: "Connect Vercel" });
+    expect(cardModel(project({ status: "done" }, { publish: { state: "failed", url: null, at: null, error: "Build failed", changed: false } }))).toMatchObject({ badge: { text: "Publish failed" }, line: "Build failed" });
+  });
+
   it("finished with something unresolved says so in amber, and what it is", () => {
     const m = cardModel(project({ status: "done", note: "done, but smoke found 1 problem" }));
     expect(m.badge).toEqual({ tone: "waiting", text: "Done, with notes" });

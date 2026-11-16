@@ -2,7 +2,7 @@ import { fetch } from 'expo/fetch';
 
 import type { Project } from '@sfo/api';
 
-export const API_URL = process.env.EXPO_PUBLIC_SFO_CONTROL_URL ?? 'https://sfo-control.fly.dev';
+export const API_URL = process.env.EXPO_PUBLIC_SFO_CONTROL_URL ?? 'https://sfo.dannyyoustra.com';
 
 export class ApiError extends Error {
   constructor(

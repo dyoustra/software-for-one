@@ -16,6 +16,7 @@ let vault: Vault;
 let source: string;
 let head: string;
 let contract: object | null;
+let archiveSize = 4096;
 
 const webContract = { gate: [{ name: "t", run: ["npm", "test"], files: "tests/{slice}*" }], publish: { kind: "web", framework: "vite" } };
 
@@ -25,7 +26,7 @@ const sprites: SpriteCli = {
   destroy: async () => {},
   exec: async (_sprite, script) => {
     if (script.includes("rev-parse HEAD")) return { status: 0, stdout: `${head}\n${contract ? JSON.stringify(contract) : ""}` };
-    if (script.includes("git -C") && script.includes("archive")) return { status: 0, stdout: "/tmp/sfo-publish.tar\n" };
+    if (script.includes("git -C") && script.includes("archive")) return { status: 0, stdout: `/tmp/sfo-publish.tar\t${archiveSize}\t3\n` };
     return { status: 1, stdout: "unexpected" };
   },
   pull: async (_sprite, _remote, local) => {
@@ -71,6 +72,10 @@ beforeEach(() => {
   fs.mkdirSync(path.join(source, "src"));
   fs.writeFileSync(path.join(source, "src", "main.js"), "console.log(1)");
   fs.symlinkSync("/etc/hosts", path.join(source, "src", "sneaky"));
+  fs.mkdirSync(path.join(source, ".sfo"));
+  fs.writeFileSync(path.join(source, ".sfo", "SPEC.md"), "private");
+  fs.writeFileSync(path.join(source, ".env.local"), "SECRET=1");
+  archiveSize = 4096;
   head = "aaaaaaa";
   contract = webContract;
 });
@@ -94,6 +99,18 @@ describe("publishing a web project", () => {
     expect(calls.deploys).toHaveLength(1);
     expect(calls.deploys[0].framework).toBe("vite");
     expect(calls.deploys[0].files.map((f) => f.file).sort()).toEqual(["index.html", "src/main.js"]);
+  });
+
+  it("refuses an archive its machine says is too large, before pulling it", async () => {
+    const { user_id } = project();
+    vault.put(user_id, "vercel_token", "good");
+    archiveSize = 500 * 1024 * 1024;
+    const { api, calls } = fakeVercel();
+    const inflight = new Set<Promise<unknown>>();
+    await publisher({ db, vault, sprites, vercel: api, inflight, pollMs: 1 }).delivered({ id: ID, user_id, sprite: "sfo-00000000" });
+    await settle(inflight);
+    expect(row()).toMatchObject({ publish_state: "failed", publish_error: expect.stringMatching(/too large to publish/) });
+    expect(calls.uploads).toHaveLength(0);
   });
 
   it("asks for Vercel, and touches nothing, when it is not connected", async () => {

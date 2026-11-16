@@ -180,6 +180,12 @@ export default function Settings() {
       </Card>
 
       <Card>
+        <Body style={styles.section}>Connections</Body>
+        <Muted>{have.includes('vercel_token') ? 'Vercel is connected: web projects go online through it.' : 'Vercel is not connected. A web project asks for it when it is ready to go online.'}</Muted>
+        {have.includes('vercel_token') && <Button title="Disconnect Vercel" kind="destructive" onPress={() => api('/credentials/vercel_token', { method: 'DELETE' }).then(load, setError)} />}
+      </Card>
+
+      <Card>
         <Body style={styles.section}>GitHub</Body>
         <Muted>
           {have.includes('github_installation')

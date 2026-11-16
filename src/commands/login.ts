@@ -7,7 +7,7 @@ import { projectsRoot, type Env } from "../core/paths.js";
 import { readProfile, readKey, describeKeyRef, type KeyRef } from "../core/access.js";
 
 const KEYCHAIN_SERVICE = "sfo-control";
-export const DEFAULT_CONTROL_URL = "https://sfo-control.fly.dev";
+export const DEFAULT_CONTROL_URL = "https://sfo.dannyyoustra.com";
 
 /** Where the control plane is: SFO_CONTROL_URL, else what `sfo login` recorded, else the default. */
 export function controlUrl(env: Env = process.env): string {

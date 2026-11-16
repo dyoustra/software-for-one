@@ -4,6 +4,7 @@ import { Linking, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { Project, Question } from '@sfo/api';
 import { LiveStrip } from '@/components/activity';
+import { Online } from '@/components/online';
 import { PriorArtDecision } from '@/components/prior-art';
 import { Delivered, useResults } from '@/components/results';
 import { ProjectCard } from '@/components/project-card';
@@ -50,7 +51,7 @@ export default function ProjectScreen() {
       put(`/projects/${id}`, p);
       setFresh(p);
       const kind = cardModel(p).kind;
-      live.current = kind === 'running' || kind === 'setup';
+      live.current = kind === 'running' || kind === 'setup' || p.publish?.state === 'deploying';
       setQuestions(p.summary?.status === 'awaiting_human' ? await api<Question[]>(`/projects/${id}/questions`) : []);
       setError(null);
     } catch (err) {
@@ -128,6 +129,7 @@ export default function ProjectScreen() {
       <ErrorText error={error} />
       {!project && !error && <Loading label="Waking the project's machine…" />}
       {project && <ProjectCard project={project} />}
+      {project?.publish && <Online project={project} onChange={load} />}
       {kind === 'done' && <DeliveredFor id={id} />}
       {stoppedForPriorArt && (
         <PriorArtFor id={id} busy={busy === 'run'} onBuild={() => act('run', `/projects/${id}/run`, { anyway: true })} onDrop={() => remove(false)} />

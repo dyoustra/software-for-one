@@ -113,6 +113,16 @@ export function cardModel(project: Project): CardModel {
         time,
       };
     case 'done': {
+      // Online, or on its way there, says so first: the address is what you got.
+      const online = project.publish;
+      if (online?.state === 'live' && online.url) {
+        return { ...base, kind: 'done', badge: { tone: 'done', text: '✓ Live' }, time, line: online.url.replace(/^https:\/\//, ''), lineIsCode: true };
+      }
+      if (online && online.state !== 'live') {
+        const badge: CardModel['badge'] =
+          online.state === 'deploying' ? { tone: 'running', text: 'Going live' } : online.state === 'needs_connection' ? { tone: 'waiting', text: 'Connect Vercel' } : { tone: 'failed', text: 'Publish failed' };
+        return { ...base, kind: 'done', badge, time, line: online.state === 'failed' ? (online.error ?? undefined) : undefined };
+      }
       const commands = s.delivered?.commands ?? [];
       // A `done` with a note has something unresolved (smoke, review, deferred checks).
       const badge: CardModel['badge'] = s.note ? { tone: 'waiting', text: 'Done, with notes' } : { tone: 'done', text: commands.length ? '✓ CLI' : '✓ Done' };

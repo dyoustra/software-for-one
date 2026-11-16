@@ -1,7 +1,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import type { Db } from "./db.js";
 import type { Vault } from "./credentials.js";
 import type { VercelApi } from "./vercel.js";
@@ -40,13 +40,31 @@ f="$p/.sfo/CONTRACTS.json"
 if [ -f "$f" ] && [ ! -L "$f" ]; then cat "$f"; fi
 `;
 
-/** The tracked files at `root` of the committed tree, as a tar on the Sprite: nothing untracked, no build output. */
+/**
+ * The tracked files at `root` of the committed tree, as a tar on the Sprite:
+ * nothing untracked, no build output. Prints the tar's path, its size and its
+ * entry count, so the control plane can refuse one too large before pulling
+ * it (an uncompressed tar unpacks to no more than its own size).
+ */
 const ARCHIVE = `set -e
 p="\${SFO_HOME:-$HOME/.sfo}/$1"
 out="/tmp/sfo-publish-$1.tar"
 if [ "$2" = "." ]; then git -C "$p" archive --format=tar -o "$out" HEAD; else git -C "$p" archive --format=tar -o "$out" "HEAD:$2"; fi
-echo "$out"
+printf '%s\\t%s\\t%s\\n' "$out" "$(wc -c < "$out" | tr -d ' ')" "$(tar -tf "$out" | wc -l | tr -d ' ')"
 `;
+
+/** Never sent to the host: sfo's own records, git's, and env files that may hold secrets. */
+const PRIVATE = /^(\.sfo\/|\.git)|(^|\/)\.env/;
+
+function untar(tar: string, into: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("tar", ["-xf", tar, "-C", into], { stdio: ["ignore", "ignore", "pipe"] });
+    let stderr = "";
+    child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+    child.on("error", reject);
+    child.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`could not unpack it: ${stderr.slice(0, 200)}`))));
+  });
+}
 
 function set(db: Db, id: string, fields: Record<string, string | null>): void {
   const keys = Object.keys(fields);
@@ -56,14 +74,15 @@ function set(db: Db, id: string, fields: Record<string, string | null>): void {
 /** Every regular file under `dir`, relative, skipping symlinks: what the host builds from. */
 function filesUnder(dir: string): string[] {
   const out: string[] = [];
-  const walk = (rel: string) => {
+  const pending = [""];
+  while (pending.length > 0 && out.length <= MAX_FILES) {
+    const rel = pending.pop()!;
     for (const entry of fs.readdirSync(path.join(dir, rel), { withFileTypes: true })) {
       const child = rel ? `${rel}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) walk(child);
+      if (entry.isDirectory()) pending.push(child);
       else if (entry.isFile()) out.push(child);
     }
-  };
-  walk("");
+  }
   return out;
 }
 
@@ -106,16 +125,22 @@ export function publisher(deps: PublisherDeps) {
     try {
       const archived = await deps.sprites.exec(row.sprite, ARCHIVE, [row.id, publish.root]);
       if (archived.status !== 0) throw new Error(`could not package it: ${archived.stdout.trim().slice(0, 200)}`);
+      const [remote, sizeText, countText] = (archived.stdout.trim().split("\n").pop() ?? "").split("\t");
+      const size = Number(sizeText);
+      const count = Number(countText);
+      // Refused on the Sprite's word, before a byte comes here.
+      if (!remote || !Number.isFinite(size) || !Number.isFinite(count) || size > MAX_BYTES || count > MAX_FILES) {
+        throw new Error(`it is too large to publish (${count} files, ${Math.round(size / 1e6)} MB; the most is ${MAX_FILES} files, ${MAX_BYTES / 1e6} MB)`);
+      }
       const tar = path.join(scratch, "source.tar");
-      await deps.sprites.pull(row.sprite, archived.stdout.trim().split("\n").pop() ?? "", tar);
+      await deps.sprites.pull(row.sprite, remote, tar);
+      if (fs.statSync(tar).size > MAX_BYTES) throw new Error("it is larger than its machine said");
       const tree = path.join(scratch, "tree");
       fs.mkdirSync(tree);
-      const untar = spawnSync("tar", ["-xf", tar, "-C", tree], { encoding: "utf8" });
-      if (untar.status !== 0) throw new Error(`could not unpack it: ${untar.stderr}`);
+      await untar(tar, tree);
 
-      const files = filesUnder(tree);
-      const bytes = files.reduce((n, f) => n + fs.statSync(path.join(tree, f)).size, 0);
-      if (files.length > MAX_FILES || bytes > MAX_BYTES) throw new Error(`it is too large to publish (${files.length} files, ${Math.round(bytes / 1e6)} MB)`);
+      const files = filesUnder(tree).filter((f) => !PRIVATE.test(f));
+      if (files.length > MAX_FILES) throw new Error(`it has too many files to publish (the most is ${MAX_FILES})`);
 
       const project = await deps.vercel.ensureProject(token, row.id);
       const uploaded = await inBatches(files, UPLOADS_AT_ONCE, async (file) => ({ file, ...(await deps.vercel.uploadFile(token, fs.readFileSync(path.join(tree, file)))) }));
