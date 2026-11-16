@@ -113,6 +113,18 @@ describe("publishing a web project", () => {
     expect(calls.uploads).toHaveLength(0);
   });
 
+  it("refuses an archive holding links between files, which a commit cannot", async () => {
+    const { user_id } = project();
+    vault.put(user_id, "vercel_token", "good");
+    fs.linkSync(path.join(source, "index.html"), path.join(source, "copy.html"));
+    const { api, calls } = fakeVercel();
+    const inflight = new Set<Promise<unknown>>();
+    await publisher({ db, vault, sprites, vercel: api, inflight, pollMs: 1 }).delivered({ id: ID, user_id, sprite: "sfo-00000000" });
+    await settle(inflight);
+    expect(row()).toMatchObject({ publish_state: "failed", publish_error: expect.stringMatching(/links between files/) });
+    expect(calls.uploads).toHaveLength(0);
+  });
+
   it("asks for Vercel, and touches nothing, when it is not connected", async () => {
     const { user_id } = project();
     const { api, calls } = fakeVercel();

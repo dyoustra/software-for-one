@@ -56,6 +56,30 @@ printf '%s\\t%s\\t%s\\n' "$out" "$(wc -c < "$out" | tr -d ' ')" "$(tar -tf "$out
 /** Never sent to the host: sfo's own records, git's, and env files that may hold secrets. */
 const PRIVATE = /^(\.sfo\/|\.git)|(^|\/)\.env/;
 
+function run(command: string, args: string[]): Promise<{ code: number | null; stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (d: Buffer) => (stdout += d.toString()));
+    child.stderr.on("data", (d: Buffer) => (stderr += d.toString()));
+    child.on("error", reject);
+    child.on("close", (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+/**
+ * Only what `git archive` writes: files, folders and symlinks. The tar sits on
+ * the Sprite, where the build agent could replace it, and a hard link or
+ * sparse entry can unpack to far more than the tar's own size.
+ */
+async function onlyPlainEntries(tar: string): Promise<void> {
+  const listed = await run("tar", ["-tvf", tar]);
+  if (listed.code !== 0) throw new Error(`could not read it: ${listed.stderr.slice(0, 200)}`);
+  const odd = listed.stdout.split("\n").filter((l) => l && (!/^[-dl]/.test(l) || / link to /.test(l)));
+  if (odd.length > 0) throw new Error("it holds entries a commit cannot (links between files, devices or sparse files); refused");
+}
+
 function untar(tar: string, into: string): Promise<void> {
   return new Promise((resolve, reject) => {
     const child = spawn("tar", ["-xf", tar, "-C", into], { stdio: ["ignore", "ignore", "pipe"] });
@@ -137,10 +161,14 @@ export function publisher(deps: PublisherDeps) {
       if (fs.statSync(tar).size > MAX_BYTES) throw new Error("it is larger than its machine said");
       const tree = path.join(scratch, "tree");
       fs.mkdirSync(tree);
+      await onlyPlainEntries(tar);
       await untar(tar, tree);
 
       const files = filesUnder(tree).filter((f) => !PRIVATE.test(f));
       if (files.length > MAX_FILES) throw new Error(`it has too many files to publish (the most is ${MAX_FILES})`);
+      // What actually unpacked, before any of it is read.
+      const unpacked = files.reduce((n, f) => n + fs.lstatSync(path.join(tree, f)).size, 0);
+      if (unpacked > MAX_BYTES) throw new Error(`it is too large to publish (${Math.round(unpacked / 1e6)} MB unpacked)`);
 
       const project = await deps.vercel.ensureProject(token, row.id);
       const uploaded = await inBatches(files, UPLOADS_AT_ONCE, async (file) => ({ file, ...(await deps.vercel.uploadFile(token, fs.readFileSync(path.join(tree, file)))) }));
