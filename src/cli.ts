@@ -72,7 +72,9 @@ export function buildProgram(): Command {
       const id = await createProject(
         idea,
         async (i) => {
-          const outcome = await triage(i, { path, access: resolved });
+          const { readPreferences } = await import("./core/preferences.js");
+          const { familyFor } = await import("./core/models.js");
+          const outcome = await triage(i, { path, access: resolved, family: familyFor("triage", readPreferences().models, false) });
           verdict = outcome.result.verdict;
           counterOffer = outcome.result.counterOffer;
           return outcome;
@@ -183,10 +185,27 @@ export function buildProgram(): Command {
     }));
 
   program
+    .command("models")
+    .description("A project's model choices (Haiku, Sonnet, Opus by stage group); --set changes them for it alone")
+    .argument("<id>", "project id")
+    .option("--json", "print them as JSON")
+    .option("--set <json>", "replace them: a JSON object, or - to read it from stdin")
+    .action(guarded(async (id: string, opts: { json?: boolean; set?: string }) => {
+      const { readProjectModels, setProjectModels } = await import("./commands/models.js");
+      const { formatModels } = await import("./core/models.js");
+      let models = readProjectModels(id);
+      if (opts.set !== undefined) {
+        const text = opts.set === "-" ? fs.readFileSync(0, "utf8") : opts.set;
+        models = setProjectModels(id, JSON.parse(text));
+      }
+      console.log(opts.json ? JSON.stringify(models) : formatModels(models));
+    }));
+
+  program
     .command("prefs")
     .alias("preferences")
     .description("Your standing preferences: languages by kind, web host and data, default budgets; `edit` opens SFO.md")
-    .argument("[setting]", "languages, web-host, web-data, budget, smoke-cap, or edit")
+    .argument("[setting]", "languages, web-host, web-data, budget, smoke-cap, models, or edit")
     .argument("[values...]", "the new value; for languages, the kind then a comma-separated ranking")
     .action(guarded(async (setting: string | undefined, values: string[]) => {
       const prefs = await import("./core/preferences.js");

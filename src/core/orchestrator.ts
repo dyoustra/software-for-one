@@ -782,7 +782,7 @@ async function runSlices(
     } finally {
       stopHeartbeat();
     }
-    recordCost(id, stageName, result.ok, result.usage, env, "cli", result.billing);
+    recordCost(id, stageName, result.ok, result.usage, env, "cli", result.billing, result.model);
 
     // Before grading: the slice's half-written code stays in the tree for the
     // resumed attempt, which is exactly what a retry would get.
@@ -1108,7 +1108,7 @@ export async function advance(
 
     // Recorded before the ok/failed branch: a stage that failed still spent
     // money, and billing only the happy path under-reports every retry.
-    recordCost(id, upcoming, result.ok, result.usage, env, "cli", result.billing);
+    recordCost(id, upcoming, result.ok, result.usage, env, "cli", result.billing, result.model);
 
     warnOnDroppedCriteria(criteriaBefore, criterionIds(id, env), upcoming);
 

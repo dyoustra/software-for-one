@@ -435,7 +435,7 @@ export async function runSmoke(ctx: SmokeContext): Promise<SmokeOutcome> {
         allowedTools: agentToolsForStage(id, "smoke-repair", env),
       }),
     );
-    recordCost(id, "smoke-repair", result.ok, result.usage, env, "cli", result.billing);
+    recordCost(id, "smoke-repair", result.ok, result.usage, env, "cli", result.billing, result.model);
     if (result.limited) return { outcome: "limit", stage: "smoke-repair", limit: result.limited };
 
     const taken = takeContest(id, SMOKE_CONTEST_ID, env);

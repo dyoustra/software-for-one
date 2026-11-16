@@ -1,3 +1,4 @@
+import { ModelChoosingRunner } from "../runner/models.js";
 import { ClaudeCodeRunner } from "../runner/claude-code.js";
 import { loadPrompt } from "../stages/prompts.js";
 import { projectDir, logPath, type Env } from "../core/paths.js";
@@ -56,7 +57,7 @@ export async function runSingleStage(
 
   // Resolved after the id is known to exist, so a typo reports "no such
   // project" rather than a missing key.
-  const runner = injected ?? new ClaudeCodeRunner({ access: resolveProjectAccess(id, { env }) });
+  const runner = injected ?? new ModelChoosingRunner(new ClaudeCodeRunner({ access: resolveProjectAccess(id, { env }) }), id, env);
   const result = await runner.runStage({
     workdir: projectDir(id, env),
     prompt: loadPrompt(stage),
@@ -65,7 +66,7 @@ export async function runSingleStage(
   });
 
   // Re-runs are appended, not replaced — the bill counts every attempt.
-  recordCost(id, stage, result.ok, result.usage, env, "cli", result.billing);
+  recordCost(id, stage, result.ok, result.usage, env, "cli", result.billing, result.model);
 
   // The checks and the lock that follow test-repair in a run follow it here
   // too: skipped, the build is graded against an unlocked suite and every

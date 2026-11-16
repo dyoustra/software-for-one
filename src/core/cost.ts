@@ -26,6 +26,8 @@ export interface CostRecord {
    * inherited whatever credential the shell had.
    */
   billing?: Billing;
+  /** The exact model that ran, when the run said. */
+  model?: string;
   usage: StageUsage;
 }
 
@@ -60,6 +62,7 @@ function parseCostRecord(value: unknown): CostRecord | null {
     ok: rec.ok === true,
     via: rec.via === "sdk" ? "sdk" : "cli",
     ...(rec.billing === "api" || rec.billing === "plan" ? { billing: rec.billing } : {}),
+    ...(typeof rec.model === "string" ? { model: rec.model } : {}),
     usage: usage as unknown as StageUsage,
   };
 }
@@ -79,6 +82,7 @@ export function recordCost(
   // binary; only triage can currently take the SDK route.
   via: CostVia = "cli",
   billing?: Billing,
+  model?: string,
 ): void {
   if (!usage) return;
   const record: CostRecord = {
@@ -87,6 +91,7 @@ export function recordCost(
     ok,
     via,
     ...(billing ? { billing } : {}),
+    ...(model ? { model } : {}),
     usage,
   };
   fs.mkdirSync(sfoDir(id, env), { recursive: true });

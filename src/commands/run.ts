@@ -1,3 +1,4 @@
+import { ModelChoosingRunner } from "../runner/models.js";
 import path from "node:path";
 import { advance } from "../core/orchestrator.js";
 import { ClaudeCodeRunner } from "../runner/claude-code.js";
@@ -81,6 +82,11 @@ export function notifyOutcome(id: string, env?: Env, notify: Notifier = desktopN
  * and the limit park still says what to do.
  */
 export function runnerFor(id: string, access: ResolvedAccess, env?: Env): Runner {
+  return new ModelChoosingRunner(planOrFallback(id, access, env), id, env);
+}
+
+/** The plan runner, or the plan falling back to the API key when the person opted in. */
+export function planOrFallback(id: string, access: ResolvedAccess, env?: Env): Runner {
   const plan = new ClaudeCodeRunner({ access });
   const profile = readProfile(env);
   if (access.method !== "claude_subscription" || !profile?.fallbackToApiKey) return plan;
@@ -93,7 +99,7 @@ export function runnerFor(id: string, access: ResolvedAccess, env?: Env): Runner
     return plan;
   }
   return new FallbackRunner(plan, new ClaudeCodeRunner({ access: keyAccess }), (input, result) =>
-    recordCost(id, path.basename(input.logPath, ".log"), false, result.usage, env, "cli", result.billing),
+    recordCost(id, path.basename(input.logPath, ".log"), false, result.usage, env, "cli", result.billing, result.model),
   );
 }
 

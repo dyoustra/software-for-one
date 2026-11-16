@@ -1,3 +1,4 @@
+import { NEWEST, type Family } from "../core/models.js";
 import { z } from "zod";
 import { runStructured } from "../runner/structured.js";
 import type { StageUsage } from "../runner/types.js";
@@ -141,6 +142,8 @@ export interface TriageSdkInput {
   schema: Record<string, unknown>;
   /** Absent means the SDK finds its own, from the environment. */
   apiKey?: string;
+  /** The exact model to call. */
+  model: string;
 }
 
 export type TriageSdkImpl = (input: TriageSdkInput) => Promise<TriageCallResult>;
@@ -158,7 +161,7 @@ export const runTriageSdk: TriageSdkImpl = async (input) => {
 
   const startedAt = Date.now();
   const response = await client.messages.create({
-    model: "claude-opus-5-5",
+    model: input.model,
     max_tokens: 16000,
     system: input.system,
     output_config: { format: { type: "json_schema", schema: input.schema } },
@@ -204,6 +207,8 @@ export interface TriageOptions {
   access?: ResolvedAccess;
   sdk?: TriageSdkImpl;
   cli?: TriageCliImpl;
+  /** The family the person chose for triage; Opus when unsaid. */
+  family?: Family;
 }
 
 /**
@@ -219,17 +224,20 @@ export async function triage(idea: string, opts: TriageOptions = {}): Promise<Tr
   const via = opts.path ?? triagePathFor(access);
   const schema = triageOutputSchema();
 
+  const family = opts.family ?? "opus";
   const { text, usage } =
     via === "sdk"
       ? await (opts.sdk ?? runTriageSdk)({
           system: SYSTEM,
           prompt: idea,
           schema,
+          model: NEWEST[family],
           ...(access.method === "anthropic_api_key" ? { apiKey: access.apiKey } : {}),
         })
       : await (opts.cli ?? runStructured)({
           prompt: `${SYSTEM}\n\nIdea:\n${idea}`,
           schema,
+          model: family,
           env: childEnv(process.env, access),
         });
 

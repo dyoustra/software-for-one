@@ -1,3 +1,4 @@
+import { DEFAULT_MODELS, ModelsSchema, changeModels, formatModels } from "./models.js";
 import fs from "node:fs";
 import path from "node:path";
 import { z } from "zod";
@@ -28,6 +29,8 @@ export const PreferencesSchema = z.strictObject({
   webData: z.enum(WEB_DATA),
   budgetUsd: z.number().positive().nullable(),
   smokeCapUsd: z.number().min(0),
+  /** Which model family each stage group (and stage) runs on; older files read the defaults. */
+  models: ModelsSchema.default(DEFAULT_MODELS),
 });
 export type Preferences = z.infer<typeof PreferencesSchema>;
 
@@ -37,6 +40,7 @@ export const DEFAULT_PREFERENCES: Preferences = {
   webData: "browser",
   budgetUsd: null,
   smokeCapUsd: 2,
+  models: DEFAULT_MODELS,
 };
 
 export const SFO_MD_TEMPLATE = `# SFO.md
@@ -93,7 +97,7 @@ function dollars(value: string, what: string): number {
   return n;
 }
 
-export const SETTINGS = ["languages", "web-host", "web-data", "budget", "smoke-cap"] as const;
+export const SETTINGS = ["languages", "web-host", "web-data", "budget", "smoke-cap", "models"] as const;
 
 /** One change, from `sfo prefs <setting> …`. Refuses anything outside its allowed values. */
 export function setPreference(setting: string, args: string[], env?: Env): Preferences {
@@ -118,6 +122,9 @@ export function setPreference(setting: string, args: string[], env?: Env): Prefe
     case "smoke-cap":
       next.smokeCapUsd = dollars(args[0] ?? "", "smoke-cap");
       break;
+    case "models":
+      next.models = changeModels(next.models, args);
+      break;
     default:
       throw new Error(`unknown preference "${setting}" — one of: ${SETTINGS.join(", ")}, or \`edit\` for SFO.md`);
   }
@@ -132,6 +139,7 @@ export function formatPreferences(p: Preferences): string {
     `web data:  ${p.webData}`,
     `budget:    ${p.budgetUsd === null ? "none" : `$${p.budgetUsd.toFixed(2)} per project`}`,
     `smoke cap: $${p.smokeCapUsd.toFixed(2)} per run`,
+    `models:    ${formatModels(p.models)}`,
   ].join("\n");
 }
 

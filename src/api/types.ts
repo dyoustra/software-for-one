@@ -112,6 +112,15 @@ export interface PreferencesResponse {
   allowed: { kinds: LanguageKind[]; languages: string[]; webHosts: string[]; webData: string[] };
 }
 
+/** Which model family each stage group, and stage, runs on (MODELS_SPEC). */
+export interface ModelChoices {
+  thinking: "haiku" | "sonnet" | "opus";
+  building: "haiku" | "sonnet" | "opus";
+  writing: "haiku" | "sonnet" | "opus";
+  stages: Partial<Record<string, "haiku" | "sonnet" | "opus">>;
+  escalate: boolean;
+}
+
 /** One thing a run did, read from its stage log (LIVE_LOGS_SPEC §4). */
 export type LogEvent =
   | { kind: "start"; text: string }
@@ -166,7 +175,8 @@ export interface ProjectResults {
   cost: {
     totalUsd: number;
     computeMs: number;
-    byStage: { stage: string; costUsd: number; computeMs: number; ok: boolean; billing: "api" | "plan" | null }[];
+    /** `model`: the exact model it last ran on, when its records say. */
+    byStage: { stage: string; costUsd: number; computeMs: number; ok: boolean; billing: "api" | "plan" | null; model: string | null }[];
   };
   slices: { id: string; name: string; criteria: string[]; attempts: number; result: "passed" | "failed" | "skipped" | "pending" }[];
 }

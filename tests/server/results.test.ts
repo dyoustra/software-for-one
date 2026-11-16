@@ -55,7 +55,7 @@ function seed(withDelivery: boolean) {
   fs.writeFileSync(
     path.join(sfo, "COST.jsonl"),
     jsonl([
-      { stage: "spec", ok: true, usage: usage(0.4, 60_000), billing: "plan", at: "t" },
+      { stage: "spec", ok: true, usage: usage(0.4, 60_000), billing: "plan", model: "claude-opus-5-5", at: "t" },
       { stage: "build-S-02", ok: false, usage: usage(0.3, 30_000), billing: "plan", at: "t" },
       { stage: "build-S-02", ok: false, usage: usage(0.25, 20_000), billing: "plan", at: "t" },
     ]),
@@ -97,8 +97,8 @@ describe("a project's results", () => {
       totalUsd: 0.95,
       computeMs: 110_000,
       byStage: [
-        { stage: "spec", costUsd: 0.4, computeMs: 60_000, ok: true, billing: "plan" },
-        { stage: "build-S-02", costUsd: 0.55, computeMs: 50_000, ok: false, billing: "plan" },
+        { stage: "spec", costUsd: 0.4, computeMs: 60_000, ok: true, billing: "plan", model: "claude-opus-5-5" },
+        { stage: "build-S-02", costUsd: 0.55, computeMs: 50_000, ok: false, billing: "plan", model: null },
       ],
     });
     expect(body.slices).toEqual([

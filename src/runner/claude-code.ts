@@ -72,6 +72,30 @@ export function parseUsageFromLog(text: string): StageUsage | undefined {
 
 const LIMIT_TEXT = /usage limit reached|hit your limit/i;
 
+/** The model a run reports in its first (init) event, read from the start of its log. */
+export function modelFromLog(file: string): string | undefined {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(file, "r");
+    const head = Buffer.alloc(16_384);
+    const n = fs.readSync(fd, head, 0, head.length, 0);
+    for (const line of head.subarray(0, n).toString("utf8").split("\n")) {
+      if (!line.startsWith("{")) continue;
+      try {
+        const e = JSON.parse(line) as { type?: string; subtype?: string; model?: unknown };
+        if (e.type === "system" && e.subtype === "init" && typeof e.model === "string") return e.model;
+      } catch {
+        // A line cut at the buffer's end.
+      }
+    }
+  } catch {
+    // No log: nothing to report.
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
+  return undefined;
+}
+
 /**
  * Whether a failed run was stopped by a subscription limit. The stream carries
  * `rate_limit_event` messages whose `status` turns `rejected` when a window is
@@ -259,6 +283,7 @@ export class ClaudeCodeRunner implements Runner {
         const tail = readTail(input.logPath);
         const usage = parseUsageFromLog(tail);
         const limited = exitCode !== 0 ? parseUsageLimitFromLog(tail) : undefined;
+        const model = modelFromLog(input.logPath);
         resolve({
           ok: exitCode === 0,
           exitCode,
@@ -266,6 +291,7 @@ export class ClaudeCodeRunner implements Runner {
           ...(usage ? { usage } : {}),
           billing: this.billing,
           ...(limited ? { limited } : {}),
+          ...(model ? { model } : {}),
         });
       });
 

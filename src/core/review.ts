@@ -66,7 +66,7 @@ async function runAgent(ctx: ReviewContext, stage: string, prompt: string): Prom
       allowedTools: agentToolsForStage(id, stage, env),
     }),
   );
-  recordCost(id, stage, result.ok, result.usage, env, "cli", result.billing);
+  recordCost(id, stage, result.ok, result.usage, env, "cli", result.billing, result.model);
   return result;
 }
 

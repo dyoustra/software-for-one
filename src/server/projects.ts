@@ -1,3 +1,4 @@
+import { ModelsSchema } from "../core/models.js";
 import type { Publisher } from "./publish.js";
 import fs from "node:fs";
 import { randomBytes } from "node:crypto";
@@ -386,6 +387,24 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
   // The delivery summary, as the run wrote it; empty until delivery.
   // Brings the project's Sprite to the current sfo. Never mid-run: the stage
   // under way would have its program swapped from under it.
+  // A project's own model choices (MODELS_SPEC §4), kept on its Sprite with
+  // the rest of its preferences, and read by each stage as it starts.
+  app.get("/projects/:id/models", auth, async (c: Context<Env>) => {
+    const row = owned(c);
+    if (!row) return c.json({ error: "no such project" }, 404);
+    const r = await sfo(row, ["models", row.id, "--json"]);
+    return r.status === 0 ? c.json(JSON.parse(r.stdout)) : c.json({ error: r.stdout.trim().slice(0, 300) || "could not read its models" }, 502);
+  });
+
+  app.put("/projects/:id/models", auth, async (c: Context<Env>) => {
+    const row = owned(c);
+    if (!row) return c.json({ error: "no such project" }, 404);
+    const parsed = ModelsSchema.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.json({ error: parsed.error.issues[0]?.message ?? "not a set of model choices" }, 400);
+    const r = await sfo(row, ["models", row.id, "--json", "--set", "-"], JSON.stringify(parsed.data));
+    return r.status === 0 ? c.json(JSON.parse(r.stdout)) : c.json({ error: r.stdout.trim().slice(0, 300) || "could not change its models" }, 502);
+  });
+
   app.post("/projects/:id/upgrade", auth, async (c: Context<Env>) => {
     const row = owned(c);
     if (!row) return c.json({ error: "no such project" }, 404);

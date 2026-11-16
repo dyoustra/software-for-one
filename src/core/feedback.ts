@@ -212,7 +212,7 @@ export async function runFeedback(ctx: FeedbackContext, n: number): Promise<Feed
         allowedTools: agentToolsForStage(id, "feedback-repair", env),
       }),
     );
-    recordCost(id, stage, result.ok, result.usage, env, "cli", result.billing);
+    recordCost(id, stage, result.ok, result.usage, env, "cli", result.billing, result.model);
     if (result.limited) return { outcome: "limit", limit: result.limited };
 
     const outcome = takeResult(id, env);

@@ -1,8 +1,9 @@
+import { ModelChoosingRunner } from "../../src/runner/models.js";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { guardRunnable, runnerFor } from "../../src/commands/run.js";
+import { guardRunnable, runnerFor, planOrFallback } from "../../src/commands/run.js";
 import { commandArgs } from "../../src/core/host.js";
 import { FallbackRunner } from "../../src/runner/fallback.js";
 import { writeState, type ProjectState } from "../../src/core/state.js";
@@ -261,19 +262,21 @@ describe("runnerFor", () => {
     const keyed = { ...env, SFO_TEST_FALLBACK_KEY: "sk" };
 
     withFallback(false, "sk");
-    expect(runnerFor("p", { method: "claude_subscription" }, keyed)).not.toBeInstanceOf(FallbackRunner);
+    expect(planOrFallback("p", { method: "claude_subscription" }, keyed)).not.toBeInstanceOf(FallbackRunner);
 
     withFallback(true, "sk");
-    expect(runnerFor("p", { method: "claude_subscription" }, keyed)).toBeInstanceOf(FallbackRunner);
-    expect(runnerFor("p", { method: "anthropic_api_key", apiKey: "sk" }, keyed)).not.toBeInstanceOf(
+    expect(planOrFallback("p", { method: "claude_subscription" }, keyed)).toBeInstanceOf(FallbackRunner);
+    expect(planOrFallback("p", { method: "anthropic_api_key", apiKey: "sk" }, keyed)).not.toBeInstanceOf(
       FallbackRunner,
     );
+    // Whichever it is, each run gets the model chosen for its stage.
+    expect(runnerFor("p", { method: "claude_subscription" }, keyed)).toBeInstanceOf(ModelChoosingRunner);
   });
 
   it("runs on the plan alone, and says why, when the fallback's key is missing", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => {});
     withFallback(true, null);
-    expect(runnerFor("p", { method: "claude_subscription" }, env)).not.toBeInstanceOf(FallbackRunner);
+    expect(planOrFallback("p", { method: "claude_subscription" }, env)).not.toBeInstanceOf(FallbackRunner);
     expect(error).toHaveBeenCalledWith(expect.stringMatching(/fallback to the API key is on, but no API key found/));
     error.mockRestore();
   });

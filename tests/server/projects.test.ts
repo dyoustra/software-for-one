@@ -241,6 +241,28 @@ describe("preferences", () => {
   });
 });
 
+describe("a project's models", () => {
+  it("are read from and written to its machine, and checked before they go", async () => {
+    const s = server();
+    const { token } = await withProject(s);
+    const exec = s.fake.sprites.exec;
+    const seen: { args: string[]; input?: string }[] = [];
+    s.fake.sprites.exec = async (sprite, script, args = [], opts = {}) => {
+      if (args[0] === "models") {
+        seen.push({ args, input: opts.input });
+        return { status: 0, stdout: opts.input ?? JSON.stringify({ thinking: "opus", building: "opus", writing: "sonnet", stages: {}, escalate: true }) };
+      }
+      return exec(sprite, script, args, opts);
+    };
+    expect(await (await s.call("GET", "/projects/moon-abc123/models", token)).json()).toMatchObject({ writing: "sonnet" });
+    const choice = { thinking: "opus", building: "sonnet", writing: "haiku", stages: { review: "haiku" }, escalate: false };
+    expect(await (await s.call("PUT", "/projects/moon-abc123/models", token, choice)).json()).toEqual(choice);
+    expect(seen.at(-1)).toEqual({ args: ["models", "moon-abc123", "--json", "--set", "-"], input: JSON.stringify(choice) });
+    expect((await s.call("PUT", "/projects/moon-abc123/models", token, { ...choice, writing: "gpt" })).status).toBe(400);
+    expect(seen).toHaveLength(2);
+  });
+});
+
 describe("upgrading a project's sfo", () => {
   it("swaps in the current sfo and says which commit it is at", async () => {
     const s = server();

@@ -28,6 +28,8 @@ export interface StageResult {
   billing?: "api" | "plan";
   /** Set when the run stopped because a subscription's usage limit was hit. */
   limited?: UsageLimit;
+  /** The exact model that ran (e.g. claude-opus-5-5), from the run's own report. */
+  model?: string;
 }
 
 export interface UsageLimit {

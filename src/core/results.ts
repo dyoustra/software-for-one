@@ -31,11 +31,12 @@ export function resultsFor(id: string, env?: Env): ProjectResults {
 
   const byStage = new Map<string, ProjectResults["cost"]["byStage"][number]>();
   for (const r of quietly(() => readCostRecords(id, env), [])) {
-    const seen = byStage.get(r.stage) ?? { stage: r.stage, costUsd: 0, computeMs: 0, ok: r.ok, billing: r.billing ?? null };
+    const seen = byStage.get(r.stage) ?? { stage: r.stage, costUsd: 0, computeMs: 0, ok: r.ok, billing: r.billing ?? null, model: null as string | null };
     seen.costUsd += r.usage.costUsd;
     seen.computeMs += r.usage.durationMs;
     seen.ok = r.ok;
     seen.billing = r.billing ?? seen.billing;
+    seen.model = r.model ?? seen.model;
     byStage.set(r.stage, seen);
   }
   const stages = [...byStage.values()].map((s) => ({ ...s, costUsd: Math.round(s.costUsd * 100) / 100 }));

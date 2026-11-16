@@ -79,7 +79,7 @@ async function runAdjudicator(
       allowedTools: agentToolsForStage(id, stage, env),
     }),
   );
-  recordCost(id, stage, result.ok, result.usage, env, "cli", result.billing);
+  recordCost(id, stage, result.ok, result.usage, env, "cli", result.billing, result.model);
   return result;
 }
 
