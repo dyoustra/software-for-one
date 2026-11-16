@@ -77,8 +77,7 @@ as **Publish**).
   there. Mitigations: the deployer Sprite runs nothing but `eas` and is
   destroyed after each build; the Expo token is a robot user's, revocable; the
   App Store Connect key has the narrowest role that can create apps. The
-  residual risk is accepted for v1 only with the person's agreement, or v1
-  requires a static `app.json` with no local plugins.
+  residual risk is **accepted for v1** (2026-11-16), with those mitigations.
 - **Spend.** Databases and builds can cost money past free tiers. The done
   screen and Cost show what was provisioned, and a project's budget covers
   its database's expected monthly cost.
