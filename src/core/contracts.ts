@@ -51,6 +51,26 @@ export const ContractSchema = z.object({
       needs: Needs,
     })
     .optional(),
+  /**
+   * How it goes live when it is not a command on PATH (WEB_AND_MOBILE_SPEC
+   * §3): sfo deploys it from `root`, setting the env vars it names.
+   */
+  publish: z
+    .object({
+      kind: z.enum(["web", "mobile"]),
+      /** The folder the host builds from, relative to the project. */
+      root: z
+        .string()
+        .default(".")
+        .refine((p) => !p.startsWith("/") && !p.split("/").includes(".."), "root must be a folder inside the project"),
+      /** The framework, when the host should not detect it (Vercel's names: vite, nextjs, …). */
+      framework: z.string().min(1).nullable().default(null),
+      /** Env vars the app reads that sfo sets. */
+      env: z.array(z.string().regex(/^[A-Z][A-Z0-9_]*$/, "an env var name")).default([]),
+      /** Set when the app keeps synced data: sfo creates the database and sets DATABASE_URL. */
+      database: z.enum(["postgres"]).optional(),
+    })
+    .optional(),
   render: z
     .array(
       z.object({

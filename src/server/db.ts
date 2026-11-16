@@ -143,6 +143,27 @@ const MIGRATIONS: string[] = [
   ALTER TABLE projects ADD COLUMN setup_step TEXT;
   ALTER TABLE projects ADD COLUMN setup_error TEXT;
   `,
+  // v10: accounts a project goes live through (WEB_AND_MOBILE_SPEC), and
+  // where each project went live. credentials is rebuilt for its wider CHECK.
+  `
+  CREATE TABLE credentials_rebuilt (
+    user_id TEXT NOT NULL REFERENCES users(id),
+    kind TEXT NOT NULL CHECK (kind IN ('claude_token', 'anthropic_api_key', 'github_installation', 'vercel_token', 'expo_token', 'asc_api_key', 'database_token')),
+    ciphertext BLOB NOT NULL,
+    nonce BLOB NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (user_id, kind)
+  );
+  INSERT INTO credentials_rebuilt SELECT user_id, kind, ciphertext, nonce, created_at FROM credentials;
+  DROP TABLE credentials;
+  ALTER TABLE credentials_rebuilt RENAME TO credentials;
+  ALTER TABLE projects ADD COLUMN publish_state TEXT CHECK (publish_state IN ('needs_connection', 'deploying', 'live', 'failed'));
+  ALTER TABLE projects ADD COLUMN published_url TEXT;
+  ALTER TABLE projects ADD COLUMN published_commit TEXT;
+  ALTER TABLE projects ADD COLUMN published_at TEXT;
+  ALTER TABLE projects ADD COLUMN publish_error TEXT;
+  ALTER TABLE projects ADD COLUMN head_commit TEXT;
+  `,
 ];
 
 export type Db = DatabaseSync;

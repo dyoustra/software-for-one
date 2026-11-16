@@ -4,7 +4,7 @@
  * Types only — nothing here may import anything.
  */
 
-export type CredentialKind = "claude_token" | "anthropic_api_key" | "github_installation";
+export type CredentialKind = "claude_token" | "anthropic_api_key" | "github_installation" | "vercel_token" | "expo_token" | "asc_api_key" | "database_token";
 
 /** A project as `sfo status` reports it on its Sprite. */
 export interface ProjectSummary {
@@ -45,6 +45,15 @@ export interface Project {
   idea?: string;
   /** While `creating`: the step under way, or why setup failed. */
   setup?: { step: string | null; error: string | null };
+  /** Where a web project went live (WEB_AND_MOBILE_SPEC §4), once sfo has tried. */
+  publish?: {
+    state: "needs_connection" | "deploying" | "live" | "failed";
+    url: string | null;
+    at: string | null;
+    error: string | null;
+    /** Delivered again since it went live: Publish would put the new version up. */
+    changed: boolean;
+  };
   createdAt: string;
   updatedAt: string;
 }

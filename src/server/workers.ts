@@ -1,3 +1,4 @@
+import type { Publisher } from "./publish.js";
 import { randomBytes } from "node:crypto";
 import type { Context, Hono } from "hono";
 import type { Db } from "./db.js";
@@ -31,7 +32,7 @@ export function issueWorkerKey(): { token: string; hash: string } {
   return { token, hash: hashToken(token) };
 }
 
-export function workerRoutes(app: Hono<Env>, deps: { db: Db; sprites: SpriteCli; push: SendPush; log?: (m: string) => void }): void {
+export function workerRoutes(app: Hono<Env>, deps: { db: Db; sprites: SpriteCli; push: SendPush; log?: (m: string) => void; publisher?: Publisher }): void {
   const { db, sprites } = deps;
   const log = deps.log ?? console.log;
 
@@ -99,6 +100,12 @@ export function workerRoutes(app: Hono<Env>, deps: { db: Db; sprites: SpriteCli;
     if (typeof title !== "string" || typeof message !== "string") return c.json({ error: "title and message are required" }, 400);
     db.prepare("INSERT INTO events (project_id, kind, payload, at) VALUES (?, 'notify', ?, ?)").run(row.id, JSON.stringify({ title: title.slice(0, 200), message: message.slice(0, 2000) }), at);
     await refreshSummary(row);
+
+    // Delivered: a web project goes live the first time (WEB_AND_MOBILE_SPEC §2).
+    const now = db.prepare("SELECT summary FROM projects WHERE id = ?").get(row.id) as { summary: string | null } | undefined;
+    if (deps.publisher && now?.summary && (JSON.parse(now.summary) as { status?: string }).status === "done") {
+      await deps.publisher.delivered({ id: row.id, user_id: row.user_id, sprite: row.sprite }).catch((err) => log(`could not check ${row.id} for publishing: ${err instanceof Error ? err.message : String(err)}`));
+    }
 
     // Only to phones that proved they receive on the token, and are still
     // signed in to this account.

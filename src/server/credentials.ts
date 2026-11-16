@@ -1,9 +1,10 @@
+import type { VercelApi } from "./vercel.js";
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 import type { Context, Hono } from "hono";
 import type { Db } from "./db.js";
 import { hashToken, requireDevice, type Env } from "./auth.js";
 
-export const KINDS = ["claude_token", "anthropic_api_key", "github_installation"] as const;
+export const KINDS = ["claude_token", "anthropic_api_key", "github_installation", "vercel_token", "expo_token", "asc_api_key", "database_token"] as const;
 export type CredentialKind = (typeof KINDS)[number];
 
 /**
@@ -119,6 +120,7 @@ export function credentialRoutes(
   gh: GitHubOAuth,
   /** Where GitHub may send someone back: the app's own addresses, as registered on the GitHub App. */
   redirects: string[],
+  vercel: VercelApi,
 ): void {
   const auth = requireDevice(db);
 
@@ -135,6 +137,17 @@ export function credentialRoutes(
       return c.json({ ok: true });
     });
   }
+
+  // A Vercel token, checked with Vercel before it is kept: web projects go live through it.
+  app.put("/credentials/vercel", auth, async (c: Context<Env>) => {
+    const { value } = (await c.req.json().catch(() => ({}))) as { value?: string };
+    const token = value?.trim();
+    if (!token) return c.json({ error: "paste a Vercel token" }, 400);
+    const account = await vercel.whoami(token).catch(() => null);
+    if (!account) return c.json({ error: "Vercel did not accept that token" }, 400);
+    vault.put(c.get("userId"), "vercel_token", token);
+    return c.json({ ok: true, account });
+  });
 
   app.delete("/credentials/:kind", auth, (c: Context<Env>) => {
     const kind = KINDS.find((k) => k === c.req.param("kind"));

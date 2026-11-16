@@ -1,3 +1,4 @@
+import type { Publisher } from "./publish.js";
 import fs from "node:fs";
 import { randomBytes } from "node:crypto";
 import os from "node:os";
@@ -27,6 +28,8 @@ export interface ProjectDeps {
   controlUrl?: string;
   /** Setups still running after their request returned; shutdown waits for them. */
   setups?: Set<Promise<unknown>>;
+  /** Takes web projects live. */
+  publisher?: Publisher;
 }
 
 type ProjectRow = {
@@ -39,6 +42,12 @@ type ProjectRow = {
   idea: string | null;
   setup_step: string | null;
   setup_error: string | null;
+  publish_state: string | null;
+  published_url: string | null;
+  published_commit: string | null;
+  published_at: string | null;
+  publish_error: string | null;
+  head_commit: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -60,6 +69,18 @@ function present(row: ProjectRow): Project {
     status: row.status as Project["status"],
     summary: row.summary ? JSON.parse(row.summary) : null,
     ...(row.status === "creating" ? { idea: row.idea ?? "", setup: { step: row.setup_step, error: row.setup_error } } : {}),
+    ...(row.publish_state
+      ? {
+          publish: {
+            state: row.publish_state as NonNullable<Project["publish"]>["state"],
+            url: row.published_url,
+            at: row.published_at,
+            error: row.publish_error,
+            // Delivered again since it last went live: the app offers Publish.
+            changed: row.published_commit !== null && row.head_commit !== null && row.head_commit !== row.published_commit,
+          },
+        }
+      : {}),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -374,6 +395,16 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
     const r = await sprites.exec(row.sprite, UPGRADE_SFO, [process.env.SFO_REPO_URL || SFO_REPO]);
     if (r.status !== 0) return c.json({ error: `the upgrade failed, and the old sfo is still in place: ${r.stdout.trim().split("\n").slice(-3).join(" ")}` }, 502);
     return c.json({ ok: true, commit: r.stdout.trim().split("\n").pop() });
+  });
+
+  // Puts what the project is at now online (a web project), after the
+  // person asks; answers at once, and the project says how it goes.
+  app.post("/projects/:id/publish", auth, async (c: Context<Env>) => {
+    const row = owned(c);
+    if (!row) return c.json({ error: "no such project" }, 404);
+    if (!deps.publisher) return c.json({ error: "publishing is not set up here" }, 501);
+    const refused = await deps.publisher.publish({ id: row.id, user_id: row.user_id, sprite: row.sprite });
+    return refused ? c.json({ error: refused }, 400) : c.json({ ok: true }, 202);
   });
 
   // A page of a stage's log, as events (LIVE_LOGS_SPEC §4). The app polls it

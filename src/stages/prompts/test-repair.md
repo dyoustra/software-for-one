@@ -28,6 +28,7 @@ the contract, and the build has to satisfy it.
     {
       "gate":    [ {"name": "...", "run": ["argv", "..."], "files": "tests/{slice}-*.test.ts"} ],
       "install": {"run": ["argv"], "check": [["argv"]], "commands": ["<name>"], "needs": []},
+      "publish": {"kind": "web", "root": ".", "framework": "vite", "env": []},
       "render":  [ {"name": "...", "run": ["argv"], "produces": ["path.png"], "needs": []} ],
       "smoke":   [ {"name": "<seam id from SERVICES.jsonl>", "run": ["argv"], "needs": []} ]
     }
@@ -44,6 +45,13 @@ the contract, and the build has to satisfy it.
   prove it worked, each run from a new terminal. `commands` lists the names
   it puts on PATH, if any: sfo will not run an install that would replace a
   command something else already owns.
+- **`publish`** — for something that goes online rather than onto a PATH: a
+  web app is `{"kind": "web"}`. sfo uploads the committed files under `root`
+  to the person's host, which builds and serves them, and gives the person
+  the URL. `framework` is the host's name for it (`vite`, `nextjs`, …) when
+  detection should not guess. Commit everything the host's build needs,
+  including the lockfile; nothing untracked is sent. Leave it out for a CLI or
+  a board.
 - **`render`** — commands that produce something to look at: screenshots, a
   terminal capture, a photo. Review looks at what they produce.
 - **`smoke`** — one entry per seam in `.sfo/SERVICES.jsonl` with a smoke check,
@@ -101,13 +109,15 @@ with `npx playwright install chromium`):
        {"name": "typecheck", "run": ["npm", "run", "typecheck"]},
        {"name": "unit",      "run": ["npx", "vitest", "run"], "files": "tests/{slice}-*.test.ts"},
        {"name": "browser",   "run": ["npx", "playwright", "test"], "files": "tests/e2e/{slice}-*.spec.ts"}],
-     "install": {"run": ["npm", "link"], "check": [["<launcher>", "--version"]]},
+     "install": {"run": ["npm", "link"], "check": [["<launcher>", "--version"]], "commands": ["<launcher>"]},
+     "publish": {"kind": "web", "framework": "vite"},
      "render": [{"name": "home, phone and desktop, light and dark",
                  "run": ["npx", "playwright", "test", "render/"],
                  "produces": ["render/out/home-desktop-light.png", "render/out/home-phone-dark.png"]}]}
 
 The launcher in `bin` serves the production build on a free port and opens the
-browser; `--version` must exit without starting it.
+browser; `--version` must exit without starting it. `publish` puts the same
+build online.
 
 **Firmware for a board** (PlatformIO, with `test_dir = tests` in
 `platformio.ini`; logic tested on the host in a `native` environment, so the
