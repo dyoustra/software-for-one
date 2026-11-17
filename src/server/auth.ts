@@ -83,11 +83,27 @@ export async function personFor(deps: Pick<AuthDeps, "db" | "verifyApple" | "all
 }
 
 /** A new signed-in device for this person, and the token it uses; only the token's hash is kept. */
-export function issueDevice(db: Db, userId: string, name: string, passkeyId: string | null = null): { deviceId: string; token: string } {
+export function issueDevice(db: Db, userId: string, name: string): { deviceId: string; token: string } {
   const token = `sfo_${randomBytes(32).toString("base64url")}`;
   const deviceId = randomUUID();
-  db.prepare("INSERT INTO devices (id, user_id, name, token_hash, created_at, passkey_id) VALUES (?, ?, ?, ?, ?, ?)").run(deviceId, userId, name, hashToken(token), now(), passkeyId);
+  db.prepare("INSERT INTO devices (id, user_id, name, token_hash, created_at) VALUES (?, ?, ?, ?, ?)").run(deviceId, userId, name, hashToken(token), now());
   return { deviceId, token };
+}
+
+/**
+ * A device signed in by a passkey, issued only if that passkey still exists
+ * and the device that added it is live, in the same statement: a passkey
+ * removed between its check and this cannot still let a device in.
+ */
+export function issueDeviceByPasskey(db: Db, userId: string, name: string, passkeyId: string): { deviceId: string; token: string } | null {
+  const token = `sfo_${randomBytes(32).toString("base64url")}`;
+  const deviceId = randomUUID();
+  const r = db
+    .prepare(
+      "INSERT INTO devices (id, user_id, name, token_hash, created_at, passkey_id) SELECT ?, ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM passkeys p LEFT JOIN devices d ON d.id = p.device_id WHERE p.id = ? AND (p.device_id IS NULL OR d.revoked_at IS NULL))",
+    )
+    .run(deviceId, userId, name, hashToken(token), now(), passkeyId, passkeyId);
+  return r.changes ? { deviceId, token } : null;
 }
 
 /**
@@ -112,6 +128,8 @@ export function removePasskey(db: Db, passkeyId: string): void {
 /** Deletes a passkey; answers the live devices it signed in, for the caller to revoke. */
 function removePasskeyOnly(db: Db, passkeyId: string): string[] {
   db.prepare("DELETE FROM passkeys WHERE id = ?").run(passkeyId);
+  // A CLI code it approved but the CLI has not collected yet goes too.
+  db.prepare("UPDATE device_codes SET status = 'denied' WHERE passkey_id = ?").run(passkeyId);
   return (db.prepare("SELECT id FROM devices WHERE passkey_id = ? AND revoked_at IS NULL").all(passkeyId) as { id: string }[]).map((r) => r.id);
 }
 
@@ -174,7 +192,9 @@ export function authRoutes(app: Hono<Env>, deps: AuthDeps): void {
       // token's.
       if (row.status === "approved" && row.user_id) {
         db.prepare("DELETE FROM device_codes WHERE device_code = ?").run(row.device_code);
-        return c.json({ token: issueDevice(db, row.user_id, row.device_name, row.passkey_id).token });
+        const issued = row.passkey_id ? issueDeviceByPasskey(db, row.user_id, row.device_name, row.passkey_id) : issueDevice(db, row.user_id, row.device_name);
+        if (!issued) return c.json({ error: "the passkey that approved this was removed — `sfo login` again" }, 403);
+        return c.json({ token: issued.token });
       }
       if (Date.now() >= deadline) return c.json({ status: "pending" }, 202);
       await new Promise((r) => setTimeout(r, 500));

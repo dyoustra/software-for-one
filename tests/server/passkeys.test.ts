@@ -189,6 +189,17 @@ describe("passkeys", () => {
     expect((await s.call("GET", "/devices", undefined, cli)).status).toBe(401);
   });
 
+  it("cancel a CLI code they approved, if removed before the CLI collects it", async () => {
+    const s = server();
+    const me = await s.apple("me");
+    const { key, added } = await s.add(me);
+    const started = (await s.call("POST", "/auth/device", { name: "mac" })).body as { userCode: string; deviceCode: string };
+    const { challengeId, options } = (await s.call("POST", "/auth/passkey/options", {})).body as { challengeId: string; options: { challenge: string } };
+    await s.call("POST", "/approve", { userCode: started.userCode, approve: true, passkey: { challengeId, response: key.signIn(options) } });
+    await s.call("DELETE", `/passkeys/${encodeURIComponent(String(added.body.id))}`, undefined, me);
+    expect((await s.call("GET", `/auth/device/${started.deviceCode}`)).body).not.toHaveProperty("token");
+  });
+
   it("are their owner's to remove, and no one else's", async () => {
     const s = server();
     const me = await s.apple("me");

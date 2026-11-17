@@ -9,7 +9,7 @@ import {
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 import type { Db } from "./db.js";
-import { accountAllowed, hashToken, issueDevice, removePasskey, requireDevice, type Allowlists, type Env } from "./auth.js";
+import { accountAllowed, hashToken, issueDeviceByPasskey, removePasskey, requireDevice, type Allowlists, type Env } from "./auth.js";
 
 export interface PasskeyConfig {
   /** The domain passkeys are bound to, forever (SIGN_IN_SPEC §6). */
@@ -149,7 +149,8 @@ export function passkeys(db: Db, allowlists: Allowlists, config: PasskeyConfig =
       const body = (await c.req.json().catch(() => ({}))) as { challengeId?: string; response?: AuthenticationResponseJSON; deviceName?: string };
       const signedIn = body.challengeId && body.response ? await verifySignIn(body.challengeId, body.response) : null;
       if (!signedIn) return c.json({ error: "that passkey did not sign in" }, 403);
-      return c.json({ token: issueDevice(db, signedIn.userId, (body.deviceName || "a device").slice(0, 80), signedIn.passkeyId).token });
+      const issued = issueDeviceByPasskey(db, signedIn.userId, (body.deviceName || "a device").slice(0, 80), signedIn.passkeyId);
+      return issued ? c.json({ token: issued.token }) : c.json({ error: "that passkey did not sign in" }, 403);
     });
   }
 
