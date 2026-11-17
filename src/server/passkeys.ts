@@ -9,7 +9,7 @@ import {
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 import type { Db } from "./db.js";
-import { accountAllowed, hashToken, issueDevice, requireDevice, type Allowlists, type Env } from "./auth.js";
+import { accountAllowed, hashToken, issueDevice, removePasskey, requireDevice, type Allowlists, type Env } from "./auth.js";
 
 export interface PasskeyConfig {
   /** The domain passkeys are bound to, forever (SIGN_IN_SPEC §6). */
@@ -49,11 +49,15 @@ export function passkeys(db: Db, allowlists: Allowlists, config: PasskeyConfig =
     challenges.set(key, { challenge, userId, expires: Date.now() + CHALLENGE_MS });
   };
 
-  /** The account a passkey answer signs in to, or null. */
-  async function verifySignIn(challengeId: string, response: AuthenticationResponseJSON): Promise<string | null> {
+  /** The account and passkey a passkey answer signs in with, or null. */
+  async function verifySignIn(challengeId: string, response: AuthenticationResponseJSON): Promise<{ userId: string; passkeyId: string } | null> {
     const waiting = take(`auth:${hashToken(challengeId)}`);
     if (!waiting || typeof response?.id !== "string") return null;
-    const row = db.prepare("SELECT * FROM passkeys WHERE id = ?").get(response.id) as Row | undefined;
+    // Only a passkey whose adding device is still live: one left by a revoked
+    // device is gone already, and this refuses one that slipped past.
+    const row = db
+      .prepare("SELECT p.* FROM passkeys p LEFT JOIN devices d ON d.id = p.device_id WHERE p.id = ? AND (p.device_id IS NULL OR d.revoked_at IS NULL)")
+      .get(response.id) as Row | undefined;
     if (!row) return null;
     const result = await verifyAuthenticationResponse({
       response,
@@ -65,7 +69,7 @@ export function passkeys(db: Db, allowlists: Allowlists, config: PasskeyConfig =
     }).catch(() => null);
     if (!result?.verified) return null;
     db.prepare("UPDATE passkeys SET counter = ?, last_used_at = ? WHERE id = ?").run(result.authenticationInfo.newCounter, new Date().toISOString(), row.id);
-    return accountAllowed(db, row.user_id, allowlists) ? row.user_id : null;
+    return accountAllowed(db, row.user_id, allowlists) ? { userId: row.user_id, passkeyId: row.id } : null;
   }
 
   function routes(app: Hono<Env>): void {
@@ -107,16 +111,13 @@ export function passkeys(db: Db, allowlists: Allowlists, config: PasskeyConfig =
       if (!result.verified) return c.json({ error: "that passkey could not be checked" }, 400);
       const { credential } = result.registrationInfo;
       if (db.prepare("SELECT 1 FROM passkeys WHERE id = ?").get(credential.id)) return c.json({ error: "that passkey is already added" }, 409);
-      db.prepare("INSERT INTO passkeys (id, user_id, public_key, counter, transports, name, created_at, device_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
-        credential.id,
-        userId,
-        credential.publicKey,
-        credential.counter,
-        credential.transports ? JSON.stringify(credential.transports) : null,
-        (body.name ?? "Passkey").slice(0, 80),
-        new Date().toISOString(),
-        c.get("deviceId"),
-      );
+      // Only while the adding device is still live, checked in the same statement.
+      const inserted = db
+        .prepare(
+          "INSERT INTO passkeys (id, user_id, public_key, counter, transports, name, created_at, device_id) SELECT ?, ?, ?, ?, ?, ?, ?, id FROM devices WHERE id = ? AND revoked_at IS NULL",
+        )
+        .run(credential.id, userId, credential.publicKey, credential.counter, credential.transports ? JSON.stringify(credential.transports) : null, (body.name ?? "Passkey").slice(0, 80), new Date().toISOString(), c.get("deviceId"));
+      if (inserted.changes === 0) return c.json({ error: "this device has been signed out" }, 401);
       return c.json({ ok: true, id: credential.id });
     });
 
@@ -129,8 +130,10 @@ export function passkeys(db: Db, allowlists: Allowlists, config: PasskeyConfig =
     );
 
     app.delete("/passkeys/:id", auth, (c: Context<Env>) => {
-      const r = db.prepare("DELETE FROM passkeys WHERE id = ? AND user_id = ?").run(c.req.param("id") ?? "", c.get("userId"));
-      return r.changes ? c.json({ ok: true }) : c.json({ error: "no such passkey" }, 404);
+      const mine = db.prepare("SELECT id FROM passkeys WHERE id = ? AND user_id = ?").get(c.req.param("id") ?? "", c.get("userId")) as { id: string } | undefined;
+      if (!mine) return c.json({ error: "no such passkey" }, 404);
+      removePasskey(db, mine.id);
+      return c.json({ ok: true });
     });
 
     // Signing in: any passkey for this domain may answer; the account is the
@@ -144,9 +147,9 @@ export function passkeys(db: Db, allowlists: Allowlists, config: PasskeyConfig =
 
     app.post("/auth/passkey", async (c) => {
       const body = (await c.req.json().catch(() => ({}))) as { challengeId?: string; response?: AuthenticationResponseJSON; deviceName?: string };
-      const userId = body.challengeId && body.response ? await verifySignIn(body.challengeId, body.response) : null;
-      if (!userId) return c.json({ error: "that passkey did not sign in" }, 403);
-      return c.json({ token: issueDevice(db, userId, (body.deviceName || "a device").slice(0, 80)).token });
+      const signedIn = body.challengeId && body.response ? await verifySignIn(body.challengeId, body.response) : null;
+      if (!signedIn) return c.json({ error: "that passkey did not sign in" }, 403);
+      return c.json({ token: issueDevice(db, signedIn.userId, (body.deviceName || "a device").slice(0, 80), signedIn.passkeyId).token });
     });
   }
 

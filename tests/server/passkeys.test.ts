@@ -157,6 +157,38 @@ describe("passkeys", () => {
     expect((await s.signIn(key)).result.status).toBe(403);
   });
 
+  it("take what they let in with them: removing one signs out the devices it signed in, and theirs", async () => {
+    const s = server();
+    const me = await s.apple("me");
+    const stolen = await s.apple("me");
+    const { key } = await s.add(stolen);
+    const viaPasskey = String((await s.signIn(key)).result.body.token);
+    const second = await s.add(viaPasskey);
+
+    const devices = (await s.call("GET", "/devices", undefined, me)).body as unknown as { id: string; name: string; current: boolean }[];
+    const stolenId = devices.filter((d) => !d.current)[0].id;
+    await s.call("DELETE", `/devices/${stolenId}`, undefined, me);
+
+    expect((await s.call("GET", "/passkeys", undefined, viaPasskey)).status).toBe(401);
+    expect((await s.call("GET", "/passkeys", undefined, me)).body).toEqual([]);
+    expect((await s.signIn(second.key)).result.status).toBe(403);
+    expect((await s.call("GET", "/devices", undefined, me)).status).toBe(200);
+  });
+
+  it("signs out a CLI it approved, when it is removed", async () => {
+    const s = server();
+    const me = await s.apple("me");
+    const { key, added } = await s.add(me);
+    const started = (await s.call("POST", "/auth/device", { name: "mac" })).body as { userCode: string; deviceCode: string };
+    const { challengeId, options } = (await s.call("POST", "/auth/passkey/options", {})).body as { challengeId: string; options: { challenge: string } };
+    await s.call("POST", "/approve", { userCode: started.userCode, approve: true, passkey: { challengeId, response: key.signIn(options) } });
+    const cli = String((await s.call("GET", `/auth/device/${started.deviceCode}`)).body.token);
+    expect((await s.call("GET", "/devices", undefined, cli)).status).toBe(200);
+
+    await s.call("DELETE", `/passkeys/${encodeURIComponent(String(added.body.id))}`, undefined, me);
+    expect((await s.call("GET", "/devices", undefined, cli)).status).toBe(401);
+  });
+
   it("are their owner's to remove, and no one else's", async () => {
     const s = server();
     const me = await s.apple("me");

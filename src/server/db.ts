@@ -184,6 +184,12 @@ const MIGRATIONS: string[] = [
   `
   ALTER TABLE passkeys ADD COLUMN device_id TEXT REFERENCES devices(id);
   `,
+  // v13: the passkey a device signed in with, directly or by approving a
+  // code, so removing a passkey revokes what it let in.
+  `
+  ALTER TABLE devices ADD COLUMN passkey_id TEXT;
+  ALTER TABLE device_codes ADD COLUMN passkey_id TEXT;
+  `,
 ];
 
 export type Db = DatabaseSync;

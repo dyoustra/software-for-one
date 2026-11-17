@@ -18,7 +18,7 @@ export interface AuthDeps {
   /** The domain passkeys are bound to: the approval page offers one only there. */
   passkeyDomain?: string;
   /** A passkey answer's account, for approving a code with a passkey instead of Apple. */
-  passkeySignIn?: (challengeId: string, response: AuthenticationResponseJSON) => Promise<string | null>;
+  passkeySignIn?: (challengeId: string, response: AuthenticationResponseJSON) => Promise<{ userId: string; passkeyId: string } | null>;
   log?: (message: string) => void;
 }
 
@@ -83,11 +83,36 @@ export async function personFor(deps: Pick<AuthDeps, "db" | "verifyApple" | "all
 }
 
 /** A new signed-in device for this person, and the token it uses; only the token's hash is kept. */
-export function issueDevice(db: Db, userId: string, name: string): { deviceId: string; token: string } {
+export function issueDevice(db: Db, userId: string, name: string, passkeyId: string | null = null): { deviceId: string; token: string } {
   const token = `sfo_${randomBytes(32).toString("base64url")}`;
   const deviceId = randomUUID();
-  db.prepare("INSERT INTO devices (id, user_id, name, token_hash, created_at) VALUES (?, ?, ?, ?, ?)").run(deviceId, userId, name, hashToken(token), now());
+  db.prepare("INSERT INTO devices (id, user_id, name, token_hash, created_at, passkey_id) VALUES (?, ?, ?, ?, ?, ?)").run(deviceId, userId, name, hashToken(token), now(), passkeyId);
   return { deviceId, token };
+}
+
+/**
+ * Revokes a device and everything it let in: the passkeys it added, the
+ * devices those passkeys signed in, and so on down. A token that is stolen
+ * and then revoked leaves nothing of its own behind.
+ */
+export function revokeDevice(db: Db, deviceId: string): void {
+  const devices = [deviceId];
+  while (devices.length > 0) {
+    const d = devices.pop()!;
+    db.prepare("UPDATE devices SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL").run(now(), d);
+    for (const { id } of db.prepare("SELECT id FROM passkeys WHERE device_id = ?").all(d) as { id: string }[]) devices.push(...removePasskeyOnly(db, id));
+  }
+}
+
+/** Removes a passkey and revokes every device it signed in, and what they let in. */
+export function removePasskey(db: Db, passkeyId: string): void {
+  for (const d of removePasskeyOnly(db, passkeyId)) revokeDevice(db, d);
+}
+
+/** Deletes a passkey; answers the live devices it signed in, for the caller to revoke. */
+function removePasskeyOnly(db: Db, passkeyId: string): string[] {
+  db.prepare("DELETE FROM passkeys WHERE id = ?").run(passkeyId);
+  return (db.prepare("SELECT id FROM devices WHERE passkey_id = ? AND revoked_at IS NULL").all(passkeyId) as { id: string }[]).map((r) => r.id);
 }
 
 /** Lets a request through with a live device token, and says whose. */
@@ -105,7 +130,7 @@ export function requireDevice(db: Db): MiddlewareHandler<Env> {
   };
 }
 
-type CodeRow = { device_code: string; user_code: string; device_name: string; status: string; user_id: string | null; expires_at: string };
+type CodeRow = { device_code: string; user_code: string; device_name: string; status: string; user_id: string | null; passkey_id: string | null; expires_at: string };
 
 export function authRoutes(app: Hono<Env>, deps: AuthDeps): void {
   const { db } = deps;
@@ -149,7 +174,7 @@ export function authRoutes(app: Hono<Env>, deps: AuthDeps): void {
       // token's.
       if (row.status === "approved" && row.user_id) {
         db.prepare("DELETE FROM device_codes WHERE device_code = ?").run(row.device_code);
-        return c.json({ token: issueDevice(db, row.user_id, row.device_name).token });
+        return c.json({ token: issueDevice(db, row.user_id, row.device_name, row.passkey_id).token });
       }
       if (Date.now() >= deadline) return c.json({ status: "pending" }, 202);
       await new Promise((r) => setTimeout(r, 500));
@@ -162,17 +187,17 @@ export function authRoutes(app: Hono<Env>, deps: AuthDeps): void {
     const body = (await c.req.json().catch(() => ({}))) as { userCode?: string; idToken?: string; passkey?: { challengeId?: string; response?: AuthenticationResponseJSON }; approve?: boolean };
     const row = db.prepare("SELECT * FROM device_codes WHERE user_code = ?").get((body.userCode ?? "").toUpperCase().trim()) as CodeRow | undefined;
     if (!row || row.expires_at < now() || row.status !== "pending") return c.json({ error: "no such code waiting — check it, or `sfo login` again" }, 404);
-    const userId = body.idToken
-      ? await personFor(deps, body.idToken).catch(() => null)
-      : body.passkey?.challengeId && body.passkey.response && deps.passkeySignIn
+    const byPasskey =
+      !body.idToken && body.passkey?.challengeId && body.passkey.response && deps.passkeySignIn
         ? await deps.passkeySignIn(body.passkey.challengeId, body.passkey.response).catch(() => null)
         : null;
+    const userId = body.idToken ? await personFor(deps, body.idToken).catch(() => null) : (byPasskey?.userId ?? null);
     if (!userId) return c.json({ error: body.passkey ? "that passkey did not sign in" : "this Apple account is not allowed in" }, 403);
     if (!body.approve) {
       db.prepare("UPDATE device_codes SET status = 'denied' WHERE device_code = ?").run(row.device_code);
       return c.json({ ok: true, approved: false });
     }
-    db.prepare("UPDATE device_codes SET status = 'approved', user_id = ? WHERE device_code = ?").run(userId, row.device_code);
+    db.prepare("UPDATE device_codes SET status = 'approved', user_id = ?, passkey_id = ? WHERE device_code = ?").run(userId, byPasskey?.passkeyId ?? null, row.device_code);
     return c.json({ ok: true, approved: true, device: row.device_name });
   });
 
@@ -195,16 +220,15 @@ export function authRoutes(app: Hono<Env>, deps: AuthDeps): void {
   );
 
   app.delete("/devices/current", requireDevice(db), (c: Context<Env>) => {
-    db.prepare("UPDATE devices SET revoked_at = ? WHERE id = ?").run(now(), c.get("deviceId"));
-    db.prepare("DELETE FROM passkeys WHERE device_id = ?").run(c.get("deviceId"));
+    revokeDevice(db, c.get("deviceId"));
     return c.json({ ok: true });
   });
 
   app.delete("/devices/:id", requireDevice(db), (c: Context<Env>) => {
-    const r = db.prepare("UPDATE devices SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL").run(now(), c.req.param("id") ?? "", c.get("userId"));
-    // A device's passkeys go with it: one it added must not outlive it.
-    if (r.changes) db.prepare("DELETE FROM passkeys WHERE device_id = ?").run(c.req.param("id") ?? "");
-    return r.changes ? c.json({ ok: true }) : c.json({ error: "no such device" }, 404);
+    const owned = db.prepare("SELECT id FROM devices WHERE id = ? AND user_id = ? AND revoked_at IS NULL").get(c.req.param("id") ?? "", c.get("userId")) as { id: string } | undefined;
+    if (!owned) return c.json({ error: "no such device" }, 404);
+    revokeDevice(db, owned.id);
+    return c.json({ ok: true });
   });
 }
 
