@@ -164,6 +164,20 @@ const MIGRATIONS: string[] = [
   ALTER TABLE projects ADD COLUMN publish_error TEXT;
   ALTER TABLE projects ADD COLUMN head_commit TEXT;
   `,
+  // v11: passkeys, added to an account and signing in to it (SIGN_IN_SPEC §6).
+  `
+  CREATE TABLE passkeys (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL REFERENCES users(id),
+    public_key BLOB NOT NULL,
+    counter INTEGER NOT NULL,
+    transports TEXT,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    last_used_at TEXT
+  );
+  CREATE INDEX passkeys_by_user ON passkeys(user_id);
+  `,
 ];
 
 export type Db = DatabaseSync;

@@ -7,6 +7,7 @@ import { projectRoutes } from "./projects.js";
 import { workerRoutes, type SendPush } from "./workers.js";
 import { githubSignInRoutes, type GitHubDevice } from "./github-signin.js";
 import { publisher } from "./publish.js";
+import { passkeys, type PasskeyConfig } from "./passkeys.js";
 import { vercel, type VercelApi } from "./vercel.js";
 import type { SpriteCli } from "../core/sprite.js";
 import type { GitHub } from "../core/provision.js";
@@ -30,6 +31,8 @@ export interface ServerDeps extends Omit<AuthDeps, "db"> {
   vercel?: VercelApi;
   /** How long a publish waits between looks at a deployment; tests shorten it. */
   publishPollMs?: number;
+  /** The passkeys' domain and pages; sfo.dannyyoustra.com unless a test says otherwise. */
+  passkeys?: PasskeyConfig;
 }
 
 /**
@@ -42,7 +45,9 @@ export function createApp(deps: ServerDeps): Hono<Env> {
   app.use("*", cors({ origin: (origin) => (origins.includes(origin) ? origin : null), allowHeaders: ["authorization", "content-type"], maxAge: 600 }));
 
   app.get("/health", (c) => c.json({ ok: true, version: deps.version, schema: schemaVersion(deps.db) }));
-  authRoutes(app, deps);
+  const keys = passkeys(deps.db, { apple: deps.allowed, github: deps.allowedGithub }, deps.passkeys);
+  authRoutes(app, { ...deps, passkeySignIn: keys.verifySignIn, passkeyDomain: keys.domain });
+  keys.routes(app);
   githubSignInRoutes(app, { db: deps.db, github: deps.githubDevice, allowlists: { apple: deps.allowed, github: deps.allowedGithub }, holdMs: deps.holdMs, log: deps.log });
   const setups = deps.setups ?? new Set<Promise<unknown>>();
   const publishing = publisher({ db: deps.db, vault: deps.vault, sprites: deps.sprites, vercel: deps.vercel ?? vercel, inflight: setups, log: deps.log, pollMs: deps.publishPollMs });

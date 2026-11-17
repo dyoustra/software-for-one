@@ -1,3 +1,4 @@
+import type { AuthenticationResponseJSON } from "@simplewebauthn/server";
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import type { Db } from "./db.js";
@@ -14,6 +15,10 @@ export interface AuthDeps {
   publicUrl: string;
   /** How long a device-code request is held open before the CLI asks again. */
   holdMs?: number;
+  /** The domain passkeys are bound to: the approval page offers one only there. */
+  passkeyDomain?: string;
+  /** A passkey answer's account, for approving a code with a passkey instead of Apple. */
+  passkeySignIn?: (challengeId: string, response: AuthenticationResponseJSON) => Promise<string | null>;
   log?: (message: string) => void;
 }
 
@@ -52,11 +57,7 @@ export type Allowlists = Record<Provider, Set<string>>;
  */
 export function accountFor(db: Db, provider: Provider, subject: string, allowlists: Allowlists, log: (m: string) => void = console.log): string | null {
   const found = db.prepare("SELECT user_id FROM identities WHERE provider = ? AND subject = ?").get(provider, subject) as { user_id: string } | undefined;
-  const permitted = found
-    ? (db.prepare("SELECT provider, subject FROM identities WHERE user_id = ?").all(found.user_id) as { provider: Provider; subject: string }[]).some((i) =>
-        allowlists[i.provider].has(i.subject),
-      )
-    : allowlists[provider].has(subject);
+  const permitted = found ? accountAllowed(db, found.user_id, allowlists) : allowlists[provider].has(subject);
   if (found && permitted) return found.user_id;
   if (!permitted) {
     log(`sign-in refused for ${PROVIDERS[provider].name} id ${subject} — to allow it: fly secrets set ${PROVIDERS[provider].allowlist}=${subject}`);
@@ -66,6 +67,13 @@ export function accountFor(db: Db, provider: Provider, subject: string, allowlis
   db.prepare("INSERT INTO users (id, created_at) VALUES (?, ?)").run(id, now());
   db.prepare("INSERT INTO identities (user_id, provider, subject, created_at) VALUES (?, ?, ?, ?)").run(id, provider, subject, now());
   return id;
+}
+
+/** Whether an account may sign in: while any of its methods with an outside identity is allowlisted. */
+export function accountAllowed(db: Db, userId: string, allowlists: Allowlists): boolean {
+  return (db.prepare("SELECT provider, subject FROM identities WHERE user_id = ?").all(userId) as { provider: Provider; subject: string }[]).some((i) =>
+    allowlists[i.provider].has(i.subject),
+  );
 }
 
 /** The person behind an Apple sign-in, or null if they are not allowed in. */
@@ -148,14 +156,18 @@ export function authRoutes(app: Hono<Env>, deps: AuthDeps): void {
     }
   });
 
-  app.get("/approve", (c) => c.html(approvePage()));
+  app.get("/approve", (c) => c.html(approvePage(deps.passkeyDomain ?? null)));
 
   app.post("/approve", async (c) => {
-    const body = (await c.req.json().catch(() => ({}))) as { userCode?: string; idToken?: string; approve?: boolean };
+    const body = (await c.req.json().catch(() => ({}))) as { userCode?: string; idToken?: string; passkey?: { challengeId?: string; response?: AuthenticationResponseJSON }; approve?: boolean };
     const row = db.prepare("SELECT * FROM device_codes WHERE user_code = ?").get((body.userCode ?? "").toUpperCase().trim()) as CodeRow | undefined;
     if (!row || row.expires_at < now() || row.status !== "pending") return c.json({ error: "no such code waiting — check it, or `sfo login` again" }, 404);
-    const userId = body.idToken ? await personFor(deps, body.idToken).catch(() => null) : null;
-    if (!userId) return c.json({ error: "this Apple account is not allowed in" }, 403);
+    const userId = body.idToken
+      ? await personFor(deps, body.idToken).catch(() => null)
+      : body.passkey?.challengeId && body.passkey.response && deps.passkeySignIn
+        ? await deps.passkeySignIn(body.passkey.challengeId, body.passkey.response).catch(() => null)
+        : null;
+    if (!userId) return c.json({ error: body.passkey ? "that passkey did not sign in" : "this Apple account is not allowed in" }, 403);
     if (!body.approve) {
       db.prepare("UPDATE device_codes SET status = 'denied' WHERE device_code = ?").run(row.device_code);
       return c.json({ ok: true, approved: false });
@@ -165,7 +177,11 @@ export function authRoutes(app: Hono<Env>, deps: AuthDeps): void {
   });
 
   app.get("/identities", requireDevice(db), (c: Context<Env>) =>
-    c.json(db.prepare("SELECT provider, created_at AS createdAt FROM identities WHERE user_id = ? ORDER BY created_at").all(c.get("userId"))),
+    c.json(
+      db
+        .prepare("SELECT provider, created_at AS createdAt FROM identities WHERE user_id = ? UNION ALL SELECT 'passkey', created_at FROM passkeys WHERE user_id = ? ORDER BY createdAt")
+        .all(c.get("userId"), c.get("userId")),
+    ),
   );
 
   app.get("/devices", requireDevice(db), (c: Context<Env>) =>
@@ -194,7 +210,7 @@ export function authRoutes(app: Hono<Env>, deps: AuthDeps): void {
  * The code is typed, never filled in from the link: a pre-filled code is how
  * someone else's sign-in, sent as a link, gets approved in one click.
  */
-function approvePage(): string {
+function approvePage(passkeyDomain: string | null): string {
   return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>sfo — approve a device</title>
 <style>body{font:16px -apple-system,system-ui,sans-serif;max-width:28rem;margin:4rem auto;padding:0 1rem;color:#111;background:#fff}
@@ -207,6 +223,7 @@ Approving signs that device in as you; never approve a code someone sent you.</p
 <p>Type the code from your terminal:</p>
 <p><input id="code" value="" placeholder="XXXX-XXXX" maxlength="9" autocomplete="off"></p>
 <p><button id="yes">Sign in with Apple and approve</button><button id="no">Deny</button></p>
+<p id="pk" hidden><button id="passkey">Approve with a passkey</button></p>
 <p id="msg"></p>
 <script>
 AppleID.auth.init({clientId:"com.youstra.sfo.web",scope:"",redirectURI:location.origin+"/approve",usePopup:true});
@@ -222,5 +239,26 @@ async function decide(approve){
 }
 document.getElementById("yes").onclick=()=>decide(true);
 document.getElementById("no").onclick=()=>decide(false);
+// A passkey works only on the domain it is bound to, so it is offered only there.
+const PASSKEY_DOMAIN=${JSON.stringify(passkeyDomain)};
+const b64u={
+  dec:s=>Uint8Array.from(atob(s.replace(/-/g,"+").replace(/_/g,"/")+"===".slice((s.length+3)%4)),c=>c.charCodeAt(0)),
+  enc:b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"")
+};
+if(PASSKEY_DOMAIN&&location.hostname===PASSKEY_DOMAIN&&window.PublicKeyCredential){document.getElementById("pk").hidden=false;}
+document.getElementById("passkey").onclick=async()=>{
+  const msg=document.getElementById("msg");
+  try{
+    const o=await (await fetch("/auth/passkey/options",{method:"POST"})).json();
+    const cred=await navigator.credentials.get({publicKey:{challenge:b64u.dec(o.options.challenge),rpId:o.options.rpId,userVerification:o.options.userVerification,timeout:o.options.timeout}});
+    const r=cred.response;
+    const response={id:cred.id,rawId:b64u.enc(cred.rawId),type:cred.type,clientExtensionResults:{},
+      response:{clientDataJSON:b64u.enc(r.clientDataJSON),authenticatorData:b64u.enc(r.authenticatorData),signature:b64u.enc(r.signature),userHandle:r.userHandle?b64u.enc(r.userHandle):undefined}};
+    const res=await fetch("/approve",{method:"POST",headers:{"content-type":"application/json"},
+      body:JSON.stringify({userCode:document.getElementById("code").value,approve:true,passkey:{challengeId:o.challengeId,response}})});
+    const body=await res.json();
+    msg.textContent=res.ok?"Approved "+body.device+". You can close this page.":body.error;
+  }catch(e){msg.textContent="The passkey did not finish: "+(e.message||e);}
+};
 </script></body></html>`;
 }
