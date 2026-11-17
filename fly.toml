@@ -7,6 +7,9 @@ primary_region = "dfw"
 [env]
   PORT = "8080"
   SFO_DB = "/data/sfo.db"
+  # WEB_APP_SPEC §1: the API's own address, and the web app that may call it with its cookie.
+  SFO_PUBLIC_URL = "https://api.sfo.dannyyoustra.com"
+  SFO_WEB_ORIGINS = "https://sfo.dannyyoustra.com,http://localhost:8081"
 
 [[mounts]]
   source = "sfo_data"
