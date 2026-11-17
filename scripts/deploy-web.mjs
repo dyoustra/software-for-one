@@ -19,10 +19,11 @@ run("npx", ["vercel", "deploy", "--prod", "--yes"], out);
 function vercelConfig() {
   return {
     cleanUrls: true,
-    // Expo writes a dynamic route's page under its bracketed name.
+    // Expo writes a dynamic route's page under its bracketed name; with clean
+    // URLs on, a rewrite must name it without .html, and percent-encoded.
     rewrites: [
-      { source: "/project/:id", destination: "/project/[id].html" },
-      { source: "/project/:id/:page(cost|log|models|questions|report|slices)", destination: "/project/[id]/:page.html" },
+      { source: "/project/:id", destination: "/project/%5Bid%5D" },
+      { source: "/project/:id/:page(cost|log|models|questions|report|slices)", destination: "/project/%5Bid%5D/:page" },
     ],
     headers: [
       { source: "/.well-known/apple-app-site-association", headers: [{ key: "Content-Type", value: "application/json" }] },
