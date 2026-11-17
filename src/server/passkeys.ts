@@ -9,6 +9,7 @@ import {
   type RegistrationResponseJSON,
 } from "@simplewebauthn/server";
 import type { Db } from "./db.js";
+import { deliverToken } from "./session.js";
 import { accountAllowed, hashToken, issueDeviceByPasskey, removePasskey, requireDevice, type Allowlists, type Env } from "./auth.js";
 
 export interface PasskeyConfig {
@@ -18,7 +19,8 @@ export interface PasskeyConfig {
   origins: string[];
 }
 
-export const PASSKEYS: PasskeyConfig = { rpID: "sfo.dannyyoustra.com", origins: ["https://sfo.dannyyoustra.com"] };
+/** The web app's pages and the approval page's (WEB_APP_SPEC §1), both under the one domain. */
+export const PASSKEYS: PasskeyConfig = { rpID: "sfo.dannyyoustra.com", origins: ["https://sfo.dannyyoustra.com", "https://api.sfo.dannyyoustra.com"] };
 
 /**
  * The app proves it belongs to the passkeys' domain through this file, which
@@ -150,7 +152,7 @@ export function passkeys(db: Db, allowlists: Allowlists, config: PasskeyConfig =
       const signedIn = body.challengeId && body.response ? await verifySignIn(body.challengeId, body.response) : null;
       if (!signedIn) return c.json({ error: "that passkey did not sign in" }, 403);
       const issued = issueDeviceByPasskey(db, signedIn.userId, (body.deviceName || "a device").slice(0, 80), signedIn.passkeyId);
-      return issued ? c.json({ token: issued.token }) : c.json({ error: "that passkey did not sign in" }, 403);
+      return issued ? deliverToken(c, db, issued) : c.json({ error: "that passkey did not sign in" }, 403);
     });
   }
 

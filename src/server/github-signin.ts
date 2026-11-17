@@ -1,7 +1,8 @@
 import { randomBytes } from "node:crypto";
 import type { Context, Hono } from "hono";
 import type { Db } from "./db.js";
-import { accountFor, hashToken, issueDevice, type Allowlists, type Env } from "./auth.js";
+import { accountFor, hashToken, issueDevice, liveDevice, type Allowlists, type Env } from "./auth.js";
+import { deliverToken } from "./session.js";
 
 /** GitHub's device flow, as this server drives it; injectable for tests. */
 export interface GitHubDevice {
@@ -105,10 +106,7 @@ export function githubSignInRoutes(
 
   function finish(c: Context<Env>, githubId: string, body: { deviceName?: string; link?: boolean }) {
     if (body.link) {
-      const token = c.req.header("authorization")?.match(/^Bearer (.+)$/)?.[1];
-      const device = token
-        ? (db.prepare("SELECT user_id FROM devices WHERE token_hash = ? AND revoked_at IS NULL").get(hashToken(token)) as { user_id: string } | undefined)
-        : undefined;
+      const device = liveDevice(db, c);
       if (!device) return c.json({ error: "sign in first to add GitHub to your account" }, 401);
       const owner = db.prepare("SELECT user_id FROM identities WHERE provider = 'github' AND subject = ?").get(githubId) as { user_id: string } | undefined;
       if (owner && owner.user_id !== device.user_id) return c.json({ error: "that GitHub account already signs in to another sfo account" }, 409);
@@ -117,6 +115,6 @@ export function githubSignInRoutes(
     }
     const userId = accountFor(db, "github", githubId, deps.allowlists, deps.log);
     if (!userId) return c.json({ error: "this GitHub account is not allowed in" }, 403);
-    return c.json({ token: issueDevice(db, userId, (body.deviceName || "a device").slice(0, 80)).token });
+    return deliverToken(c, db, issueDevice(db, userId, (body.deviceName || "a device").slice(0, 80)));
   }
 }

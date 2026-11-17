@@ -7,16 +7,23 @@ import { projectsRoot, type Env } from "../core/paths.js";
 import { readProfile, readKey, describeKeyRef, type KeyRef } from "../core/access.js";
 
 const KEYCHAIN_SERVICE = "sfo-control";
-export const DEFAULT_CONTROL_URL = "https://sfo.dannyyoustra.com";
+export const DEFAULT_CONTROL_URL = "https://api.sfo.dannyyoustra.com";
 
-/** Where the control plane is: SFO_CONTROL_URL, else what `sfo login` recorded, else the default. */
+/** Addresses the control plane has moved from (WEB_APP_SPEC §2); `sfo.dannyyoustra.com` is the web app now. */
+const MOVED: Record<string, string> = { "https://sfo.dannyyoustra.com": DEFAULT_CONTROL_URL };
+
+/**
+ * Where the control plane is: SFO_CONTROL_URL, else what `sfo login`
+ * recorded, else the default. A recorded address it has moved from is
+ * rewritten, once, to where it went; the token still works there.
+ */
 export function controlUrl(env: Env = process.env): string {
   if (env.SFO_CONTROL_URL) return env.SFO_CONTROL_URL;
-  try {
-    return (JSON.parse(fs.readFileSync(path.join(projectsRoot(env), "control.json"), "utf8")) as { url: string }).url;
-  } catch {
-    return DEFAULT_CONTROL_URL;
-  }
+  const saved = readControlFile(env);
+  if (!saved.url) return DEFAULT_CONTROL_URL;
+  const moved = MOVED[saved.url];
+  if (moved) writeControlFile({ ...saved, url: moved }, env);
+  return moved ?? saved.url;
 }
 
 type ControlFile = { url?: string; githubFingerprint?: string | null };

@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { Context, Hono, MiddlewareHandler } from "hono";
 import type { Db } from "./db.js";
 import type { VerifyApple } from "./apple.js";
+import { clearSession, deliverToken, presentedToken, SESSION_DAYS, setSession, type SessionEnv } from "./session.js";
 
 export interface AuthDeps {
   db: Db;
@@ -22,7 +23,7 @@ export interface AuthDeps {
   log?: (message: string) => void;
 }
 
-export type Env = { Variables: { userId: string; deviceId: string } };
+export type Env = { Variables: { userId: string; deviceId: string } & SessionEnv["Variables"] };
 
 const DEVICE_CODE_TTL_MS = 10 * 60_000;
 /** No 0/O or 1/I: a code is read off one screen and typed or checked on another. */
@@ -133,15 +134,35 @@ function removePasskeyOnly(db: Db, passkeyId: string): string[] {
   return (db.prepare("SELECT id FROM devices WHERE passkey_id = ? AND revoked_at IS NULL").all(passkeyId) as { id: string }[]).map((r) => r.id);
 }
 
+/**
+ * The live device a request signs in as, by bearer token or session cookie,
+ * or null. A cookie device answers only to its cookie and a bearer device
+ * only to its header, so a token never moves from one to the other. A cookie
+ * device unused for the cookie's lifetime is revoked, not merely refused.
+ */
+export function liveDevice(db: Db, c: Context): { id: string; user_id: string } | null {
+  const presented = presentedToken(c);
+  if (!presented) return null;
+  const device = db.prepare("SELECT id, user_id, cookie, last_used_at FROM devices WHERE token_hash = ? AND revoked_at IS NULL").get(hashToken(presented.token)) as
+    | { id: string; user_id: string; cookie: number; last_used_at: string | null }
+    | undefined;
+  if (!device || Boolean(device.cookie) !== presented.cookie) return null;
+  if (device.cookie && device.last_used_at && Date.now() - Date.parse(device.last_used_at) > SESSION_DAYS * 86_400_000) {
+    revokeDevice(db, device.id);
+    return null;
+  }
+  db.prepare("UPDATE devices SET last_used_at = ? WHERE id = ?").run(now(), device.id);
+  return device;
+}
+
 /** Lets a request through with a live device token, and says whose. */
 export function requireDevice(db: Db): MiddlewareHandler<Env> {
   return async (c, next) => {
-    const token = c.req.header("authorization")?.match(/^Bearer (.+)$/)?.[1];
-    const device = token
-      ? (db.prepare("SELECT id, user_id FROM devices WHERE token_hash = ? AND revoked_at IS NULL").get(hashToken(token)) as { id: string; user_id: string } | undefined)
-      : undefined;
-    if (!device) return c.json({ error: "sign in first: `sfo login`" }, 401);
-    db.prepare("UPDATE devices SET last_used_at = ? WHERE id = ?").run(now(), device.id);
+    const device = liveDevice(db, c);
+    if (!device) {
+      clearSession(c);
+      return c.json({ error: "sign in first: `sfo login`" }, 401);
+    }
     c.set("userId", device.user_id);
     c.set("deviceId", device.id);
     await next();
@@ -159,7 +180,14 @@ export function authRoutes(app: Hono<Env>, deps: AuthDeps): void {
     if (!body.idToken) return c.json({ error: "idToken is required" }, 400);
     const userId = await personFor(deps, body.idToken).catch(() => null);
     if (!userId) return c.json({ error: "this Apple account is not allowed in" }, 403);
-    return c.json({ token: issueDevice(db, userId, body.deviceName || "app").token });
+    return deliverToken(c, db, issueDevice(db, userId, body.deviceName || "app"));
+  });
+
+  /** Whether the web app's cookie still signs it in; each answer slides the cookie's 30 days on. */
+  app.get("/auth/session", requireDevice(db), (c: Context<Env>) => {
+    const presented = presentedToken(c);
+    if (presented?.cookie) setSession(c, presented.token);
+    return c.json({ ok: true });
   });
 
   app.post("/auth/device", async (c) => {
@@ -241,6 +269,7 @@ export function authRoutes(app: Hono<Env>, deps: AuthDeps): void {
 
   app.delete("/devices/current", requireDevice(db), (c: Context<Env>) => {
     revokeDevice(db, c.get("deviceId"));
+    clearSession(c);
     return c.json({ ok: true });
   });
 
@@ -292,7 +321,7 @@ const b64u={
   dec:s=>Uint8Array.from(atob(s.replace(/-/g,"+").replace(/_/g,"/")+"===".slice((s.length+3)%4)),c=>c.charCodeAt(0)),
   enc:b=>btoa(String.fromCharCode(...new Uint8Array(b))).replace(/\+/g,"-").replace(/\//g,"_").replace(/=+$/,"")
 };
-if(PASSKEY_DOMAIN&&location.hostname===PASSKEY_DOMAIN&&window.PublicKeyCredential){document.getElementById("pk").hidden=false;}
+if(PASSKEY_DOMAIN&&(location.hostname===PASSKEY_DOMAIN||location.hostname.endsWith("."+PASSKEY_DOMAIN))&&window.PublicKeyCredential){document.getElementById("pk").hidden=false;}
 document.getElementById("passkey").onclick=async()=>{
   const msg=document.getElementById("msg");
   try{

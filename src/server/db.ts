@@ -190,6 +190,10 @@ const MIGRATIONS: string[] = [
   ALTER TABLE devices ADD COLUMN passkey_id TEXT;
   ALTER TABLE device_codes ADD COLUMN passkey_id TEXT;
   `,
+  // v14: devices whose token lives in the web app's session cookie.
+  `
+  ALTER TABLE devices ADD COLUMN cookie INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 export type Db = DatabaseSync;

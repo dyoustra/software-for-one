@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import { cors } from "hono/cors";
+import { sessions } from "./session.js";
 import { schemaVersion, type Db } from "./db.js";
 import { authRoutes, type AuthDeps, type Env } from "./auth.js";
 import { credentialRoutes, type GitHubOAuth, type Vault } from "./credentials.js";
@@ -42,7 +43,8 @@ export interface ServerDeps extends Omit<AuthDeps, "db"> {
 export function createApp(deps: ServerDeps): Hono<Env> {
   const app = new Hono<Env>();
   const origins = deps.webOrigins ?? ["http://localhost:8081"];
-  app.use("*", cors({ origin: (origin) => (origins.includes(origin) ? origin : null), allowHeaders: ["authorization", "content-type"], maxAge: 600 }));
+  app.use("*", cors({ origin: (origin) => (origins.includes(origin) ? origin : null), allowHeaders: ["authorization", "content-type", "x-sfo-session"], credentials: true, maxAge: 600 }));
+  app.use("*", sessions(origins));
 
   app.get("/health", (c) => c.json({ ok: true, version: deps.version, schema: schemaVersion(deps.db) }));
   const keys = passkeys(deps.db, { apple: deps.allowed, github: deps.allowedGithub }, deps.passkeys);
