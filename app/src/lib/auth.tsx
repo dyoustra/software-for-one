@@ -75,7 +75,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       onCode({ userCode: started.body.userCode, verificationUri: started.body.verificationUri });
       // The server holds each wait about 50 s and answers 202 to be asked again.
       for (;;) {
-        const r = await post<{ token?: string }>('/auth/github/wait', { flow: started.body.flow, deviceName: deviceName(), link }, { token: link ? token : null, signal });
+        let r: Awaited<ReturnType<typeof post<{ token?: string }>>>;
+        try {
+          r = await post<{ token?: string }>('/auth/github/wait', { flow: started.body.flow, deviceName: deviceName(), link }, { token: link ? token : null, signal });
+        } catch (err) {
+          // A dropped connection (a network change, a phone between Wi-Fi and
+          // cellular) loses only this wait: the flow lives on the server, so
+          // ask again. The server's own answers, and cancelling, still end it.
+          if (err instanceof ApiError || signal.aborted) throw err;
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          continue;
+        }
         if (r.status === 202) continue;
         if (!link && r.body.token) {
           await tokenStore.set(r.body.token);
