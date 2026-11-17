@@ -144,6 +144,19 @@ describe("passkeys", () => {
     expect((await s.call("GET", `/auth/device/${started.deviceCode}`)).body).toHaveProperty("token");
   });
 
+  it("go with the device that added them, so a stolen device's token leaves nothing behind", async () => {
+    const s = server();
+    const me = await s.apple("me");
+    const other = await s.apple("me");
+    const { key } = await s.add(other);
+    expect((await s.call("GET", "/passkeys", undefined, me)).body).toEqual([expect.objectContaining({ device: "app" })]);
+    const devices = (await s.call("GET", "/devices", undefined, me)).body as unknown as { id: string; current: boolean }[];
+    const added = devices.find((d) => !d.current)!;
+    await s.call("DELETE", `/devices/${added.id}`, undefined, me);
+    expect((await s.call("GET", "/passkeys", undefined, me)).body).toEqual([]);
+    expect((await s.signIn(key)).result.status).toBe(403);
+  });
+
   it("are their owner's to remove, and no one else's", async () => {
     const s = server();
     const me = await s.apple("me");

@@ -7,9 +7,10 @@ import { Body, Button, ErrorText, Heading } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth';
+import { passkeysHere } from '@/lib/passkeys';
 
 export default function SignIn() {
-  const { signIn } = useAuth();
+  const { signIn, passkey } = useAuth();
   const theme = useTheme();
   const scheme = useColorScheme();
   const [available, setAvailable] = useState(false);
@@ -35,6 +36,18 @@ export default function SignIn() {
               setError(null);
               signIn().catch((err: { code?: string }) => {
                 if (err?.code !== 'ERR_REQUEST_CANCELED') setError(err);
+              });
+            }}
+          />
+        )}
+        {passkeysHere() && !withGitHub && (
+          <Button
+            title="Sign in with a passkey"
+            kind="secondary"
+            onPress={() => {
+              setError(null);
+              passkey().catch((err: { code?: string; name?: string }) => {
+                if (err?.name !== 'NotAllowedError' && err?.code !== 'ERR_CANCELED') setError(err);
               });
             }}
           />

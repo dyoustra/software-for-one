@@ -107,7 +107,7 @@ export function passkeys(db: Db, allowlists: Allowlists, config: PasskeyConfig =
       if (!result.verified) return c.json({ error: "that passkey could not be checked" }, 400);
       const { credential } = result.registrationInfo;
       if (db.prepare("SELECT 1 FROM passkeys WHERE id = ?").get(credential.id)) return c.json({ error: "that passkey is already added" }, 409);
-      db.prepare("INSERT INTO passkeys (id, user_id, public_key, counter, transports, name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)").run(
+      db.prepare("INSERT INTO passkeys (id, user_id, public_key, counter, transports, name, created_at, device_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)").run(
         credential.id,
         userId,
         credential.publicKey,
@@ -115,12 +115,17 @@ export function passkeys(db: Db, allowlists: Allowlists, config: PasskeyConfig =
         credential.transports ? JSON.stringify(credential.transports) : null,
         (body.name ?? "Passkey").slice(0, 80),
         new Date().toISOString(),
+        c.get("deviceId"),
       );
       return c.json({ ok: true, id: credential.id });
     });
 
     app.get("/passkeys", auth, (c: Context<Env>) =>
-      c.json(db.prepare("SELECT id, name, created_at AS createdAt, last_used_at AS lastUsedAt FROM passkeys WHERE user_id = ? ORDER BY created_at").all(c.get("userId"))),
+      c.json(
+        db
+          .prepare("SELECT p.id, p.name, p.created_at AS createdAt, p.last_used_at AS lastUsedAt, d.name AS device FROM passkeys p LEFT JOIN devices d ON d.id = p.device_id WHERE p.user_id = ? ORDER BY p.created_at")
+          .all(c.get("userId")),
+      ),
     );
 
     app.delete("/passkeys/:id", auth, (c: Context<Env>) => {

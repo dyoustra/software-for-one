@@ -5,6 +5,7 @@ import { Platform } from 'react-native';
 
 import { API_URL, ApiError, call } from '@/lib/api';
 import { clear as clearCache } from '@/lib/cache-store';
+import { passkeyAnswer } from '@/lib/passkeys';
 import { tokenStore } from '@/lib/token-store';
 
 /** GitHub's code for the person to enter, and where. */
@@ -35,6 +36,8 @@ type Auth = {
   /** Undefined while the stored token is being read; null when signed out. */
   token: string | null | undefined;
   signIn(): Promise<void>;
+  /** Signs this device in with a passkey already added to the account. False when the person cancelled. */
+  passkey(): Promise<boolean>;
   /**
    * GitHub's device flow: shows `onCode` GitHub's code, then waits until the
    * person approves it on GitHub. Signs this device in, or with `link` adds
@@ -67,6 +70,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await tokenStore.set(body.token);
     clearCache();
     setToken(body.token);
+  }, []);
+
+  const passkey = useCallback(async () => {
+    const started = await post<{ challengeId: string; options: Parameters<typeof passkeyAnswer>[0] }>('/auth/passkey/options', {});
+    const response = await passkeyAnswer(started.body.options);
+    if (!response) return false;
+    const { body } = await post<{ token: string }>('/auth/passkey', { challengeId: started.body.challengeId, response, deviceName: deviceName() });
+    await tokenStore.set(body.token);
+    clearCache();
+    setToken(body.token);
+    return true;
   }, []);
 
   const gitHub = useCallback<Auth['gitHub']>(
@@ -123,7 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [token],
   );
 
-  const value = useMemo(() => ({ token, signIn, gitHub, signOut, api }), [token, signIn, gitHub, signOut, api]);
+  const value = useMemo(() => ({ token, signIn, passkey, gitHub, signOut, api }), [token, signIn, passkey, gitHub, signOut, api]);
   return <AuthContext value={value}>{children}</AuthContext>;
 }
 

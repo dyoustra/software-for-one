@@ -178,6 +178,12 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX passkeys_by_user ON passkeys(user_id);
   `,
+  // v12: the device that added each passkey. Revoking a device removes the
+  // passkeys it added, so a stolen device's token cannot leave behind a
+  // passkey that outlives its revocation.
+  `
+  ALTER TABLE passkeys ADD COLUMN device_id TEXT REFERENCES devices(id);
+  `,
 ];
 
 export type Db = DatabaseSync;

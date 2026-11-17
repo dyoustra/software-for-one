@@ -196,11 +196,14 @@ export function authRoutes(app: Hono<Env>, deps: AuthDeps): void {
 
   app.delete("/devices/current", requireDevice(db), (c: Context<Env>) => {
     db.prepare("UPDATE devices SET revoked_at = ? WHERE id = ?").run(now(), c.get("deviceId"));
+    db.prepare("DELETE FROM passkeys WHERE device_id = ?").run(c.get("deviceId"));
     return c.json({ ok: true });
   });
 
   app.delete("/devices/:id", requireDevice(db), (c: Context<Env>) => {
     const r = db.prepare("UPDATE devices SET revoked_at = ? WHERE id = ? AND user_id = ? AND revoked_at IS NULL").run(now(), c.req.param("id") ?? "", c.get("userId"));
+    // A device's passkeys go with it: one it added must not outlive it.
+    if (r.changes) db.prepare("DELETE FROM passkeys WHERE device_id = ?").run(c.req.param("id") ?? "");
     return r.changes ? c.json({ ok: true }) : c.json({ error: "no such device" }, 404);
   });
 }

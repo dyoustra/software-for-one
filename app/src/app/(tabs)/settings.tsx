@@ -1,6 +1,6 @@
 import { useFocusEffect } from 'expo-router';
 import { useCallback, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { CredentialKind, Device, Identity, LanguageKind, Preferences, PreferencesResponse } from '@sfo/api';
 import { GitHubSignIn } from '@/components/github-sign-in';
@@ -10,6 +10,7 @@ import { Radius, Spacing, tint, Type } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { useAuth } from '@/lib/auth';
 import { confirm } from '@/lib/confirm';
+import { addPasskey, passkeysHere } from '@/lib/passkeys';
 
 /** When a device last reached the control plane, as a short machine fact. */
 function lastUsed(at: string): string {
@@ -17,7 +18,7 @@ function lastUsed(at: string): string {
   return days <= 0 ? 'today' : days === 1 ? '1d ago' : `${days}d ago`;
 }
 
-const PROVIDER_NAMES: Record<Identity['provider'], string> = { apple: 'Apple', github: 'GitHub' };
+const PROVIDER_NAMES: Record<Identity['provider'], string> = { apple: 'Apple', github: 'GitHub', passkey: 'Passkey' };
 
 const KIND_NAMES: Record<LanguageKind, string> = { cli: 'Command-line tools', web: 'Web apps', mobile: 'Mobile apps', firmware: 'Firmware', default: 'Anything else' };
 
@@ -102,6 +103,7 @@ export default function Settings() {
   const theme = useTheme();
   const [devices, setDevices] = useState<Device[]>([]);
   const [identities, setIdentities] = useState<Identity[]>([]);
+  const [passkeyList, setPasskeyList] = useState<{ id: string; name: string; createdAt: string; device: string | null }[]>([]);
   const [linking, setLinking] = useState(false);
   const [have, setHave] = useState<CredentialKind[]>([]);
   const [prefs, setPrefs] = useState<PreferencesResponse | null>(null);
@@ -122,6 +124,7 @@ export default function Settings() {
       ]);
       setDevices(d);
       setIdentities(i);
+      setPasskeyList(await api<{ id: string; name: string; createdAt: string; device: string | null }[]>('/passkeys'));
       setHave(c.have);
       setPrefs(p);
       setRankings(p.preferences.languages);
@@ -250,11 +253,36 @@ export default function Settings() {
 
       <Card>
         <Body style={styles.section}>Ways to sign in</Body>
-        {identities.map((i) => (
-          <Muted key={i.provider}>
-            {PROVIDER_NAMES[i.provider]}, added {new Date(i.createdAt).toLocaleDateString()}
-          </Muted>
+        {identities
+          .filter((i) => i.provider !== 'passkey')
+          .map((i) => (
+            <Muted key={i.provider}>
+              {PROVIDER_NAMES[i.provider]}, added {new Date(i.createdAt).toLocaleDateString()}
+            </Muted>
+          ))}
+        {passkeyList.map((p) => (
+          <View key={p.id} style={styles.row}>
+            <Muted style={{ flex: 1 }}>{`Passkey: ${p.name}, added ${new Date(p.createdAt).toLocaleDateString()}${p.device ? ` from ${p.device}` : ''}`}</Muted>
+            <Pressable
+              accessibilityRole="button"
+              onPress={async () => {
+                if (await confirm(`Remove the passkey ${p.name}?`, 'It will no longer sign in to sfo.', 'Remove')) api(`/passkeys/${encodeURIComponent(p.id)}`, { method: 'DELETE' }).then(load, setError);
+              }}>
+              <Text style={{ color: theme.failed, fontWeight: '600' }}>Remove</Text>
+            </Pressable>
+          </View>
         ))}
+        {passkeysHere() && (
+          <Button
+            title="Add a passkey"
+            kind="secondary"
+            onPress={() =>
+              addPasskey(api, Platform.OS === 'web' ? 'Browser' : 'iPhone').then((added) => {
+                if (added) load();
+              }, setError)
+            }
+          />
+        )}
       </Card>
       {!identities.some((i) => i.provider === 'github') &&
         (linking ? (

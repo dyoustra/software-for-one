@@ -91,7 +91,7 @@ export interface Device {
 
 /** A way to sign in to an account. */
 export interface Identity {
-  provider: "apple" | "github";
+  provider: "apple" | "github" | "passkey";
   createdAt: string;
 }
 
