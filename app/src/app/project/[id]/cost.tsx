@@ -8,6 +8,12 @@ import { useTheme } from '@/hooks/use-theme';
 import { stageName } from '@/lib/log';
 import { formatDuration, formatSpend } from '@/lib/pipeline';
 
+/** "claude-opus-5-5" → "Opus 5.5". */
+function modelName(id: string): string {
+  const m = id.match(/^claude-(haiku|sonnet|opus)-(\d+)-(\d+)/);
+  return m ? `${m[1][0].toUpperCase()}${m[1].slice(1)} ${m[2]}.${m[3]}` : id;
+}
+
 /** What a project cost, stage by stage (RESULTS_SPEC §5). */
 export default function CostScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -37,7 +43,10 @@ export default function CostScreen() {
               {cost.byStage.map((s, i) => (
                 <View key={s.stage} style={[styles.row, i > 0 && { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: theme.line }]}>
                   <View style={styles.head}>
-                    <Text style={[Type.body, { color: s.ok ? theme.ink : theme.failed, flex: 1 }]}>{stageName(s.stage)}</Text>
+                    <View style={{ flex: 1 }}>
+                      <Text style={[Type.body, { color: s.ok ? theme.ink : theme.failed }]}>{stageName(s.stage)}</Text>
+                      {s.model ? <Telemetry>{modelName(s.model)}</Telemetry> : null}
+                    </View>
                     <Telemetry style={styles.num}>{formatDuration(s.computeMs)}</Telemetry>
                     <Telemetry style={[styles.num, { color: theme.ink }]}>{formatSpend(s.costUsd)}</Telemetry>
                   </View>

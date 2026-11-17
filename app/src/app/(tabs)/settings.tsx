@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import type { CredentialKind, Device, Identity, LanguageKind, Preferences, PreferencesResponse } from '@sfo/api';
 import { GitHubSignIn } from '@/components/github-sign-in';
+import { ModelPicker } from '@/components/models';
 import { Body, Button, Card, ErrorText, Field, Heading, Loading, Muted, Page, Telemetry } from '@/components/ui';
 import { Radius, Spacing, tint, Type } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -238,6 +239,8 @@ export default function Settings() {
           />
           <Body>Spending limit for tests against real services</Body>
           <Field keyboardType="decimal-pad" value={String(prefs.preferences.smokeCapUsd)} onChangeText={(v) => set({ smokeCapUsd: Number(v) || 0 })} />
+          <Body>Models</Body>
+          <ModelPicker value={prefs.preferences.models} onChange={(models) => set({ models })} />
           <Body>SFO.md</Body>
           <Muted>Anything that fits no field above.</Muted>
           <Field multiline value={prefs.sfoMd ?? ''} onChangeText={(sfoMd) => setPrefs({ ...prefs, sfoMd })} />

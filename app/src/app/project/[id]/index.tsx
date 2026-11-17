@@ -25,6 +25,7 @@ const ROWS = [
   { title: 'Criteria', to: 'report', kind: 'criteria' },
   { title: 'Slices', to: 'slices' },
   { title: 'Cost', to: 'cost' },
+  { title: 'Models', to: 'models' },
   { title: 'Activity', to: 'log' },
 ] as const;
 

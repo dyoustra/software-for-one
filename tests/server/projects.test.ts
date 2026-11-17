@@ -241,6 +241,20 @@ describe("preferences", () => {
   });
 });
 
+describe("preferences saved before a field existed", () => {
+  it("come back with that field's default", async () => {
+    const s = server();
+    const token = await s.signIn("me");
+    const userId = (s.db.prepare("SELECT user_id FROM devices").get() as { user_id: string }).user_id;
+    s.db
+      .prepare("INSERT INTO user_preferences (user_id, preferences, sfo_md, updated_at) VALUES (?, ?, NULL, 't')")
+      .run(userId, JSON.stringify({ languages: { cli: ["python"], web: [], mobile: [], firmware: [], default: [] }, webHost: "vercel", webData: "browser", budgetUsd: null, smokeCapUsd: 2 }));
+    const got = (await (await s.call("GET", "/preferences", token)).json()) as { preferences: { languages: { cli: string[] }; models: { writing: string } } };
+    expect(got.preferences.languages.cli).toEqual(["python"]);
+    expect(got.preferences.models.writing).toBe("sonnet");
+  });
+});
+
 describe("a project's models", () => {
   it("are read from and written to its machine, and checked before they go", async () => {
     const s = server();

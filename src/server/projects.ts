@@ -176,7 +176,11 @@ export function projectRoutes(app: Hono<Env>, deps: ProjectDeps): void {
 
   const stored = (userId: string): { preferences: unknown; sfoMd: string | null } => {
     const row = db.prepare("SELECT preferences, sfo_md FROM user_preferences WHERE user_id = ?").get(userId) as { preferences: string; sfo_md: string | null } | undefined;
-    return row ? { preferences: JSON.parse(row.preferences), sfoMd: row.sfo_md } : { preferences: DEFAULT_PREFERENCES, sfoMd: null };
+    if (!row) return { preferences: DEFAULT_PREFERENCES, sfoMd: null };
+    // Through the schema, so preferences saved before a field existed come
+    // back with its default rather than without it.
+    const parsed = PreferencesSchema.safeParse(JSON.parse(row.preferences));
+    return { preferences: parsed.success ? parsed.data : DEFAULT_PREFERENCES, sfoMd: row.sfo_md };
   };
 
   app.get("/preferences", auth, (c: Context<Env>) => {

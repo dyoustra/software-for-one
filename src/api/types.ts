@@ -103,6 +103,7 @@ export interface Preferences {
   webData: "browser" | "synced";
   budgetUsd: number | null;
   smokeCapUsd: number;
+  models: ModelChoices;
 }
 
 export interface PreferencesResponse {
