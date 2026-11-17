@@ -3,7 +3,8 @@ import * as Device from 'expo-device';
 import { createContext, use, useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Platform } from 'react-native';
 
-import { API_URL, ApiError, call } from '@/lib/api';
+import { API_URL, ApiError, authInit, call, COOKIE_SESSION, usesCookie } from '@/lib/api';
+import { appleWebIdToken } from '@/lib/apple-web';
 import { clear as clearCache } from '@/lib/cache-store';
 import { passkeyAnswer } from '@/lib/passkeys';
 import { tokenStore } from '@/lib/token-store';
@@ -21,15 +22,27 @@ export function browserName(ua: string): string {
 }
 
 async function post<T>(path: string, body: unknown, init: { token?: string | null; signal?: AbortSignal } = {}): Promise<{ status: number; body: T & { error?: string } }> {
+  const auth = authInit(init.token);
   const res = await fetch(`${API_URL}${path}`, {
     method: 'POST',
     signal: init.signal,
-    headers: { 'content-type': 'application/json', ...(init.token ? { authorization: `Bearer ${init.token}` } : {}) },
+    // The deployed web app asks for its sign-ins to come back as the cookie.
+    credentials: usesCookie ? 'include' : auth.credentials,
+    headers: { 'content-type': 'application/json', ...(usesCookie ? { 'x-sfo-session': 'cookie' } : {}), ...auth.headers },
     body: JSON.stringify(body),
   });
   const parsed = (await res.json().catch(() => ({}))) as T & { error?: string };
   if (!res.ok) throw new ApiError(parsed.error ?? `The control plane answered ${res.status}`, res.status);
   return { status: res.status, body: parsed };
+}
+
+type SignedIn = { token?: string; cookie?: boolean };
+
+/** The token a sign-in answered with, or the cookie stand-in when it set the cookie instead. */
+function tokenFrom(body: SignedIn): string {
+  if (body.cookie) return COOKIE_SESSION;
+  if (!body.token) throw new Error('The control plane did not sign this device in');
+  return body.token;
 }
 
 type Auth = {
@@ -64,22 +77,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const signIn = useCallback(async () => {
-    const credential = await AppleAuthentication.signInAsync({ requestedScopes: [] });
-    if (!credential.identityToken) throw new Error('Apple did not return an identity token');
-    const { body } = await post<{ token: string }>('/auth/apple', { idToken: credential.identityToken, deviceName: deviceName() });
-    await tokenStore.set(body.token);
+    const idToken = Platform.OS === 'web' ? await appleWebIdToken() : (await AppleAuthentication.signInAsync({ requestedScopes: [] })).identityToken;
+    if (!idToken) throw new Error('Apple did not return an identity token');
+    const signedIn = tokenFrom((await post<SignedIn>('/auth/apple', { idToken, deviceName: deviceName() })).body);
+    await tokenStore.set(signedIn);
     clearCache();
-    setToken(body.token);
+    setToken(signedIn);
   }, []);
 
   const passkey = useCallback(async () => {
     const started = await post<{ challengeId: string; options: Parameters<typeof passkeyAnswer>[0] }>('/auth/passkey/options', {});
     const response = await passkeyAnswer(started.body.options);
     if (!response) return false;
-    const { body } = await post<{ token: string }>('/auth/passkey', { challengeId: started.body.challengeId, response, deviceName: deviceName() });
-    await tokenStore.set(body.token);
+    const signedIn = tokenFrom((await post<SignedIn>('/auth/passkey', { challengeId: started.body.challengeId, response, deviceName: deviceName() })).body);
+    await tokenStore.set(signedIn);
     clearCache();
-    setToken(body.token);
+    setToken(signedIn);
     return true;
   }, []);
 
@@ -89,9 +102,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       onCode({ userCode: started.body.userCode, verificationUri: started.body.verificationUri });
       // The server holds each wait about 50 s and answers 202 to be asked again.
       for (;;) {
-        let r: Awaited<ReturnType<typeof post<{ token?: string }>>>;
+        let r: Awaited<ReturnType<typeof post<SignedIn>>>;
         try {
-          r = await post<{ token?: string }>('/auth/github/wait', { flow: started.body.flow, deviceName: deviceName(), link }, { token: link ? token : null, signal });
+          r = await post<SignedIn>('/auth/github/wait', { flow: started.body.flow, deviceName: deviceName(), link }, { token: link ? token : null, signal });
         } catch (err) {
           // A dropped connection (a network change, a phone between Wi-Fi and
           // cellular) loses only this wait: the flow lives on the server, so
@@ -101,10 +114,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           continue;
         }
         if (r.status === 202) continue;
-        if (!link && r.body.token) {
-          await tokenStore.set(r.body.token);
+        if (!link) {
+          const signedIn = tokenFrom(r.body);
+          await tokenStore.set(signedIn);
           clearCache();
-          setToken(r.body.token);
+          setToken(signedIn);
         }
         return;
       }

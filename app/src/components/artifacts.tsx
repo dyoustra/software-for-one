@@ -3,7 +3,7 @@ import { StyleSheet, View } from 'react-native';
 
 import { Muted } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
-import { API_URL } from '@/lib/api';
+import { API_URL, authInit } from '@/lib/api';
 import { useAuth } from '@/lib/auth';
 import { useCached } from '@/lib/cache';
 
@@ -22,7 +22,7 @@ export function Artifacts({ id, kind, match }: { id: string; kind: 'drafts' | 'r
       {paths.map((p) => (
         <View key={p} style={styles.item}>
           <Image
-            source={{ uri: `${API_URL}/projects/${id}/artifact?path=${encodeURIComponent(p)}`, headers: { authorization: `Bearer ${token}` } }}
+            source={{ uri: `${API_URL}/projects/${id}/artifact?path=${encodeURIComponent(p)}`, headers: authInit(token).headers }}
             style={styles.image}
             contentFit="contain"
             transition={150}

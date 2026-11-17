@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import fs from "node:fs";
+import { APPLE_APP_SITE_ASSOCIATION } from "../../src/server/passkeys.js";
 import { createHash, generateKeyPairSync, randomBytes, sign } from "node:crypto";
 import { isoBase64URL, isoCBOR } from "@simplewebauthn/server/helpers";
 import { openDb } from "../../src/server/db.js";
@@ -216,8 +218,10 @@ describe("passkeys", () => {
     expect(page).toContain("Approve with a passkey");
   });
 
-  it("are tied to the app by the association file the domain serves", async () => {
+  it("are tied to the app by the same association file wherever the domain is served from", async () => {
     const s = server();
+    const webCopy = JSON.parse(fs.readFileSync(new URL("../../app/public/.well-known/apple-app-site-association", import.meta.url), "utf8"));
+    expect(webCopy).toEqual(APPLE_APP_SITE_ASSOCIATION);
     expect((await s.call("GET", "/.well-known/apple-app-site-association")).body).toEqual({ webcredentials: { apps: ["C8YMKXNGLP.com.youstra.sfo", "K8FHN3DJNA.com.youstra.sfo"] } });
   });
 });

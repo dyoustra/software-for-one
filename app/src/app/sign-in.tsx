@@ -6,6 +6,7 @@ import { GitHubSignIn } from '@/components/github-sign-in';
 import { Body, Button, ErrorText, Heading } from '@/components/ui';
 import { Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
+import { appleOnWeb } from '@/lib/apple-web';
 import { useAuth } from '@/lib/auth';
 import { passkeysHere } from '@/lib/passkeys';
 
@@ -13,12 +14,12 @@ export default function SignIn() {
   const { signIn, passkey } = useAuth();
   const theme = useTheme();
   const scheme = useColorScheme();
-  const [available, setAvailable] = useState(false);
+  const [available, setAvailable] = useState(appleOnWeb);
   const [error, setError] = useState<unknown>(null);
   const [withGitHub, setWithGitHub] = useState(false);
 
   useEffect(() => {
-    AppleAuthentication.isAvailableAsync().then(setAvailable);
+    if (!appleOnWeb()) AppleAuthentication.isAvailableAsync().then(setAvailable);
   }, []);
 
   return (
@@ -26,7 +27,18 @@ export default function SignIn() {
       <View style={styles.column}>
         <Heading>Software For One</Heading>
         <Body>Say what you want built. sfo builds it in the cloud, asks when it needs you, and tells you when it is done.</Body>
-        {available && !withGitHub && (
+        {available && !withGitHub && appleOnWeb() && (
+          <Button
+            title="Sign in with Apple"
+            onPress={() => {
+              setError(null);
+              signIn().catch((err: { error?: string }) => {
+                if (err?.error !== 'popup_closed_by_user') setError(err);
+              });
+            }}
+          />
+        )}
+        {available && !withGitHub && !appleOnWeb() && (
           <AppleAuthentication.AppleAuthenticationButton
             buttonType={AppleAuthentication.AppleAuthenticationButtonType.SIGN_IN}
             buttonStyle={scheme === 'dark' ? AppleAuthentication.AppleAuthenticationButtonStyle.WHITE : AppleAuthentication.AppleAuthenticationButtonStyle.BLACK}
